@@ -8662,3 +8662,101 @@ body.review-hubbs-view-active .main-content {
 .ch-bottom-bar .ch-next-btn {
   min-width: 280px !important;
 }
+.ch-image-tools {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 16px 20px;
+}
+
+.ch-premium-tool-btn:hover {
+  transform: translateY(-2px);
+  background: rgba(255,255,255,0.1) !important;
+}
+
+.ch-premium-tool-btn.active:hover {
+  background: rgba(168, 85, 247, 0.25) !important;
+}
+
+.ch-editor-card {
+  transition: all 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.ch-editor-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(255, 255, 255, 0.12);
+  background: rgba(255,255,255,0.05) !important;
+}
+
+.ch-caption-input-wrapper textarea:focus {
+  outline: none;
+  border-color: rgba(168, 85, 247, 0.5) !important;
+  box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.15);
+  background: rgba(0,0,0,0.3) !important;
+}
+
+.ch-time-input:focus {
+  outline: none;
+  border-color: rgba(168, 85, 247, 0.5) !important;
+  box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.15);
+  background: rgba(0,0,0,0.3) !important;
+}
+
+.ch-emoji-btn:hover {
+  color: white !important;
+  transform: scale(1.1);
+}
+
+.ch-remove-media {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  background: rgba(0,0,0,0.8);
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 50%;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  cursor: pointer;
+  transition: all 0.2s;
+  padding: 0;
+}
+
+.ch-remove-media i {
+  width: 12px;
+  height: 12px;
+}
+
+.ch-remove-media:hover {
+  background: #ef4444;
+  border-color: #ef4444;
+  transform: scale(1.1);
+}
+
+.ch-add-more-media:hover {
+  background: rgba(255,255,255,0.1) !important;
+  border-color: rgba(255,255,255,0.4) !important;
+  transform: translateY(-1px);
+  cursor: pointer;
+}
+
+.ch-preview-item {
+  position: relative;
+}
+
+.ch-preview-item:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+}
+
+.back-btn-new:hover {
+  transform: translateY(-2px) !important;
+  box-shadow: 0 8px 24px rgba(168,85,247,0.4) !important;
+}
+
+.back-btn-new:active {
+  transform: scale(0.97) !important;
+}
