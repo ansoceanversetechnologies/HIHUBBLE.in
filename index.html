@@ -471,44 +471,45 @@
               <div class="ch-panel ch-left-panel ch-layout-section" style="padding: 20px; gap: 20px;">
                 <h3 class="ch-panel-title" style="margin: 0; font-size: 1.1rem;">Media</h3>
                 
-                <div class="ch-upload-box upload-card" style="padding: 20px; background: rgba(0,0,0,0.2); border: 1px dashed rgba(255,255,255,0.15); border-radius: 14px;">
-                  <div class="ch-upload-option">
+                <!-- MEDIA UPLOAD BOX -->
+                <div id="ch-upload-box" class="ch-upload-box upload-card" style="padding: 20px; background: rgba(0,0,0,0.2); border: 1px dashed rgba(255,255,255,0.15); border-radius: 14px; cursor: pointer; transition: all 0.2s;">
+                  
+                  <input type="file" id="ch-hidden-file-input" multiple accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.mp4,.mov,.webm,.mkv,.m4v,.avi,image/*,video/*" style="display: none;" />
+                  
+                  <div id="ch-camera-btn" class="ch-upload-option" style="cursor: pointer;">
                     <div class="ch-icon-circle" style="width: 40px; height: 40px;"><i data-lucide="camera" style="width: 18px; height: 18px;"></i></div>
                     <div class="ch-option-text">
                       <div class="ch-option-title" style="font-size: 0.9rem;">Camera</div>
                       <div class="ch-option-subtitle" style="font-size: 0.75rem;">Take a photo/video</div>
                     </div>
                   </div>
+                  
                   <div class="ch-divider" style="margin: 12px 0;"><span>OR</span></div>
-                  <div class="ch-upload-option">
+                  
+                  <div id="ch-add-media-btn" class="ch-upload-option" style="cursor: pointer;">
                     <div class="ch-icon-circle" style="width: 40px; height: 40px;"><i data-lucide="image" style="width: 18px; height: 18px;"></i></div>
                     <div class="ch-option-text">
                       <div class="ch-option-title" style="font-size: 0.9rem;">Add Photos/Videos</div>
                       <div class="ch-option-subtitle" style="font-size: 0.75rem;">Upload from device</div>
                     </div>
                   </div>
+                  
                   <div class="ch-supported-formats" style="margin-top: 12px; font-size: 0.75rem;">Supported formats: JPG, PNG,<br>MP4, MOV, GIF &bull; Max size: 100MB</div>
                 </div>
 
-                <div class="ch-media-preview-section" style="margin-top: 0;">
+                <!-- DYNAMIC MEDIA PREVIEW SECTION (Hidden by default) -->
+                <div id="ch-media-preview-container" class="ch-media-preview-section" style="margin-top: 0; display: none;">
                   <h4 class="ch-sub-title" style="margin-bottom: 12px; font-size: 0.95rem;">Media Preview</h4>
-                  <div class="ch-media-preview-row" style="display: flex; gap: 10px; margin-bottom: 8px;">
-                    <div class="ch-preview-item" style="flex-shrink: 0; border-radius: 10px; border: 1px solid rgba(255,255,255,0.08); transition: transform 0.2s;">
-                      <img src="https://images.unsplash.com/photo-1550745165-9bc0b252726f?auto=format&amp;fit=crop&amp;w=100&amp;q=80" alt="Preview 1" style="border-radius: 10px;">
-                      <button class="ch-remove-media"><i data-lucide="x"></i></button>
-                    </div>
-                    <div class="ch-preview-item" style="flex-shrink: 0; border-radius: 10px; border: 1px solid rgba(255,255,255,0.08); transition: transform 0.2s;">
-                      <img src="https://images.unsplash.com/photo-1518791841217-8f162f1e1131?auto=format&amp;fit=crop&amp;w=100&amp;q=80" alt="Preview 2" style="border-radius: 10px;">
-                      <button class="ch-remove-media"><i data-lucide="x"></i></button>
-                    </div>
-                    <div class="ch-preview-item" style="flex-shrink: 0; border-radius: 10px; border: 1px solid rgba(255,255,255,0.08); transition: transform 0.2s;">
-                      <img src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&amp;fit=crop&amp;w=100&amp;q=80" alt="Preview 3" style="border-radius: 10px;">
-                      <button class="ch-remove-media"><i data-lucide="x"></i></button>
-                    </div>
-                    <div class="ch-add-more-media" style="flex-shrink: 0; border-radius: 10px; border: 1px dashed rgba(255,255,255,0.2); background: rgba(0,0,0,0.1); transition: all 0.2s;">
+                  
+                  <div id="ch-media-preview-row" class="ch-media-preview-row" style="display: flex; gap: 10px; margin-bottom: 8px; overflow-x: auto; padding-bottom: 4px;">
+                    <!-- Previews injected here via JS -->
+                    
+                    <!-- Persistent Add More button inside preview row -->
+                    <div id="ch-add-more-media-btn" class="ch-add-more-media" style="flex-shrink: 0; border-radius: 10px; border: 1px dashed rgba(255,255,255,0.2); background: rgba(0,0,0,0.1); transition: all 0.2s; cursor: pointer;">
                       <i data-lucide="plus"></i>
                     </div>
                   </div>
+                  
                   <div class="ch-drag-hint" style="font-size: 0.75rem;">You can drag to reorder media</div>
                 </div>
 
@@ -635,34 +636,19 @@
               
               <!-- RIGHT PANEL (Drafts) -->
               <div class="ch-panel ch-right-panel draft-card" style="align-self: start; padding: 16px;">
-                <div class="ch-drafts-header" style="margin-bottom: 12px;">
+                <div class="ch-drafts-header" style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
                   <h3 style="margin:0; font-size:1rem; font-weight:600;">Drafts</h3>
-                  <span class="ch-drafts-count" style="color: var(--primary); font-weight: bold; font-size: 0.9rem;">3</span>
+                  <span class="ch-drafts-count" style="color: var(--primary); font-weight: bold; font-size: 0.9rem;" id="drafts-count">0</span>
                 </div>
-                <div class="ch-drafts-list" style="display: flex; flex-direction: column; gap: 12px;">
-                  <div class="ch-draft-item" style="display:flex; gap:10px; align-items:center;">
-                    <img src="https://images.unsplash.com/photo-1550745165-9bc0b252726f?auto=format&amp;fit=crop&amp;w=100&amp;q=80" style="width:40px; height:40px; border-radius:8px; object-fit:cover;" alt="Draft">
-                    <div class="ch-draft-info">
-                      <div class="ch-draft-title" style="font-weight:600; font-size:0.85rem;">Sunset Vibes</div>
-                      <div class="ch-draft-time" style="color:var(--text-muted); font-size:0.75rem;">2h ago</div>
-                    </div>
-                  </div>
-                  <div class="ch-draft-item" style="display:flex; gap:10px; align-items:center;">
-                    <img src="https://images.unsplash.com/photo-1518791841217-8f162f1e1131?auto=format&amp;fit=crop&amp;w=100&amp;q=80" style="width:40px; height:40px; border-radius:8px; object-fit:cover;" alt="Draft">
-                    <div class="ch-draft-info">
-                      <div class="ch-draft-title" style="font-weight:600; font-size:0.85rem;">New Tech</div>
-                      <div class="ch-draft-time" style="color:var(--text-muted); font-size:0.75rem;">1d ago</div>
-                    </div>
-                  </div>
-                  <div class="ch-draft-item" style="display:flex; gap:10px; align-items:center;">
-                    <img src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&amp;fit=crop&amp;w=100&amp;q=80" style="width:40px; height:40px; border-radius:8px; object-fit:cover;" alt="Draft">
-                    <div class="ch-draft-info">
-                      <div class="ch-draft-title" style="font-weight:600; font-size:0.85rem;">Behind the Scene</div>
-                      <div class="ch-draft-time" style="color:var(--text-muted); font-size:0.75rem;">3d ago</div>
-                    </div>
+                <div class="ch-drafts-list" id="ch-drafts-list" style="display: flex; flex-direction: column; gap: 12px;">
+                  <!-- Empty State -->
+                  <div id="drafts-empty-state" style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px 16px; text-align: center; border: 1px dashed rgba(255,255,255,0.1); border-radius: 12px; background: rgba(0,0,0,0.2);">
+                    <i data-lucide="inbox" style="width: 48px; height: 48px; color: rgba(255,255,255,0.2); margin-bottom: 16px;"></i>
+                    <h4 style="margin: 0 0 8px 0; font-size: 1.1rem; color: #fff;">No Drafts Yet</h4>
+                    <p style="margin: 0 0 16px 0; font-size: 0.85rem; color: rgba(255,255,255,0.6);">Your saved HUBBs will appear here.</p>
                   </div>
                 </div>
-                <button class="ch-see-all-drafts text-btn" style="width:100%; margin-top:16px; padding:8px; background:rgba(108,59,255,0.1); color:var(--primary); border:none; border-radius:8px; font-weight:600; cursor:pointer; font-size: 0.85rem;">See All Drafts</button>
+                <button class="ch-see-all-drafts text-btn" id="see-all-drafts-btn" style="display: none; width:100%; margin-top:16px; padding:8px; background:rgba(108,59,255,0.1); color:var(--primary); border:none; border-radius:8px; font-weight:600; cursor:pointer; font-size: 0.85rem;">See All Drafts</button>
               </div>
               
             </div>
@@ -671,14 +657,14 @@
           <!-- FIXED BOTTOM BAR -->
           <div class="ch-bottom-bar" style="flex-shrink: 0; display: flex; padding: 16px 20px; background: rgba(18,18,18,0.95); border-top: 1px solid rgba(255,255,255,0.08); z-index: 10;">
             <div style="max-width: 1400px; width: 100%; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;">
-              <button class="ch-save-draft-btn" style="width: 280px; max-width: 100%; display:flex; align-items:center; justify-content:center; gap:10px; padding: 14px; border-radius: 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: white; cursor:pointer; min-height: unset; margin: 0; transition: all 0.2s;" onclick="if(window.showToast) window.showToast('Saved as draft! 📝');">
+              <button class="ch-save-draft-btn" style="width: 280px; max-width: 100%; display:flex; align-items:center; justify-content:center; gap:10px; padding: 14px; border-radius: 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: white; cursor:pointer; min-height: unset; margin: 0; transition: all 0.2s;" onclick="if(window.saveCurrentDraft) window.saveCurrentDraft();">
                 <i data-lucide="file-text" style="width:20px; height:20px;"></i>
                 <div class="ch-btn-text" style="text-align:left;">
                   <div class="ch-btn-title" style="font-weight:600; font-size:0.9rem;">Save as Draft</div>
                   <div class="ch-btn-subtitle" style="font-size:0.75rem; color:var(--text-muted);">Last saved: 2m ago</div>
                 </div>
               </button>
-              <button class="ch-next-btn" style="width: 280px; max-width: 100%; display:flex; flex-direction:column; align-items:center; justify-content:center; padding: 14px; border-radius: 12px; background: linear-gradient(135deg, var(--primary) 0%, #d946ef 100%); border: none; color: white; cursor:pointer; box-shadow: 0 4px 15px rgba(168,85,247,0.4); min-height: unset; margin: 0; transition: all 0.2s;" onclick="switchView('review-hubbs')">
+              <button class="ch-next-btn" style="width: 280px; max-width: 100%; display:flex; flex-direction:column; align-items:center; justify-content:center; padding: 14px; border-radius: 12px; background: linear-gradient(135deg, var(--primary) 0%, #d946ef 100%); border: none; color: white; cursor:pointer; box-shadow: 0 4px 15px rgba(168,85,247,0.4); min-height: unset; margin: 0; transition: all 0.2s;" onclick="handleReviewNavigation()">
                 <div style="display:flex; align-items:center; gap:6px;">
                   <span class="ch-btn-title" style="font-weight:700; font-size:1rem;">Next</span>
                   <i data-lucide="arrow-right" style="width:18px; height:18px;"></i>
@@ -711,23 +697,38 @@
           <div style="flex: 1; overflow-y: auto; padding: 0 24px 16px 24px; display: flex; flex-direction: column; align-items: center;">
             <div style="width: 100%; max-width: 1400px; height: 100%; margin: 0 auto; display: flex; justify-content: center; align-items: center; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); border-radius: 20px; padding: 16px; box-shadow: 0 16px 40px rgba(0,0,0,0.2);">
               
-              <!-- COMPARISON SLIDER PLACEHOLDER -->
-              <div style="position: relative; height: 100%; max-width: 100%; min-height: 400px; max-height: calc(100vh - 220px); aspect-ratio: 9/16; border-radius: 12px; overflow: hidden; box-shadow: 0 20px 50px rgba(0,0,0,0.5);">
+              <!-- EMPTY STATE (Hidden by default) -->
+              <div id="review-empty-state" style="display: none; width: 100%; height: 100%; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 16px;">
+                <div style="width: 120px; height: 120px; border-radius: 50%; background: rgba(130, 80, 255, 0.1); display: flex; align-items: center; justify-content: center; margin-bottom: 8px;">
+                  <i data-lucide="image-off" style="width: 60px; height: 60px; color: var(--primary);"></i>
+                </div>
+                <h3 style="margin: 0; font-size: 1.5rem; color: #1F1235; font-weight: 700;" class="empty-state-title">No HUBB Selected</h3>
+                <p style="margin: 0; color: #65617C; max-width: 300px; line-height: 1.4;" class="empty-state-desc">Please upload a photo or video before reviewing.</p>
+                <div style="display: flex; gap: 12px; margin-top: 12px;">
+                  <button onclick="switchView('create-hubbs')" style="padding: 10px 24px; border-radius: 8px; background: rgba(0,0,0,0.05); border: 1px solid rgba(0,0,0,0.1); color: #1F1235; font-weight: 600; cursor: pointer; transition: all 0.2s;" class="empty-state-back-btn">Back</button>
+                  <button onclick="switchView('create-hubbs'); setTimeout(()=>document.getElementById('ch-hidden-file-input').click(), 300);" style="padding: 10px 24px; border-radius: 8px; background: linear-gradient(135deg, var(--primary) 0%, #a855f7 100%); border: none; color: white; font-weight: 600; cursor: pointer; box-shadow: 0 4px 12px rgba(168,85,247,0.3); transition: all 0.2s;">Upload Media</button>
+                </div>
+              </div>
+
+              <!-- COMPARISON SLIDER CONTAINER -->
+              <div id="review-slider-wrapper" style="position: relative; height: 100%; max-width: 100%; min-height: 400px; max-height: calc(100vh - 220px); aspect-ratio: 9/16; border-radius: 12px; overflow: hidden; box-shadow: 0 20px 50px rgba(0,0,0,0.5); background: #000;">
                 
-                <!-- After Image (Full background) -->
-                <div style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;">
-                  <img src="https://images.unsplash.com/photo-1550745165-9bc0b252726f?auto=format&amp;fit=crop&amp;w=800&amp;q=80" style="width: 100%; height: 100%; object-fit: cover;" alt="Edited">
-                  <div style="position: absolute; top: 12px; right: 12px; background: rgba(0,0,0,0.7); color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; backdrop-filter: blur(4px);">EDITED POST</div>
+                <!-- After Media (Full background, Edited) -->
+                <div id="review-after-container" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;">
+                  <!-- Injected via JS -->
+                  <div style="position: absolute; top: 12px; right: 12px; background: rgba(0,0,0,0.7); color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; backdrop-filter: blur(4px); z-index: 10;">EDITED POST</div>
                 </div>
 
-                <!-- Before Image (Clipped to left half) -->
-                <div style="position: absolute; top: 0; left: 0; width: 50%; height: 100%; overflow: hidden; border-right: 2px solid white;">
-                  <img src="https://images.unsplash.com/photo-1550745165-9bc0b252726f?auto=format&amp;fit=crop&amp;w=800&amp;q=80&amp;sat=-100" style="width: 200%; height: 100%; object-fit: cover; max-width: none; filter: grayscale(80%) contrast(90%);" alt="Raw">
-                  <div style="position: absolute; top: 12px; left: 12px; background: rgba(0,0,0,0.7); color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; backdrop-filter: blur(4px);">RAW POST</div>
+                <!-- Before Media (Clipped, Raw) -->
+                <div id="review-before-container" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; clip-path: inset(0 50% 0 0);">
+                  <!-- Injected via JS -->
+                  <div style="position: absolute; top: 12px; left: 12px; background: rgba(0,0,0,0.7); color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; backdrop-filter: blur(4px); z-index: 10;">RAW POST</div>
+                  <!-- The divider line that moves with the handle -->
+                  <div id="review-slider-line" style="position: absolute; top: 0; right: 0; width: 2px; height: 100%; background: #6D3CFF; box-shadow: 0 0 10px rgba(108, 59, 255, 0.5); z-index: 5;"></div>
                 </div>
 
                 <!-- Handle -->
-                <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 36px; height: 36px; background: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.3); z-index: 2;">
+                <div id="review-slider-handle" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 36px; height: 36px; background: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.3); z-index: 15; cursor: col-resize;">
                   <i data-lucide="chevrons-left-right" style="color: #111; width: 20px; height: 20px;"></i>
                 </div>
 
@@ -739,16 +740,16 @@
           <div style="flex-shrink: 0; padding: 16px 24px; background: rgba(18,18,18,0.95); border-top: 1px solid rgba(255,255,255,0.08); z-index: 10;">
             <div style="display: flex; align-items: center; justify-content: space-between; max-width: 1400px; margin: 0 auto; gap: 16px;">
               <!-- Save as Draft -->
-              <button style="display:flex; align-items:center; justify-content:center; gap:10px; height: 42px; padding: 0 20px; border-radius: 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: white; cursor:pointer; transition: all 0.2s;" onclick="if(window.showToast) window.showToast('Saved as draft! 📝');" onmouseover="this.style.background='rgba(255,255,255,0.1)'; this.style.transform='translateY(-2px)';" onmouseout="this.style.background='rgba(255,255,255,0.05)'; this.style.transform='none';">
+              <button id="review-save-draft-btn" style="display:flex; align-items:center; justify-content:center; gap:10px; height: 42px; padding: 0 20px; border-radius: 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: white; cursor:pointer; transition: all 0.2s;" onclick="if(window.saveCurrentDraft) window.saveCurrentDraft();">
                 <i data-lucide="file-text" style="width:16px; height:16px;"></i>
                 <div style="display:flex; flex-direction:column; align-items:flex-start; line-height: 1.1;">
                   <span style="font-weight:500; font-size:0.85rem;">Save as Draft</span>
-                  <span style="font-size:0.7rem; color:var(--text-muted);">Last saved: 2m ago</span>
+                  <span id="review-draft-time" style="font-size:0.7rem; color:var(--text-muted);">Unsaved</span>
                 </div>
               </button>
 
               <!-- Publish Button -->
-              <button onclick="switchView('home'); if(window.showToast) window.showToast('Hubb published successfully! 🚀');" style="display: flex; align-items: center; justify-content: center; gap: 8px; height: 42px; padding: 0 24px; border-radius: 12px; background: linear-gradient(135deg, var(--primary) 0%, #d946ef 100%); border: none; color: white; cursor: pointer; font-weight: 600; font-size: 0.9rem; box-shadow: 0 4px 15px rgba(168,85,247,0.3); transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1); flex-shrink: 0;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 8px 24px rgba(168,85,247,0.4)';" onmouseout="this.style.transform='none'; this.style.boxShadow='0 4px 15px rgba(168,85,247,0.3)';">
+              <button id="review-publish-btn" onclick="publishHubb()" style="display: flex; align-items: center; justify-content: center; gap: 8px; height: 42px; padding: 0 24px; border-radius: 12px; background: linear-gradient(135deg, var(--primary) 0%, #d946ef 100%); border: none; color: white; cursor: pointer; font-weight: 600; font-size: 0.9rem; box-shadow: 0 4px 15px rgba(168,85,247,0.3); transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1); flex-shrink: 0;">
                 Publish Hubb <i data-lucide="upload-cloud" style="width: 18px; height: 18px;"></i>
               </button>
             </div>
@@ -1691,7 +1692,7 @@
       <img src="" id="story-creation-preview" style="flex: 1; width: 100%; border-radius: 16px; object-fit: contain; background: black; min-height: 0;">
       <div style="display: flex; gap: 16px; justify-content: center; padding-top: 12px;">
         <button id="story-creation-cancel" class="btn btn-secondary" style="padding: 12px 24px; border-radius: 30px; border: 1px solid rgba(255,255,255,0.2); background: transparent; color: white; font-weight: 600;">Cancel</button>
-        <button id="story-creation-draft" class="btn btn-secondary" style="padding: 12px 24px; border-radius: 30px; border: 1px solid rgba(255,255,255,0.2); background: transparent; color: white; font-weight: 600;">Save as Draft</button>
+        <button id="story-creation-draft" class="btn btn-secondary" style="padding: 12px 24px; border-radius: 30px; border: 1px solid rgba(255,255,255,0.2); background: transparent; color: white; font-weight: 600;" onclick="if(window.saveCurrentDraft) window.saveCurrentDraft();">Save as Draft</button>
         <button id="story-creation-publish" class="btn btn-primary" style="padding: 12px 32px; border-radius: 30px; background: var(--primary-gradient); color: white; border: none; font-weight: 600;">Publish</button>
       </div>
     </div>

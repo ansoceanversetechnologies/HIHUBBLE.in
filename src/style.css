@@ -8760,3 +8760,470 @@ body.review-hubbs-view-active .main-content {
 .back-btn-new:active {
   transform: scale(0.97) !important;
 }
+
+/* ==================================================== */
+/* SHARE HUBBS - LIGHT THEME ENHANCEMENTS */
+/* ==================================================== */
+
+/* CARD BACKGROUND */
+.light-theme #view-create-hubbs .ch-panel,
+.light-theme #view-create-hubbs .ch-upload-box,
+.light-theme #view-create-hubbs .ch-editor-card,
+.light-theme #view-create-hubbs .ch-drafts-list .ch-draft-item {
+  background: rgba(255, 255, 255, 0.92) !important;
+  backdrop-filter: blur(18px) !important;
+  border: 1px solid rgba(130, 80, 255, 0.12) !important;
+  box-shadow: 0 12px 32px rgba(125, 80, 255, 0.08) !important;
+}
+
+/* HEADINGS */
+.light-theme #view-create-hubbs h2,
+.light-theme #view-create-hubbs h3,
+.light-theme #view-create-hubbs h4,
+.light-theme #view-create-hubbs .ch-panel-title,
+.light-theme #view-create-hubbs .ch-sub-title,
+.light-theme .create-hubbs-header h2 {
+  color: #1F1235 !important;
+  font-weight: 700 !important;
+}
+
+/* BODY TEXT */
+.light-theme #view-create-hubbs p,
+.light-theme #view-create-hubbs span,
+.light-theme #view-create-hubbs div,
+.light-theme #view-create-hubbs .ch-option-subtitle,
+.light-theme #view-create-hubbs .ch-supported-formats,
+.light-theme #view-create-hubbs .ch-draft-time,
+.light-theme #view-create-hubbs .ch-datetime-label,
+.light-theme #view-create-hubbs .ch-drag-hint,
+.light-theme #view-create-hubbs .ch-btn-subtitle,
+.light-theme .create-hubbs-header p {
+  color: #4B4B63 !important;
+  font-weight: 500 !important;
+}
+
+/* FIX DARK TEXT OVERRIDES FOR SPECIFIC ELEMENTS */
+.light-theme #view-create-hubbs .ch-option-title,
+.light-theme #view-create-hubbs .ch-setting-label,
+.light-theme #view-create-hubbs .ch-draft-title,
+.light-theme #view-create-hubbs .ch-field-label,
+.light-theme #view-create-hubbs .ch-invited-user span,
+.light-theme #view-create-hubbs .ch-btn-title,
+.light-theme #view-create-hubbs .ch-drafts-count {
+  color: #1F1235 !important;
+  font-weight: 700 !important;
+}
+
+/* INPUT FIELDS */
+.light-theme #view-create-hubbs input,
+.light-theme #view-create-hubbs .ch-input-with-icon input,
+.light-theme #view-create-hubbs .ch-datetime-group input {
+  background: #FFFFFF !important;
+  border: 1px solid rgba(120, 90, 255, 0.18) !important;
+  color: #1F1235 !important;
+}
+
+.light-theme #view-create-hubbs input::placeholder {
+  color: #8A86A8 !important;
+}
+
+.light-theme #view-create-hubbs input:focus {
+  border-color: #7B4DFF !important;
+  box-shadow: 0 0 0 4px rgba(123, 77, 255, 0.12) !important;
+  outline: none !important;
+}
+
+/* TEXTAREA */
+.light-theme #view-create-hubbs .ch-caption-input-wrapper textarea {
+  background: #FFFFFF !important;
+  color: #1F1235 !important;
+  border: 1px solid rgba(120, 90, 255, 0.18) !important;
+}
+
+.light-theme #view-create-hubbs .ch-caption-input-wrapper textarea::placeholder {
+  color: #8E8AAE !important;
+}
+
+.light-theme #view-create-hubbs .ch-caption-input-wrapper textarea:focus {
+  border-color: #7B4DFF !important;
+  box-shadow: 0 0 0 4px rgba(123, 77, 255, 0.12) !important;
+  outline: none !important;
+}
+
+/* SELECT DROPDOWNS */
+.light-theme #view-create-hubbs .ch-dropdown,
+.light-theme #view-create-hubbs .ch-hub-selector {
+  background: #FFFFFF !important;
+  color: #2B2348 !important;
+  border: 1px solid rgba(120, 90, 255, 0.18) !important;
+}
+
+/* Selected chips */
+.light-theme #view-create-hubbs .ch-hub-tag {
+  background: rgba(130, 80, 255, 0.1) !important;
+  color: #2B2348 !important;
+  border: 1px solid rgba(120, 90, 255, 0.18) !important;
+}
+.light-theme #view-create-hubbs .ch-hub-tag i {
+  color: #6D3CFF !important;
+}
+
+/* BUTTONS */
+/* Back to Home & Next */
+.light-theme .back-btn-new,
+.light-theme #view-create-hubbs .ch-bottom-bar .ch-next-btn {
+  background: linear-gradient(135deg, #6C3BFF 0%, #a855f7 100%) !important;
+  color: #FFFFFF !important;
+  border: none !important;
+}
+.light-theme .back-btn-new span,
+.light-theme .back-btn-new i,
+.light-theme #view-create-hubbs .ch-bottom-bar .ch-next-btn span,
+.light-theme #view-create-hubbs .ch-bottom-bar .ch-next-btn .ch-btn-subtitle,
+.light-theme #view-create-hubbs .ch-bottom-bar .ch-next-btn .ch-btn-title,
+.light-theme #view-create-hubbs .ch-bottom-bar .ch-next-btn i {
+  color: #FFFFFF !important;
+}
+
+.light-theme .back-btn-new:hover,
+.light-theme #view-create-hubbs .ch-bottom-bar .ch-next-btn:hover {
+  box-shadow: 0 4px 15px rgba(168, 85, 247, 0.4) !important;
+}
+
+/* Save Draft */
+.light-theme #view-create-hubbs .ch-save-draft-btn {
+  background: #FFFFFF !important;
+  color: #1F1235 !important;
+  border: 1px solid #7B4DFF !important;
+}
+.light-theme #view-create-hubbs .ch-save-draft-btn .ch-btn-title,
+.light-theme #view-create-hubbs .ch-save-draft-btn i {
+  color: #1F1235 !important;
+}
+.light-theme #view-create-hubbs .ch-save-draft-btn .ch-btn-subtitle {
+  color: #4B4B63 !important;
+}
+.light-theme #view-create-hubbs .ch-save-draft-btn:hover {
+  background: rgba(123, 77, 255, 0.05) !important;
+}
+
+/* CAMERA CARD ICONS */
+.light-theme #view-create-hubbs .ch-upload-option .ch-icon-circle {
+  background: linear-gradient(135deg, #6C3BFF 0%, #a855f7 100%) !important;
+  color: #FFFFFF !important;
+  border: none !important;
+}
+
+.light-theme #view-create-hubbs .ch-upload-option .ch-icon-circle i {
+  color: #FFFFFF !important;
+}
+
+/* Divider */
+.light-theme #view-create-hubbs .ch-divider {
+  background: rgba(130, 80, 255, 0.2) !important;
+}
+.light-theme #view-create-hubbs .ch-divider span {
+  background: #FFFFFF !important;
+  color: #4B4B63 !important;
+}
+
+/* MEDIA PREVIEW */
+.light-theme #view-create-hubbs .ch-preview-item,
+.light-theme #view-create-hubbs .ch-add-more-media {
+  border: 1px solid rgba(130, 80, 255, 0.3) !important;
+  box-shadow: 0 4px 12px rgba(125, 80, 255, 0.08) !important;
+  background: #FFFFFF !important;
+}
+
+/* DRAFT CARD */
+.light-theme #view-create-hubbs .ch-see-all-drafts {
+  background: #FFFFFF !important;
+  color: #7B4DFF !important;
+  border: 1px solid #7B4DFF !important;
+}
+.light-theme #view-create-hubbs .ch-see-all-drafts:hover {
+  background: #7B4DFF !important;
+  color: #FFFFFF !important;
+}
+
+/* SIDEBAR - Do NOT redesign. Increase contrast only. */
+.light-theme .sidebar-left .nav-item {
+  color: #2D2450 !important;
+}
+.light-theme .sidebar-left .nav-item i {
+  color: #6D3CFF !important;
+}
+.light-theme .sidebar-left .nav-item.active {
+  background: linear-gradient(135deg, #6C3BFF 0%, #a855f7 100%) !important;
+  color: #FFFFFF !important;
+}
+.light-theme .sidebar-left .nav-item.active i,
+.light-theme .sidebar-left .nav-item.active span {
+  color: #FFFFFF !important;
+}
+
+/* PROFILE CARD */
+.light-theme .profile-preview-info h3,
+.light-theme .stat-val {
+  color: #1F1235 !important;
+}
+.light-theme .profile-preview-info p {
+  color: #4B4B63 !important;
+}
+.light-theme .stat-lbl {
+  color: #2D2450 !important;
+}
+
+/* HEADER */
+.light-theme .header-logo-text .brand-hubble {
+  color: #1F1235 !important;
+}
+
+/* TOGGLE SWITCHES */
+.light-theme .ch-switch input:checked + .ch-slider {
+  background-color: #6C3BFF !important;
+  box-shadow: 0 4px 8px rgba(108, 59, 255, 0.3) !important;
+}
+.light-theme .ch-slider {
+  background-color: rgba(130, 80, 255, 0.2) !important;
+}
+
+/* ICONS */
+.light-theme #view-create-hubbs i {
+  color: #6D3CFF !important;
+}
+.light-theme #view-create-hubbs i:hover {
+  color: #5829E3 !important;
+}
+
+/* EXCEPTIONS FOR ICONS THAT SHOULD REMAIN WHITE OR SPECIFIC */
+.light-theme #view-create-hubbs .ch-upload-option .ch-icon-circle i,
+.light-theme .back-btn-new i,
+.light-theme #view-create-hubbs .ch-bottom-bar .ch-next-btn i {
+  color: #FFFFFF !important;
+}
+.light-theme #view-create-hubbs .ch-upload-option .ch-icon-circle i:hover,
+.light-theme .back-btn-new i:hover,
+.light-theme #view-create-hubbs .ch-bottom-bar .ch-next-btn i:hover {
+  color: #FFFFFF !important;
+}
+.light-theme #view-create-hubbs .ch-save-draft-btn i {
+  color: #1F1235 !important;
+}
+
+/* BORDERS */
+.light-theme #view-create-hubbs .ch-panel,
+.light-theme #view-create-hubbs .ch-editor-card,
+.light-theme #view-create-hubbs .ch-upload-box,
+.light-theme #view-create-hubbs .ch-dropdown,
+.light-theme #view-create-hubbs .ch-input-with-icon input,
+.light-theme #view-create-hubbs .ch-caption-input-wrapper textarea {
+  border-color: rgba(123, 77, 255, 0.15) !important;
+}
+
+/* Remove dark background header specifically on Create Hubbs */
+.light-theme .create-hubbs-header {
+  background: rgba(255, 255, 255, 0.85) !important;
+  border-bottom: 1px solid rgba(130, 80, 255, 0.12) !important;
+  backdrop-filter: blur(18px) !important;
+}
+
+/* Bottom Bar Fix */
+.light-theme #view-create-hubbs .ch-bottom-bar {
+  background: rgba(255, 255, 255, 0.95) !important;
+  border-top: 1px solid rgba(130, 80, 255, 0.12) !important;
+  backdrop-filter: blur(18px) !important;
+}
+
+/* ==================================================== */
+/* REVIEW HUBBS - LIGHT THEME ENHANCEMENTS */
+/* ==================================================== */
+
+/* HEADER CARD */
+.light-theme #view-review-hubbs .review-header {
+  background: rgba(255, 255, 255, 0.95) !important;
+  border-bottom: 1px solid rgba(125, 80, 255, 0.15) !important;
+  box-shadow: 0 12px 30px rgba(125, 80, 255, 0.08) !important;
+  backdrop-filter: blur(18px) !important;
+}
+
+.light-theme #view-review-hubbs .review-header h2 {
+  color: #1F1235 !important;
+}
+
+.light-theme #view-review-hubbs .review-header p {
+  color: #67627E !important;
+}
+
+.light-theme #view-review-hubbs .review-header button {
+  background: linear-gradient(135deg, #6C3BFF 0%, #a855f7 100%) !important;
+  color: #FFFFFF !important;
+  border: none !important;
+}
+.light-theme #view-review-hubbs .review-header button i,
+.light-theme #view-review-hubbs .review-header button span {
+  color: #FFFFFF !important;
+}
+.light-theme #view-review-hubbs .review-header button:hover {
+  box-shadow: 0 4px 15px rgba(168, 85, 247, 0.4) !important;
+}
+
+/* MAIN PREVIEW CARD */
+.light-theme #view-review-hubbs > div:nth-child(2) > div {
+  background: rgba(255, 255, 255, 0.9) !important;
+  border: 1px solid rgba(125, 80, 255, 0.15) !important;
+  box-shadow: 0 10px 30px rgba(123, 77, 255, 0.08) !important;
+}
+
+/* IMAGE CONTAINER */
+.light-theme #view-review-hubbs > div:nth-child(2) > div > div {
+  border-radius: 20px !important;
+  border: 1px solid rgba(130, 80, 255, 0.2) !important;
+  box-shadow: 0 8px 24px rgba(125, 80, 255, 0.12) !important;
+}
+
+/* LABELS (RAW POST / EDITED POST) */
+/* The inline styles on the labels are sufficient. Removed dangerously broad selector that overwrites image layers with purple background. */
+
+/* COMPARISON SLIDER HANDLE */
+.light-theme #view-review-hubbs > div:nth-child(2) > div > div > div:nth-child(3) {
+  border: 2px solid #6D3CFF !important;
+  box-shadow: 0 4px 12px rgba(108, 59, 255, 0.4) !important;
+  transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+}
+.light-theme #view-review-hubbs > div:nth-child(2) > div > div > div:nth-child(3):hover {
+  transform: translate(-50%, -50%) scale(1.1) !important;
+  box-shadow: 0 6px 16px rgba(108, 59, 255, 0.6) !important;
+}
+.light-theme #view-review-hubbs > div:nth-child(2) > div > div > div:nth-child(3) i {
+  color: #6D3CFF !important;
+}
+
+/* BOTTOM ACTION BAR */
+.light-theme #view-review-hubbs > div:nth-child(3) {
+  background: rgba(255, 255, 255, 0.95) !important;
+  border-top: 1px solid rgba(125, 80, 255, 0.15) !important;
+  backdrop-filter: blur(18px) !important;
+}
+
+/* Save Draft Button */
+.light-theme #view-review-hubbs > div:nth-child(3) button:nth-child(1) {
+  background: #FFFFFF !important;
+  border: 1px solid #6D3CFF !important;
+}
+.light-theme #view-review-hubbs > div:nth-child(3) button:nth-child(1) span:first-child {
+  color: #2C2450 !important;
+}
+.light-theme #view-review-hubbs > div:nth-child(3) button:nth-child(1) span:last-child {
+  color: #8A86A8 !important;
+}
+.light-theme #view-review-hubbs > div:nth-child(3) button:nth-child(1) i {
+  color: #6D3CFF !important;
+}
+.light-theme #view-review-hubbs > div:nth-child(3) button:nth-child(1):hover {
+  background: #6D3CFF !important;
+}
+.light-theme #view-review-hubbs > div:nth-child(3) button:nth-child(1):hover span,
+.light-theme #view-review-hubbs > div:nth-child(3) button:nth-child(1):hover i {
+  color: #FFFFFF !important;
+}
+
+/* Publish Button */
+.light-theme #view-review-hubbs > div:nth-child(3) button:nth-child(2) {
+  background: linear-gradient(135deg, #6C3BFF 0%, #a855f7 100%) !important;
+  color: #FFFFFF !important;
+  border: none !important;
+}
+.light-theme #view-review-hubbs > div:nth-child(3) button:nth-child(2) i,
+.light-theme #view-review-hubbs > div:nth-child(3) button:nth-child(2) span {
+  color: #FFFFFF !important;
+}
+.light-theme #view-review-hubbs > div:nth-child(3) button:nth-child(2):hover {
+  box-shadow: 0 8px 24px rgba(168, 85, 247, 0.4) !important;
+}
+
+/* PROFILE CARD OVERRIDES (Applying to the sidebar which is persistent) */
+.light-theme .profile-preview-card p {
+  color: #6C6788 !important;
+}
+.light-theme .profile-preview-card .stat-lbl {
+  color: #2C2450 !important;
+}
+.light-theme .profile-preview-card .profile-stats {
+  border-top: 1px solid rgba(120, 90, 255, 0.15) !important;
+}
+
+/* SIDEBAR HOVER */
+.light-theme .sidebar-left .nav-item:not(.active):hover {
+  background: rgba(130, 80, 255, 0.1) !important;
+}
+
+/* GENERAL TEXT COLORS FOR REVIEW HUBBS */
+.light-theme #view-review-hubbs h1,
+.light-theme #view-review-hubbs h2,
+.light-theme #view-review-hubbs h3 {
+    color: #1F1235 !important;
+}
+
+.light-theme #view-review-hubbs p {
+    color: #65617C !important;
+}
+
+.light-theme #view-review-hubbs .text-muted,
+.light-theme #view-review-hubbs span[style*="var(--text-muted)"] {
+    color: #8A86A8 !important;
+}
+
+/* ==================================================== */
+/* REVIEW HUBBS - DYNAMIC WORKFLOW & SLIDER             */
+/* ==================================================== */
+
+#review-slider-handle {
+  transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+}
+#review-slider-handle:hover {
+  transform: translate(-50%, -50%) scale(1.15) !important;
+  box-shadow: 0 6px 20px rgba(255,255,255,0.6), 0 0 15px rgba(108, 59, 255, 0.4) !important;
+}
+
+/* Empty State / Validation Modal */
+.review-validation-modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(8px);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+.review-validation-modal-overlay.active {
+  opacity: 1;
+  pointer-events: all;
+}
+.review-validation-modal {
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.15);
+  box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+  backdrop-filter: blur(20px);
+  padding: 32px;
+  border-radius: 24px;
+  text-align: center;
+  max-width: 400px;
+  width: 90%;
+  transform: scale(0.9);
+  transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+.review-validation-modal-overlay.active .review-validation-modal {
+  transform: scale(1);
+}
+.light-theme .review-validation-modal {
+  background: rgba(255,255,255,0.95);
+  border: 1px solid rgba(130, 80, 255, 0.15);
+  box-shadow: 0 20px 50px rgba(125, 80, 255, 0.15);
+}
+.light-theme .review-validation-modal h3 { color: #1F1235; }
+.light-theme .review-validation-modal p { color: #65617C; }

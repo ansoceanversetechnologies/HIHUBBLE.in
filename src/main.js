@@ -189,6 +189,195 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+
+  // --- INDEXEDDB DRAFTS WRAPPER ---
+  const DraftsDB = {
+    dbName: 'HiHubbleDrafts',
+    dbVersion: 1,
+    storeName: 'drafts',
+    init() {
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open(this.dbName, this.dbVersion);
+        request.onupgradeneeded = (e) => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains(this.storeName)) {
+            db.createObjectStore(this.storeName, { keyPath: 'id' });
+          }
+        };
+        request.onsuccess = (e) => resolve(e.target.result);
+        request.onerror = (e) => reject(e.target.error);
+      });
+    },
+    async saveDraft(draft) {
+      const db = await this.init();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(this.storeName, 'readwrite');
+        const store = tx.objectStore(this.storeName);
+        draft.lastModified = Date.now();
+        if (!draft.id) draft.id = 'draft_' + Date.now();
+        if (!draft.createdAt) draft.createdAt = Date.now();
+        const request = store.put(draft);
+        request.onsuccess = () => resolve(draft);
+        request.onerror = () => reject(request.error);
+      });
+    },
+    async getDrafts() {
+      const db = await this.init();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(this.storeName, 'readonly');
+        const store = tx.objectStore(this.storeName);
+        const request = store.getAll();
+        request.onsuccess = () => resolve(request.result.sort((a,b) => b.lastModified - a.lastModified));
+        request.onerror = () => reject(request.error);
+      });
+    },
+    async deleteDraft(id) {
+      const db = await this.init();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(this.storeName, 'readwrite');
+        const store = tx.objectStore(this.storeName);
+        const request = store.delete(id);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+      });
+    }
+  };
+  window.DraftsDB = DraftsDB;
+
+  // --- SAVE DRAFT ACTION ---
+  window.saveCurrentDraft = async function() {
+    if (!window.chUploads || window.chUploads.length === 0) {
+      showToast('Please upload media first');
+      return;
+    }
+    const media = window.chUploads[0];
+    
+    // We must read the file into a base64 string or blob to store in IndexedDB.
+    // IndexedDB can store Blobs natively!
+    const draft = {
+      mediaFile: media.file,
+      mediaType: media.type,
+      mediaThumbUrl: media.thumbUrl,
+      editorState: JSON.parse(JSON.stringify(window.HubbleEditor.state)),
+      caption: document.querySelector('.ch-caption-input')?.value || ''
+    };
+    
+    // Check if we are editing an existing draft
+    if (window.currentDraftId) {
+      draft.id = window.currentDraftId;
+      draft.createdAt = window.currentDraftCreatedAt;
+    }
+    
+    try {
+      await DraftsDB.saveDraft(draft);
+      showToast('Saved as draft! 📝');
+      window.renderDraftsList();
+    } catch(err) {
+      console.error(err);
+      showToast('Failed to save draft');
+    }
+  };
+
+  window.renderDraftsList = async function() {
+    const list = document.getElementById('ch-drafts-list');
+    const countLabel = document.getElementById('drafts-count');
+    const emptyState = document.getElementById('drafts-empty-state');
+    const seeAllBtn = document.getElementById('see-all-drafts-btn');
+    if (!list) return;
+
+    const drafts = await DraftsDB.getDrafts();
+    if (countLabel) countLabel.innerText = drafts.length;
+    
+    // Remove all current items except the empty state
+    Array.from(list.children).forEach(child => {
+      if (child.id !== 'drafts-empty-state') child.remove();
+    });
+
+    if (drafts.length === 0) {
+      if (emptyState) emptyState.style.display = 'flex';
+      if (seeAllBtn) seeAllBtn.style.display = 'none';
+    } else {
+      if (emptyState) emptyState.style.display = 'none';
+      if (seeAllBtn) seeAllBtn.style.display = 'block';
+      
+      drafts.slice(0, 3).forEach(d => {
+        const timeAgo = Math.round((Date.now() - d.lastModified) / 60000); // mins
+        const timeStr = timeAgo < 60 ? `${timeAgo}m ago` : `${Math.round(timeAgo/60)}h ago`;
+        const title = d.caption || 'Untitled HUBB';
+        const imgUrl = d.mediaThumbUrl || URL.createObjectURL(d.mediaFile);
+        
+        const item = document.createElement('div');
+        item.className = 'ch-draft-item';
+        item.style.cssText = 'display:flex; justify-content:space-between; align-items:center; background: rgba(255,255,255,0.03); padding: 8px; border-radius: 12px;';
+        
+        item.innerHTML = `
+          <div style="display:flex; gap:10px; align-items:center; cursor:pointer;" onclick="window.loadDraft('${d.id}')">
+            <img src="${imgUrl}" style="width:40px; height:40px; border-radius:8px; object-fit:cover;" alt="Draft">
+            <div class="ch-draft-info">
+              <div class="ch-draft-title" style="font-weight:600; font-size:0.85rem; max-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${title}</div>
+              <div class="ch-draft-time" style="color:var(--text-muted); font-size:0.75rem;">${timeStr}</div>
+            </div>
+          </div>
+          <div style="display: flex; gap: 4px;">
+            <button onclick="window.duplicateDraft('${d.id}')" style="background:transparent; border:none; color:white; padding:4px; cursor:pointer; opacity: 0.6;"><i data-lucide="copy" style="width:14px; height:14px;"></i></button>
+            <button onclick="window.deleteDraft('${d.id}')" style="background:transparent; border:none; color: #ef4444; padding:4px; cursor:pointer; opacity: 0.6;"><i data-lucide="trash-2" style="width:14px; height:14px;"></i></button>
+          </div>
+        `;
+        list.appendChild(item);
+      });
+      if (window.lucide) window.lucide.createIcons();
+    }
+  };
+
+  window.loadDraft = async function(id) {
+    const drafts = await DraftsDB.getDrafts();
+    const d = drafts.find(x => x.id === id);
+    if(!d) return;
+    
+    // Restore variables
+    window.chUploads = [{
+      file: d.mediaFile,
+      type: d.mediaType,
+      thumbUrl: d.mediaThumbUrl || URL.createObjectURL(d.mediaFile)
+    }];
+    
+    window.currentDraftId = d.id;
+    window.currentDraftCreatedAt = d.createdAt;
+    
+    if (d.editorState) window.HubbleEditor.state = JSON.parse(JSON.stringify(d.editorState));
+    
+    const captionInput = document.querySelector('.ch-caption-input');
+    if (captionInput) captionInput.value = d.caption || '';
+    
+    // Switch view to editor
+    if (window.switchView) window.switchView('create-hubbs');
+    window.initCreateHubbsUpload();
+  };
+
+  window.deleteDraft = async function(id) {
+    if(confirm('Delete this draft?')) {
+      await DraftsDB.deleteDraft(id);
+      window.renderDraftsList();
+    }
+  };
+  
+  window.duplicateDraft = async function(id) {
+    const drafts = await DraftsDB.getDrafts();
+    const d = drafts.find(x => x.id === id);
+    if(!d) return;
+    
+    const clone = { ...d, id: undefined, createdAt: undefined };
+    await DraftsDB.saveDraft(clone);
+    window.renderDraftsList();
+  };
+
+  // Run on init
+  document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(() => {
+      window.renderDraftsList();
+    }, 500);
+  });
+
   // --- TOAST HELPER ---
   const toast = document.getElementById('toast-notif');
   function showToast(message) {
@@ -8048,3 +8237,1325 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
   initBeforeAfterSlider();
 }
 
+// =========================================================================
+// CREATE HUBBS - NATIVE FILE UPLOAD & PREVIEW SYSTEM
+// =========================================================================
+function initCreateHubbsUpload() {
+  const uploadBox = document.getElementById('ch-upload-box');
+  const fileInput = document.getElementById('ch-hidden-file-input');
+  const cameraBtn = document.getElementById('ch-camera-btn');
+  const addMediaBtn = document.getElementById('ch-add-media-btn');
+  const previewContainer = document.getElementById('ch-media-preview-container');
+  const previewRow = document.getElementById('ch-media-preview-row');
+  const addMoreBtn = document.getElementById('ch-add-more-media-btn');
+
+  if (!uploadBox || !fileInput) return;
+
+  window.chUploads = window.chUploads || [];
+
+  // Triggers
+  if (cameraBtn) {
+    cameraBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      fileInput.setAttribute('capture', 'environment');
+      fileInput.click();
+    });
+  }
+
+  if (addMediaBtn) {
+    addMediaBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      fileInput.removeAttribute('capture');
+      fileInput.click();
+    });
+  }
+
+  uploadBox.addEventListener('click', () => {
+    fileInput.removeAttribute('capture');
+    fileInput.click();
+  });
+
+  if (addMoreBtn) {
+    addMoreBtn.addEventListener('click', () => {
+      fileInput.removeAttribute('capture');
+      fileInput.click();
+    });
+  }
+
+  // Drag and Drop
+  uploadBox.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    uploadBox.style.borderColor = 'var(--primary, #a855f7)';
+    uploadBox.style.background = 'rgba(168, 85, 247, 0.1)';
+  });
+
+  uploadBox.addEventListener('dragleave', (e) => {
+    e.preventDefault();
+    uploadBox.style.borderColor = '';
+    uploadBox.style.background = '';
+  });
+
+  uploadBox.addEventListener('drop', (e) => {
+    e.preventDefault();
+    uploadBox.style.borderColor = '';
+    uploadBox.style.background = '';
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleFiles(e.dataTransfer.files);
+    }
+  });
+
+  fileInput.addEventListener('change', (e) => {
+    if (e.target.files && e.target.files.length > 0) {
+      handleFiles(e.target.files);
+    }
+    fileInput.value = ''; // Reset input to allow selecting same files again if removed
+  });
+
+  async function handleFiles(files) {
+    const maxSize = 100 * 1024 * 1024; // 100MB
+    const toast = document.getElementById('toast-notif');
+    
+    function showMsg(msg) {
+      if (window.showToast) {
+        window.showToast(msg);
+      } else if (toast) {
+        toast.textContent = msg;
+        toast.classList.add('active');
+        setTimeout(() => toast.classList.remove('active'), 2500);
+      } else {
+        alert(msg);
+      }
+    }
+
+    // Optional: show loading indicator
+    uploadBox.style.opacity = '0.5';
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+
+      // Validate Size
+      if (file.size > maxSize) {
+        showMsg("This file exceeds the maximum upload size of 100 MB.");
+        continue;
+      }
+
+      // Validate Type
+      if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
+        showMsg("This file type is not supported.");
+        continue;
+      }
+
+      // Generate Thumbnail
+      let thumbUrl = '';
+      let duration = 0;
+
+      try {
+        if (file.type.startsWith('video/')) {
+          const vData = await generateVideoThumbnail(file);
+          thumbUrl = vData.thumb;
+          duration = vData.duration;
+        } else {
+          thumbUrl = URL.createObjectURL(file);
+        }
+
+        window.chUploads.push({
+          file: file,
+          type: file.type,
+          thumbUrl: thumbUrl,
+          duration: duration,
+          name: file.name,
+          size: file.size
+        });
+      } catch (err) {
+        console.error("Error generating thumbnail:", err);
+        showMsg("Unable to load media. Please try again.");
+      }
+    }
+
+    uploadBox.style.opacity = '1';
+    renderMediaPreviews();
+  }
+
+  function generateVideoThumbnail(file) {
+    return new Promise((resolve, reject) => {
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      video.muted = true;
+      video.playsInline = true;
+      const url = URL.createObjectURL(file);
+      video.src = url;
+
+      video.onloadedmetadata = () => {
+        // Seek to 0.1s to grab a frame, ensuring it's loaded
+        video.currentTime = Math.min(0.1, video.duration > 0 ? video.duration / 2 : 0);
+      };
+
+      video.onseeked = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = video.videoWidth || 320;
+          canvas.height = video.videoHeight || 240;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+          URL.revokeObjectURL(url);
+          resolve({ thumb: dataUrl, duration: video.duration });
+        } catch (e) {
+          reject(e);
+        }
+      };
+
+      video.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error("Video load error"));
+      };
+    });
+  }
+
+  function formatDuration(seconds) {
+    if (!seconds || isNaN(seconds)) return '0:00';
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  }
+
+  function renderMediaPreviews() {
+    // Remove existing previews except the Add More button
+    const existingItems = previewRow.querySelectorAll('.ch-preview-item');
+    existingItems.forEach(el => el.remove());
+
+    if (window.chUploads.length === 0) {
+      uploadBox.style.display = 'block';
+      previewContainer.style.display = 'none';
+      return;
+    }
+
+    uploadBox.style.display = 'none';
+    previewContainer.style.display = 'block';
+
+    window.chUploads.forEach((item, index) => {
+      const previewEl = document.createElement('div');
+      previewEl.className = 'ch-preview-item';
+      previewEl.draggable = true;
+      previewEl.setAttribute('data-index', index);
+      // Inline styles to match original structure
+      previewEl.style.cssText = 'position: relative; flex-shrink: 0; width: 100px; height: 100px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.08); transition: transform 0.2s, box-shadow 0.2s; cursor: grab; background: #1a1a1a;';
+      
+      const img = document.createElement('img');
+      img.src = item.thumbUrl;
+      img.style.cssText = 'width: 100%; height: 100%; object-fit: cover; border-radius: 10px; pointer-events: none;';
+      previewEl.appendChild(img);
+
+      if (item.type.startsWith('video/')) {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position: absolute; bottom: 6px; right: 6px; background: rgba(0,0,0,0.75); color: white; padding: 2px 6px; border-radius: 6px; font-size: 0.7rem; font-weight: 600; display: flex; align-items: center; gap: 4px; backdrop-filter: blur(4px); pointer-events: none;';
+        overlay.innerHTML = `<i data-lucide="video" style="width: 10px; height: 10px;"></i> ${formatDuration(item.duration)}`;
+        previewEl.appendChild(overlay);
+      }
+
+      const rmBtn = document.createElement('button');
+      rmBtn.className = 'ch-remove-media';
+      rmBtn.style.cssText = 'position: absolute; top: -6px; right: -6px; width: 22px; height: 22px; border-radius: 50%; background: #ff3b30; color: white; border: none; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.4); z-index: 10; padding: 0;';
+      rmBtn.innerHTML = '<i data-lucide="x" style="width: 12px; height: 12px;"></i>';
+      rmBtn.onclick = (e) => {
+        e.stopPropagation();
+        window.chUploads.splice(index, 1);
+        if (item.type.startsWith('image/')) {
+          URL.revokeObjectURL(item.thumbUrl);
+        }
+        renderMediaPreviews();
+      };
+      previewEl.appendChild(rmBtn);
+
+      // Drag and Drop Reordering Support
+      previewEl.addEventListener('dragstart', (e) => {
+        e.dataTransfer.setData('text/plain', index);
+        previewEl.style.opacity = '0.5';
+      });
+      previewEl.addEventListener('dragend', () => {
+        previewEl.style.opacity = '1';
+        previewRow.querySelectorAll('.ch-preview-item').forEach(el => el.style.border = '1px solid rgba(255,255,255,0.08)');
+      });
+      previewEl.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        previewEl.style.border = '2px solid var(--primary, #a855f7)';
+      });
+      previewEl.addEventListener('dragleave', () => {
+        previewEl.style.border = '1px solid rgba(255,255,255,0.08)';
+      });
+      previewEl.addEventListener('drop', (e) => {
+        e.preventDefault();
+        const draggedIndex = parseInt(e.dataTransfer.getData('text/plain'), 10);
+        if (!isNaN(draggedIndex) && draggedIndex !== index) {
+          // Swap logic
+          const draggedItem = window.chUploads.splice(draggedIndex, 1)[0];
+          window.chUploads.splice(index, 0, draggedItem);
+          renderMediaPreviews();
+        }
+      });
+
+      // Simple Click to view larger (mock behavior as per requirements)
+      previewEl.addEventListener('click', () => {
+        if (window.showToast) window.showToast(`Previewing ${item.name} 🔍`);
+      });
+
+      previewRow.insertBefore(previewEl, addMoreBtn);
+    });
+
+    if (window.lucide) {
+      window.lucide.createIcons();
+    }
+  }
+
+  // Initial check
+  renderMediaPreviews();
+}
+
+document.addEventListener('DOMContentLoaded', initCreateHubbsUpload);
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
+  initCreateHubbsUpload();
+}
+// =========================================================================
+// REVIEW HUBBS - NAVIGATION & VALIDATION
+// =========================================================================
+window.handleReviewNavigation = function() {
+  if (!window.chUploads || window.chUploads.length === 0) {
+    showValidationModal();
+    return;
+  }
+  
+  // Navigate to review view
+  switchView('review-hubbs');
+  
+  // Initialize slider with the actual uploaded media
+  setTimeout(window.initReviewSlider, 50);
+};
+
+function showValidationModal() {
+  let overlay = document.getElementById('review-validation-overlay');
+  
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'review-validation-overlay';
+    overlay.className = 'review-validation-modal-overlay';
+    
+    overlay.innerHTML = `
+      <div class="review-validation-modal">
+        <h3 style="margin: 0 0 8px 0; font-size: 1.5rem; color: #fff; font-weight: 700;">No HUBB Selected</h3>
+        <p style="margin: 0 0 24px 0; color: rgba(255,255,255,0.7); font-size: 0.95rem;">Please select at least one photo or video before continuing.</p>
+        <div style="display: flex; gap: 12px; justify-content: center;">
+          <button id="rv-cancel-btn" style="padding: 10px 24px; border-radius: 8px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.1); color: #fff; font-weight: 600; cursor: pointer; transition: all 0.2s;">Cancel</button>
+          <button id="rv-upload-btn" style="padding: 10px 24px; border-radius: 8px; background: linear-gradient(135deg, var(--primary) 0%, #a855f7 100%); border: none; color: white; font-weight: 600; cursor: pointer; box-shadow: 0 4px 12px rgba(168,85,247,0.3); transition: all 0.2s;">Upload Media</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    
+    document.getElementById('rv-cancel-btn').addEventListener('click', () => {
+      overlay.classList.remove('active');
+    });
+    
+    document.getElementById('rv-upload-btn').addEventListener('click', () => {
+      overlay.classList.remove('active');
+      // Trigger the file picker
+      const fileInput = document.getElementById('ch-hidden-file-input');
+      if (fileInput) fileInput.click();
+    });
+  }
+  
+  // Trigger animation
+  requestAnimationFrame(() => {
+    overlay.classList.add('active');
+  });
+}
+
+// =========================================================================
+// REVIEW HUBBS - COMPARISON SLIDER & SYNC
+// =========================================================================
+window.initReviewSlider = function() {
+  const emptyState = document.getElementById('review-empty-state');
+  const sliderWrapper = document.getElementById('review-slider-wrapper');
+  
+  if (!window.chUploads || window.chUploads.length === 0) {
+    if (emptyState) emptyState.style.display = 'flex';
+    if (sliderWrapper) sliderWrapper.style.display = 'none';
+    return;
+  }
+  
+  if (emptyState) emptyState.style.display = 'none';
+  if (sliderWrapper) sliderWrapper.style.display = 'block';
+  
+  const beforeContainer = document.getElementById('review-before-container');
+  const afterContainer = document.getElementById('review-after-container');
+  
+  if (!beforeContainer || !afterContainer) return;
+  
+  // Clear containers except for absolute labels and lines
+  [beforeContainer, afterContainer].forEach(container => {
+    Array.from(container.children).forEach(child => {
+      if (!child.style.position.includes('absolute')) {
+        child.remove();
+      }
+    });
+  });
+
+  const mediaItem = window.chUploads[0];
+  const url = URL.createObjectURL(mediaItem.file);
+  
+  let beforeMediaNode, afterMediaNode;
+
+  if (mediaItem.type.startsWith('video/')) {
+    // Render Videos
+    beforeMediaNode = document.createElement('video');
+    afterMediaNode = document.createElement('video');
+    
+    [beforeMediaNode, afterMediaNode].forEach(v => {
+      v.src = url;
+      v.style.cssText = 'width: 100%; height: 100%; object-fit: cover;';
+      v.loop = true;
+      v.muted = true;
+      v.playsInline = true;
+      v.autoplay = true;
+    });
+    
+    // Apply Actual Edits from Editor State
+    afterMediaNode.style.filter = window.HubbleEditor.buildCSSFilterString();
+    const zoom = window.HubbleEditor.state.zoom || 1;
+    afterMediaNode.style.transform = `rotate(${window.HubbleEditor.state.rotation}deg) scale(${zoom})`;
+    
+    // Sync Logic: The BEFORE (Left/Raw) controls the AFTER (Right/Edited)
+    beforeMediaNode.addEventListener('play', () => afterMediaNode.play());
+    beforeMediaNode.addEventListener('pause', () => afterMediaNode.pause());
+    beforeMediaNode.addEventListener('seeking', () => afterMediaNode.currentTime = beforeMediaNode.currentTime);
+    beforeMediaNode.addEventListener('seeked', () => afterMediaNode.currentTime = beforeMediaNode.currentTime);
+
+    // Provide minimal playback control on clicking the wrapper
+    sliderWrapper.onclick = (e) => {
+      if (e.target.id === 'review-slider-handle' || e.target.closest('#review-slider-handle')) return;
+      if (beforeMediaNode.paused) {
+        beforeMediaNode.play();
+      } else {
+        beforeMediaNode.pause();
+      }
+    };
+    
+  } else {
+    // Render Images
+    beforeMediaNode = document.createElement('img');
+    afterMediaNode = document.createElement('img');
+    
+    [beforeMediaNode, afterMediaNode].forEach(img => {
+      img.src = url;
+      img.style.cssText = 'width: 100%; height: 100%; object-fit: cover;';
+    });
+    
+    // Apply Actual Edits from Editor State
+    afterMediaNode.style.filter = window.HubbleEditor.buildCSSFilterString();
+    const zoom = window.HubbleEditor.state.zoom || 1;
+    afterMediaNode.style.transform = `rotate(${window.HubbleEditor.state.rotation}deg) scale(${zoom})`;
+  }
+  
+  // Insert at the beginning so they sit behind the absolute positioned labels
+  beforeContainer.insertBefore(beforeMediaNode, beforeContainer.firstChild);
+  afterContainer.insertBefore(afterMediaNode, afterContainer.firstChild);
+
+  // Create a wrapper for the layers so we can clip them together with the media
+  const interactionWrapper = document.createElement('div');
+  interactionWrapper.style.cssText = 'position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;';
+  
+  // Inject Layers (Stickers / Text) into After Container wrapper
+  window.HubbleEditor.state.layers.forEach((layer) => {
+    const el = document.createElement('div');
+    el.style.cssText = `position: absolute; left: ${layer.x}%; top: ${layer.y}%; transform: translate(-50%, -50%) rotate(${layer.rotation}deg) scale(${layer.scale}); z-index: ${layer.zIndex}; pointer-events: none;`;
+    if (layer.type === 'text') {
+      el.innerHTML = `<div style="color: ${layer.styles.color || 'white'}; font-family: ${layer.styles.font || 'inherit'}; font-size: ${layer.styles.size || 24}px; font-weight: ${layer.styles.bold ? 'bold' : 'normal'}; font-style: ${layer.styles.italic ? 'italic' : 'normal'}; text-shadow: ${layer.styles.shadow ? '0 2px 10px rgba(0,0,0,0.5)' : 'none'}; text-align: center; white-space: pre-wrap;">${layer.content}</div>`;
+    } else if (layer.type === 'sticker') {
+      el.innerHTML = `<div style="font-size: ${layer.styles.size || 80}px; pointer-events: none;">${layer.content}</div>`;
+    }
+    interactionWrapper.appendChild(el);
+  });
+  
+  afterContainer.appendChild(interactionWrapper);
+
+  // Apply Crop if exists
+  if (window.HubbleEditor.state.crop) {
+     const { x, y, width, height } = window.HubbleEditor.state.crop;
+     const clipPathStr = `inset(${y}% ${100 - (x + width)}% ${100 - (y + height)}% ${x}%)`;
+     afterMediaNode.style.clipPath = clipPathStr;
+     interactionWrapper.style.clipPath = clipPathStr;
+  }
+
+  // Setup Draggable Handle
+  const handle = document.getElementById('review-slider-handle');
+  if (handle) {
+    let isDragging = false;
+    
+    const updateSliderPos = (x) => {
+      const rect = sliderWrapper.getBoundingClientRect();
+      let position = x - rect.left;
+      position = Math.max(0, Math.min(position, rect.width));
+      const percentage = (position / rect.width) * 100;
+      
+      // Hardware accelerated clip-path inset(top right bottom left)
+      // Clip the right side of the BEFORE image container
+      beforeContainer.style.clipPath = `inset(0 ${100 - percentage}% 0 0)`;
+      handle.style.left = `${percentage}%`;
+    };
+
+    handle.onmousedown = (e) => {
+      isDragging = true;
+      e.preventDefault(); 
+    };
+    
+    handle.ontouchstart = (e) => {
+      isDragging = true;
+    };
+    
+    document.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+      updateSliderPos(e.clientX);
+    });
+    
+    document.addEventListener('touchmove', (e) => {
+      if (!isDragging) return;
+      updateSliderPos(e.touches[0].clientX);
+    }, { passive: true });
+    
+    document.addEventListener('mouseup', () => isDragging = false);
+    document.addEventListener('touchend', () => isDragging = false);
+    
+    // Initial State 50%
+    beforeContainer.style.clipPath = `inset(0 50% 0 0)`;
+    handle.style.left = `50%`;
+  }
+};
+
+// =========================================================================
+// REVIEW HUBBS - ACTIONS
+// =========================================================================
+window.saveReviewDraft = function(btn) {
+  if (window.showToast) window.showToast('All edits saved to draft! 📝');
+  const span = document.getElementById('review-draft-time');
+  if (span) {
+    span.textContent = 'Last saved: Just now';
+  }
+  btn.style.opacity = '0.5';
+  btn.style.pointerEvents = 'none';
+  setTimeout(() => {
+    btn.style.opacity = '1';
+    btn.style.pointerEvents = 'all';
+  }, 1000);
+};
+
+window.publishHubb = function() {
+  if (!window.chUploads || window.chUploads.length === 0) {
+    if (window.showValidationModal) window.showValidationModal();
+    return;
+  }
+  
+  const media = window.chUploads[0];
+  const url = media.thumbUrl || URL.createObjectURL(media.file);
+  const caption = document.querySelector('.ch-caption-input')?.value || '';
+  const filter = window.HubbleEditor.buildCSSFilterString();
+  
+  const newStoryHTML = `
+    <div class="story-card has-story" onclick="window.openPublishedStory(this)">
+      <div class="story-avatar-container">
+        <img src="${url}" alt="My Story" style="filter: ${filter}; object-fit: cover;">
+      </div>
+      <span class="story-username">Your Story</span>
+      <template class="story-data">
+        ${JSON.stringify({
+          url: url,
+          type: media.type,
+          filter: filter,
+          rotation: window.HubbleEditor.state.rotation,
+          zoom: window.HubbleEditor.state.zoom || 1,
+          crop: window.HubbleEditor.state.crop,
+          layers: window.HubbleEditor.state.layers,
+          caption: caption,
+          time: Date.now()
+        })}
+      </template>
+    </div>
+  `;
+  
+  const currentBtn = document.getElementById('story-btn-current');
+  if (currentBtn) {
+    currentBtn.insertAdjacentHTML('afterend', newStoryHTML);
+  }
+  
+  if (window.showToast) window.showToast('Story published! 🚀');
+  
+  window.chUploads = [];
+  setTimeout(() => {
+    switchView('home');
+    if (typeof initCreateHubbsUpload === 'function') initCreateHubbsUpload();
+  }, 100);
+};
+
+window.openPublishedStory = function(card) {
+  const dataNode = card.querySelector('.story-data');
+  if (!dataNode) return;
+  const data = JSON.parse(dataNode.innerHTML);
+  
+  const modal = document.getElementById('story-viewer-modal');
+  if (!modal) return;
+  
+  const avatar = document.getElementById('story-viewer-avatar');
+  if (avatar) avatar.src = 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&h=150&q=80';
+  
+  const name = document.getElementById('story-viewer-name');
+  if (name) name.innerText = 'Your Story';
+  
+  const time = document.getElementById('story-viewer-time');
+  if (time) time.innerText = 'Just now';
+  
+  const contentBox = document.getElementById('story-viewer-content-box');
+  if (!contentBox) return;
+  contentBox.innerHTML = '';
+  
+  let mediaNode;
+  if (data.type.startsWith('video/')) {
+    mediaNode = document.createElement('video');
+    mediaNode.src = data.url;
+    mediaNode.autoplay = true; mediaNode.loop = true; mediaNode.muted = true; mediaNode.playsInline = true;
+  } else {
+    mediaNode = document.createElement('img');
+    mediaNode.src = data.url;
+  }
+  mediaNode.style.cssText = 'width: 100%; height: 100%; object-fit: cover;';
+  mediaNode.style.filter = data.filter;
+  mediaNode.style.transform = "rotate(" + data.rotation + "deg) scale(" + data.zoom + ")";
+  
+  if (data.crop) {
+    const { x, y, width, height } = data.crop;
+    mediaNode.style.clipPath = "inset(" + y + "% " + (100 - (x + width)) + "% " + (100 - (y + height)) + "% " + x + "%)";
+  }
+  
+  contentBox.appendChild(mediaNode);
+  
+  const wrapper = document.createElement('div');
+  wrapper.style.cssText = 'position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; overflow: hidden;';
+  if (data.crop) {
+    const { x, y, width, height } = data.crop;
+    wrapper.style.clipPath = "inset(" + y + "% " + (100 - (x + width)) + "% " + (100 - (y + height)) + "% " + x + "%)";
+  }
+  
+  if (data.layers) {
+    data.layers.forEach((layer) => {
+      const el = document.createElement('div');
+      el.style.cssText = "position: absolute; left: " + layer.x + "%; top: " + layer.y + "%; transform: translate(-50%, -50%) rotate(" + layer.rotation + "deg) scale(" + layer.scale + "); z-index: " + layer.zIndex + ";";
+      if (layer.type === 'text') {
+        el.innerHTML = '<div style="color: ' + (layer.styles.color || 'white') + '; font-family: ' + (layer.styles.font || 'inherit') + '; font-size: ' + (layer.styles.size || 24) + 'px; font-weight: ' + (layer.styles.bold ? 'bold' : 'normal') + '; font-style: ' + (layer.styles.italic ? 'italic' : 'normal') + '; text-shadow: ' + (layer.styles.shadow ? '0 2px 10px rgba(0,0,0,0.5)' : 'none') + '; text-align: center; white-space: pre-wrap;">' + layer.content + '</div>';
+      } else if (layer.type === 'sticker') {
+        el.innerHTML = '<div style="font-size: ' + (layer.styles.size || 80) + 'px;">' + layer.content + '</div>';
+      }
+      wrapper.appendChild(el);
+    });
+  }
+  
+  contentBox.appendChild(wrapper);
+  
+  modal.style.display = 'flex';
+  requestAnimationFrame(() => modal.style.opacity = '1');
+};
+
+// =========================================================================
+// HIHUBBLE ADVANCED STORY EDITOR ENGINE
+// =========================================================================
+
+window.HubbleEditor = {
+  activeMediaIndex: 0,
+  state: {
+    filter: 'original',
+    rotation: 0,
+    adjustments: {
+      brightness: 100, contrast: 100, exposure: 100, highlights: 100, shadows: 100,
+      temperature: 0, tint: 0, saturation: 100, vibrance: 100, sharpness: 0, blur: 0, opacity: 100
+    },
+    crop: null, // { x, y, width, height, aspect }
+    layers: [] // { id, type, content, x, y, rotation, scale, zIndex, styles }
+  },
+  history: [],
+  redoStack: [],
+  
+  // Initialization
+  init() {
+    this.injectEditorUI();
+    this.bindToolButtons();
+  },
+
+  injectEditorUI() {
+    // We inject a floating editor canvas that appears when tools are active
+    if (!document.getElementById('he-canvas-modal')) {
+      const modal = document.createElement('div');
+      modal.id = 'he-canvas-modal';
+      modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.85); backdrop-filter: blur(12px); z-index: 9990; display: none; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.3s;';
+      
+      modal.innerHTML = `
+        <div style="position: absolute; top: 20px; right: 20px; display: flex; gap: 12px; z-index: 9995;">
+          <button onclick="HubbleEditor.undo()" id="he-undo-btn" class="ch-premium-tool-btn" style="width: 40px; height: 40px; border-radius: 12px; background: rgba(255,255,255,0.1); color: white; border: none; cursor: pointer; opacity: 0.5; pointer-events: none;"><i data-lucide="undo" style="width: 18px; height: 18px;"></i></button>
+          <button onclick="HubbleEditor.redo()" id="he-redo-btn" class="ch-premium-tool-btn" style="width: 40px; height: 40px; border-radius: 12px; background: rgba(255,255,255,0.1); color: white; border: none; cursor: pointer; opacity: 0.5; pointer-events: none;"><i data-lucide="redo" style="width: 18px; height: 18px;"></i></button>
+          <button onclick="HubbleEditor.pushHistory(); HubbleEditor.state.rotation = (HubbleEditor.state.rotation + 90) % 360; HubbleEditor.updateRender();" class="ch-premium-tool-btn" style="padding: 0 16px; height: 40px; border-radius: 12px; background: rgba(255,255,255,0.1); color: white; border: none; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px;"><i data-lucide="rotate-cw" style="width: 16px; height: 16px;"></i> Rotate 90&deg;</button>
+          <button onclick="HubbleEditor.closeCanvas()" class="ch-premium-tool-btn" style="padding: 0 20px; height: 40px; border-radius: 12px; background: linear-gradient(135deg, var(--primary) 0%, #a855f7 100%); color: white; border: none; font-weight: 600; cursor: pointer;">Done Editing</button>
+        </div>
+        
+        <div id="he-workspace" style="position: relative; width: 80%; height: 80%; max-width: 1000px; display: flex; align-items: center; justify-content: center;">
+          <div id="he-render-container" style="position: relative; box-shadow: 0 20px 50px rgba(0,0,0,0.5); overflow: hidden; display: flex; align-items: center; justify-content: center;">
+            <div id="he-media-layer" style="position: absolute; width: 100%; height: 100%; transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);"></div>
+            <div id="he-interaction-layer" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;"></div>
+            <div id="he-crop-overlay" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; display: none;">
+               <!-- Crop Grid generated dynamically -->
+            </div>
+          </div>
+        </div>
+        
+        <!-- Floating Tool Panels -->
+        <div id="he-panels-container" style="position: absolute; left: 24px; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 16px; z-index: 9995;">
+           <!-- Panels injected here dynamically based on active tool -->
+        </div>
+      `;
+      document.body.appendChild(modal);
+      if (window.lucide) window.lucide.createIcons();
+    }
+  },
+
+  bindToolButtons() {
+    const buttons = document.querySelectorAll('.ch-image-tools .ch-premium-tool-btn');
+    buttons.forEach((btn, index) => {
+      btn.onclick = (e) => {
+        e.preventDefault();
+        
+        if (!window.chUploads || window.chUploads.length === 0) {
+          if (window.showToast) window.showToast('Please upload media first.');
+          return;
+        }
+
+        const tools = ['filters', 'crop', 'rotate', 'adjust', 'stickers', 'text'];
+        
+        // Remove active class from all
+        buttons.forEach(b => {
+          b.classList.remove('active');
+          b.style.background = 'rgba(255,255,255,0.05)';
+          b.style.borderColor = 'rgba(255,255,255,0.1)';
+          b.style.boxShadow = 'none';
+        });
+        
+        // Add active to current
+        btn.classList.add('active');
+        btn.style.background = 'rgba(168, 85, 247, 0.2)';
+        btn.style.borderColor = 'rgba(168, 85, 247, 0.5)';
+        btn.style.boxShadow = '0 4px 15px rgba(168, 85, 247, 0.4), inset 0 0 10px rgba(168, 85, 247, 0.2)';
+
+        this.openTool(tools[index]);
+      };
+    });
+  },
+
+  openTool(toolName) {
+    this.openCanvas();
+    this.renderPanels(toolName);
+    
+    if (toolName === 'crop') {
+      this.enterCropMode();
+    }
+  },
+
+
+  enterCropMode() {
+    this.tempCrop = this.state.crop ? JSON.parse(JSON.stringify(this.state.crop)) : { x: 10, y: 10, width: 80, height: 80, aspect: 'Free' };
+    const overlay = document.getElementById('he-crop-overlay');
+    if (overlay) {
+      overlay.style.display = 'block';
+      overlay.style.pointerEvents = 'all';
+    }
+    // Also disable layer dragging during crop
+    const layers = document.getElementById('he-interaction-layer');
+    if (layers) layers.style.pointerEvents = 'none';
+    
+    this.renderCropHandles();
+  },
+
+  exitCropMode(save) {
+    if (save && this.tempCrop) {
+      this.pushHistory();
+      this.state.crop = JSON.parse(JSON.stringify(this.tempCrop));
+      this.updateRender();
+    }
+    this.tempCrop = null;
+    const overlay = document.getElementById('he-crop-overlay');
+    if (overlay) {
+      overlay.style.display = 'none';
+      overlay.style.pointerEvents = 'none';
+    }
+    const layers = document.getElementById('he-interaction-layer');
+    if (layers) layers.style.pointerEvents = 'none';
+    
+    // Close the panel
+    this.closeCanvas();
+  },
+
+  setCropAspect(ratio) {
+    if (!this.tempCrop) return;
+    this.tempCrop.aspect = ratio;
+    
+    // Reset to center 80% if changing aspect
+    if (ratio === 'Free') {
+       this.tempCrop.width = 80; this.tempCrop.height = 80;
+    } else {
+      const [w, h] = ratio.split(':').map(Number);
+      const container = document.getElementById('he-render-container');
+      const rect = container.getBoundingClientRect();
+      const containerAspect = rect.width / rect.height;
+      const targetAspect = w / h;
+      
+      if (targetAspect > containerAspect) {
+        this.tempCrop.width = 80;
+        this.tempCrop.height = 80 * (containerAspect / targetAspect);
+      } else {
+        this.tempCrop.height = 80;
+        this.tempCrop.width = 80 * (targetAspect / containerAspect);
+      }
+    }
+    
+    this.tempCrop.x = (100 - this.tempCrop.width) / 2;
+    this.tempCrop.y = (100 - this.tempCrop.height) / 2;
+    this.renderCropHandles();
+    this.renderPanels('crop'); // update buttons
+  },
+
+  renderCropHandles() {
+    const overlay = document.getElementById('he-crop-overlay');
+    if (!overlay) return;
+    
+    overlay.innerHTML = '';
+    
+    const box = document.createElement('div');
+    box.id = 'he-crop-box';
+    box.style.cssText = `
+      position: absolute;
+      left: ${this.tempCrop.x}%;
+      top: ${this.tempCrop.y}%;
+      width: ${this.tempCrop.width}%;
+      height: ${this.tempCrop.height}%;
+      border: 2px solid white;
+      box-shadow: 0 0 0 9999px rgba(0,0,0,0.7);
+      cursor: move;
+      pointer-events: all;
+    `;
+    
+    const handlePositions = [
+      { top: '-6px', left: '-6px', cursor: 'nwse-resize', id: 'tl' },
+      { top: '-6px', left: 'calc(50% - 6px)', cursor: 'ns-resize', id: 'tc' },
+      { top: '-6px', right: '-6px', cursor: 'nesw-resize', id: 'tr' },
+      { top: 'calc(50% - 6px)', left: '-6px', cursor: 'ew-resize', id: 'ml' },
+      { top: 'calc(50% - 6px)', right: '-6px', cursor: 'ew-resize', id: 'mr' },
+      { bottom: '-6px', left: '-6px', cursor: 'nesw-resize', id: 'bl' },
+      { bottom: '-6px', left: 'calc(50% - 6px)', cursor: 'ns-resize', id: 'bc' },
+      { bottom: '-6px', right: '-6px', cursor: 'nwse-resize', id: 'br' }
+    ];
+    
+    handlePositions.forEach(pos => {
+      const h = document.createElement('div');
+      h.style.cssText = `
+        position: absolute;
+        width: 12px; height: 12px;
+        background: white; border-radius: 50%;
+        cursor: ${pos.cursor};
+        ${pos.top ? `top: ${pos.top};` : ''}
+        ${pos.bottom ? `bottom: ${pos.bottom};` : ''}
+        ${pos.left ? `left: ${pos.left};` : ''}
+        ${pos.right ? `right: ${pos.right};` : ''}
+      `;
+      this.bindCropDrag(h, pos.id);
+      box.appendChild(h);
+    });
+    
+    this.bindCropDrag(box, 'move');
+    overlay.appendChild(box);
+  },
+
+  bindCropDrag(element, type) {
+    element.onmousedown = (e) => {
+      e.stopPropagation();
+      let isDragging = true;
+      let startX = e.clientX;
+      let startY = e.clientY;
+      const startCrop = JSON.parse(JSON.stringify(this.tempCrop));
+      
+      const move = (ev) => {
+        if (!isDragging) return;
+        const container = document.getElementById('he-render-container');
+        const rect = container.getBoundingClientRect();
+        
+        const dx = ((ev.clientX - startX) / rect.width) * 100;
+        const dy = ((ev.clientY - startY) / rect.height) * 100;
+        
+        let { x, y, width, height, aspect } = startCrop;
+        
+        if (type === 'move') {
+          x += dx; y += dy;
+        } else {
+          if (type.includes('l')) { x += dx; width -= dx; }
+          if (type.includes('r')) { width += dx; }
+          if (type.includes('t')) { y += dy; height -= dy; }
+          if (type.includes('b')) { height += dy; }
+          
+          if (aspect !== 'Free') {
+            const [wRatio, hRatio] = aspect.split(':').map(Number);
+            const targetRatio = wRatio / hRatio;
+            const containerRatio = rect.width / rect.height;
+            
+            if (type.includes('l') || type.includes('r')) {
+               height = width * (containerRatio / targetRatio);
+               if(type.includes('t')) y = startCrop.y - (height - startCrop.height);
+            } else {
+               width = height * (targetRatio / containerRatio);
+               if(type.includes('l')) x = startCrop.x - (width - startCrop.width);
+            }
+          }
+        }
+        
+        // Clamp bounds
+        if (x < 0) x = 0;
+        if (y < 0) y = 0;
+        if (x + width > 100) {
+            if (type === 'move') x = 100 - width;
+            else width = 100 - x;
+        }
+        if (y + height > 100) {
+            if (type === 'move') y = 100 - height;
+            else height = 100 - y;
+        }
+        
+        width = Math.max(10, width);
+        height = Math.max(10, height);
+        
+        this.tempCrop = { ...this.tempCrop, x, y, width, height };
+        
+        const box = document.getElementById('he-crop-box');
+        if (box) {
+          box.style.left = `${this.tempCrop.x}%`;
+          box.style.top = `${this.tempCrop.y}%`;
+          box.style.width = `${this.tempCrop.width}%`;
+          box.style.height = `${this.tempCrop.height}%`;
+        }
+      };
+      
+      const up = () => {
+        isDragging = false;
+        document.removeEventListener('mousemove', move);
+        document.removeEventListener('mouseup', up);
+      };
+      
+      document.addEventListener('mousemove', move);
+      document.addEventListener('mouseup', up);
+    };
+  },
+
+  openCanvas() {
+    const modal = document.getElementById('he-canvas-modal');
+    if (modal && !modal.dataset.wheelBound) {
+       modal.dataset.wheelBound = 'true';
+       const container = document.getElementById('he-render-container');
+       container.addEventListener('wheel', (e) => {
+          e.preventDefault();
+          if (!this.state.zoom) this.state.zoom = 1;
+          this.state.zoom -= e.deltaY * 0.01;
+          this.state.zoom = Math.max(1, Math.min(this.state.zoom, 5));
+          this.updateRender();
+          if (document.querySelector('input[type="range"]')) {
+             // Re-render panels to update slider UI if active
+             const activeBtn = document.querySelector('.ch-premium-tool-btn.active');
+             if(activeBtn && activeBtn.innerText.includes('Crop')) this.renderPanels('crop');
+          }
+       }, { passive: false });
+    }
+    if (!modal) return;
+    modal.style.display = 'flex';
+    requestAnimationFrame(() => modal.style.opacity = '1');
+    
+    if (this.history.length === 0) {
+      this.pushHistory(); // Initial state
+    }
+    
+    this.updateRender();
+  },
+
+  closeCanvas() {
+    const overlay = document.getElementById('he-crop-overlay');
+    if (overlay && overlay.style.display !== 'none') {
+       overlay.style.display = 'none';
+       overlay.style.pointerEvents = 'none';
+    }
+    const modal = document.getElementById('he-canvas-modal');
+    if (!modal) return;
+    modal.style.opacity = '0';
+    setTimeout(() => {
+      modal.style.display = 'none';
+      document.getElementById('he-panels-container').innerHTML = '';
+      
+      // Also update the tiny thumbnails to reflect changes visually
+      if (typeof window.initCreateHubbsUpload === 'function') {
+         const thumbs = document.querySelectorAll('.ch-preview-item img, .ch-preview-item video');
+         if (thumbs[this.activeMediaIndex]) {
+           thumbs[this.activeMediaIndex].style.filter = this.buildCSSFilterString();
+           thumbs[this.activeMediaIndex].style.transform = `rotate(${this.state.rotation}deg)`;
+         }
+      }
+    }, 300);
+  },
+
+  pushHistory() {
+    this.history.push(JSON.parse(JSON.stringify(this.state)));
+    this.redoStack = []; // Clear redo stack on new action
+    this.updateUndoRedoUI();
+  },
+
+  undo() {
+    if (this.history.length > 1) {
+      this.redoStack.push(JSON.parse(JSON.stringify(this.state)));
+      this.history.pop(); // Remove current state
+      this.state = JSON.parse(JSON.stringify(this.history[this.history.length - 1]));
+      this.updateRender();
+      this.updateUndoRedoUI();
+    }
+  },
+
+  redo() {
+    if (this.redoStack.length > 0) {
+      this.history.push(JSON.parse(JSON.stringify(this.state)));
+      this.state = JSON.parse(JSON.stringify(this.redoStack.pop()));
+      this.updateRender();
+      this.updateUndoRedoUI();
+    }
+  },
+
+  updateUndoRedoUI() {
+    const undoBtn = document.getElementById('he-undo-btn');
+    const redoBtn = document.getElementById('he-redo-btn');
+    if (undoBtn) {
+      undoBtn.style.opacity = this.history.length > 1 ? '1' : '0.5';
+      undoBtn.style.pointerEvents = this.history.length > 1 ? 'all' : 'none';
+    }
+    if (redoBtn) {
+      redoBtn.style.opacity = this.redoStack.length > 0 ? '1' : '0.5';
+      redoBtn.style.pointerEvents = this.redoStack.length > 0 ? 'all' : 'none';
+    }
+  },
+
+  buildCSSFilterString() {
+    const adj = this.state.adjustments;
+    let str = `brightness(${adj.brightness}%) contrast(${adj.contrast}%) saturate(${adj.saturation}%) blur(${adj.blur}px) opacity(${adj.opacity}%)`;
+    
+    // Apply preset filters
+    const filters = {
+      'bright': ' brightness(120%) contrast(110%)',
+      'warm': ' sepia(30%) saturate(140%) hue-rotate(-10deg)',
+      'cool': ' saturate(120%) hue-rotate(10deg)',
+      'vintage': ' sepia(50%) contrast(120%)',
+      'black & white': ' grayscale(100%)',
+      'hdr': ' contrast(130%) saturate(120%) brightness(110%)',
+      'cinematic': ' contrast(120%) saturate(80%) sepia(20%) hue-rotate(-5deg)',
+      'soft': ' blur(1px) contrast(90%) brightness(105%)',
+      'dream': ' blur(2px) saturate(150%) brightness(110%)',
+      'purple glow': ' hue-rotate(45deg) saturate(130%) brightness(110%)',
+      'cool blue': ' hue-rotate(20deg) saturate(110%) contrast(105%)',
+      'sepia': ' sepia(100%)',
+      'vivid': ' saturate(200%) contrast(110%)',
+      'mono': ' grayscale(100%) contrast(120%)'
+    };
+    
+    if (this.state.filter !== 'original' && filters[this.state.filter]) {
+      str += filters[this.state.filter];
+    }
+    
+    return str;
+  },
+  addLayer(type, content, styles = {}) {
+    this.pushHistory();
+    const id = Date.now();
+    this.state.layers.push({
+      id,
+      type,
+      content,
+      x: 50, // Center %
+      y: 50, // Center %
+      rotation: 0,
+      scale: 1,
+      zIndex: this.state.layers.length + 10,
+      styles
+    });
+    this.updateRender();
+  },
+
+  updateRender() {
+    if (!window.chUploads || window.chUploads.length === 0) return;
+    
+    const media = window.chUploads[this.activeMediaIndex];
+    if (!media) return;
+
+    const container = document.getElementById('he-render-container');
+    const mediaLayer = document.getElementById('he-media-layer');
+    const interactionLayer = document.getElementById('he-interaction-layer');
+    
+    if (!container || !mediaLayer || !interactionLayer) return;
+
+    // Set Aspect Ratio based on media
+    container.style.width = '400px';
+    container.style.aspectRatio = '9/16';
+    container.style.background = '#111';
+    container.style.borderRadius = '16px';
+    
+    // Render Media Node
+    if (!mediaLayer.firstChild || mediaLayer.firstChild.dataset.url !== media.thumbUrl) {
+      mediaLayer.innerHTML = '';
+      let node;
+      if (media.type.startsWith('video/')) {
+        node = document.createElement('video');
+        node.src = URL.createObjectURL(media.file);
+        node.loop = true; node.muted = true; node.autoplay = true; node.playsInline = true;
+      } else {
+        node = document.createElement('img');
+        node.src = media.thumbUrl;
+      }
+      node.dataset.url = media.thumbUrl;
+      node.style.cssText = 'width: 100%; height: 100%; object-fit: contain; transform-origin: center center; transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);';
+      mediaLayer.appendChild(node);
+    }
+    
+    // Apply Transforms, Filters & Zoom
+    const node = mediaLayer.firstChild;
+    node.style.filter = this.buildCSSFilterString();
+    node.style.transform = `rotate(${this.state.rotation}deg) scale(${this.state.zoom || 1})`;
+    
+    // Apply Crop Clip-Path to Media and Interaction Layers (but NOT the crop overlay)
+    if (this.state.crop) {
+       const { x, y, width, height } = this.state.crop;
+       const clipPathStr = `inset(${y}% ${100 - (x + width)}% ${100 - (y + height)}% ${x}%)`;
+       mediaLayer.style.clipPath = clipPathStr;
+       interactionLayer.style.clipPath = clipPathStr;
+    } else {
+       mediaLayer.style.clipPath = 'none';
+       interactionLayer.style.clipPath = 'none';
+    }
+    
+    // Render Interaction Layers (Stickers / Text)
+    interactionLayer.innerHTML = '';
+    this.state.layers.forEach((layer, idx) => {
+      const el = document.createElement('div');
+      el.style.cssText = `position: absolute; left: ${layer.x}%; top: ${layer.y}%; transform: translate(-50%, -50%) rotate(${layer.rotation}deg) scale(${layer.scale}); z-index: ${layer.zIndex}; pointer-events: all; cursor: grab;`;
+      
+      if (layer.type === 'text') {
+        el.innerHTML = `<div style="color: ${layer.styles.color || 'white'}; font-family: ${layer.styles.font || 'inherit'}; font-size: ${layer.styles.size || 24}px; font-weight: ${layer.styles.bold ? 'bold' : 'normal'}; font-style: ${layer.styles.italic ? 'italic' : 'normal'}; text-shadow: ${layer.styles.shadow ? '0 2px 10px rgba(0,0,0,0.5)' : 'none'}; text-align: center; white-space: pre-wrap;">${layer.content}</div>`;
+      } else if (layer.type === 'sticker') {
+        el.innerHTML = `<div style="font-size: ${layer.styles.size || 80}px; pointer-events: none;">${layer.content}</div>`;
+      }
+      
+      // Drag Logic
+      el.onmousedown = (e) => {
+        let isDragging = true;
+        let startX = e.clientX;
+        let startY = e.clientY;
+        const startLeft = layer.x;
+        const startTop = layer.y;
+        
+        // Bring to front
+        layer.zIndex = Math.max(...this.state.layers.map(l => l.zIndex)) + 1;
+        el.style.zIndex = layer.zIndex;
+        
+        const move = (ev) => {
+          if(!isDragging) return;
+          const rect = interactionLayer.getBoundingClientRect();
+          const dx = ((ev.clientX - startX) / rect.width) * 100;
+          const dy = ((ev.clientY - startY) / rect.height) * 100;
+          layer.x = startLeft + dx;
+          layer.y = startTop + dy;
+          el.style.left = layer.x + '%';
+          el.style.top = layer.y + '%';
+        };
+        const up = () => {
+          isDragging = false;
+          HubbleEditor.pushHistory(); // push history on drop
+          document.removeEventListener('mousemove', move);
+          document.removeEventListener('mouseup', up);
+        };
+        document.addEventListener('mousemove', move);
+        document.addEventListener('mouseup', up);
+      };
+      
+      interactionLayer.appendChild(el);
+    });
+  },
+
+  renderPanels(activeTool) {
+    const container = document.getElementById('he-panels-container');
+    if (!container) return;
+    
+    // Generate glassmorphism panel
+    let html = `<div style="background: rgba(15,15,20,0.85); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.1); border-radius: 20px; padding: 20px; width: 320px; box-shadow: 0 20px 50px rgba(0,0,0,0.5); color: white;">`;
+    
+    if (activeTool === 'filters') {
+      html += `<h4 style="margin: 0 0 16px 0; font-size: 1.1rem; display: flex; align-items: center; gap: 8px;"><i data-lucide="aperture" style="width: 18px; height: 18px; color: var(--primary);"></i> Filters</h4>`;
+      html += `<div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; max-height: 400px; overflow-y: auto; padding-right: 8px;" class="custom-scrollbar">`;
+      
+      const filters = ['Original', 'Bright', 'Warm', 'Cool', 'Vintage', 'Black & White', 'HDR', 'Cinematic', 'Soft', 'Dream', 'Purple Glow', 'Cool Blue', 'Sepia', 'Vivid', 'Mono'];
+      
+    const filterStyles = {
+      'bright': 'brightness(120%) contrast(110%)',
+      'warm': 'sepia(30%) saturate(140%) hue-rotate(-10deg)',
+      'cool': 'saturate(120%) hue-rotate(10deg)',
+      'vintage': 'sepia(50%) contrast(120%)',
+      'black & white': 'grayscale(100%)',
+      'hdr': 'contrast(130%) saturate(120%) brightness(110%)',
+      'cinematic': 'contrast(120%) saturate(80%) sepia(20%) hue-rotate(-5deg)',
+      'soft': 'blur(1px) contrast(90%) brightness(105%)',
+      'dream': 'blur(2px) saturate(150%) brightness(110%)',
+      'purple glow': 'hue-rotate(45deg) saturate(130%) brightness(110%)',
+      'cool blue': 'hue-rotate(20deg) saturate(110%) contrast(105%)',
+      'sepia': 'sepia(100%)',
+      'vivid': 'saturate(200%) contrast(110%)',
+      'mono': 'grayscale(100%) contrast(120%)'
+    };
+
+      
+      const media = window.chUploads[this.activeMediaIndex];
+      const mediaUrl = media.thumbUrl || URL.createObjectURL(media.file);
+
+      filters.forEach(f => {
+        const id = f.toLowerCase();
+        const active = this.state.filter === id ? 'border: 2px solid var(--primary); transform: scale(1.05);' : 'border: 2px solid transparent;';
+        const cssFilter = id === 'original' ? 'none' : filterStyles[id];
+        
+        html += `
+          <div onclick="HubbleEditor.pushHistory(); HubbleEditor.state.filter = '${id}'; HubbleEditor.updateRender(); HubbleEditor.renderPanels('filters');" style="display: flex; flex-direction: column; align-items: center; gap: 6px; cursor: pointer; transition: all 0.2s; ${active}">
+            <div style="width: 100%; aspect-ratio: 1; border-radius: 12px; background: url('${mediaUrl}') center/cover; filter: ${cssFilter}; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.1);"></div>
+            <span style="font-size: 0.7rem; font-weight: 500;">${f}</span>
+          </div>
+        `;
+      });
+      html += `</div>`;
+    }
+    else if (activeTool === 'adjust') {
+      html += `<h4 style="margin: 0 0 16px 0; font-size: 1.1rem; display: flex; align-items: center; gap: 8px;"><i data-lucide="sliders" style="width: 18px; height: 18px; color: var(--primary);"></i> Adjust</h4>`;
+      html += `<div style="display: flex; flex-direction: column; gap: 16px; max-height: 400px; overflow-y: auto; padding-right: 12px;" class="custom-scrollbar">`;
+      
+      const sliders = [
+        { id: 'brightness', label: 'Brightness', min: 0, max: 200 },
+        { id: 'contrast', label: 'Contrast', min: 0, max: 200 },
+        { id: 'exposure', label: 'Exposure', min: 0, max: 200 },
+        { id: 'highlights', label: 'Highlights', min: 0, max: 200 },
+        { id: 'shadows', label: 'Shadows', min: 0, max: 200 },
+        { id: 'temperature', label: 'Temperature', min: -100, max: 100 },
+        { id: 'tint', label: 'Tint', min: -100, max: 100 },
+        { id: 'saturation', label: 'Saturation', min: 0, max: 200 },
+        { id: 'vibrance', label: 'Vibrance', min: 0, max: 200 },
+        { id: 'sharpness', label: 'Sharpness', min: 0, max: 100 },
+        { id: 'blur', label: 'Blur', min: 0, max: 20 },
+        { id: 'opacity', label: 'Opacity', min: 0, max: 100 }
+      ];
+      
+      sliders.forEach(s => {
+        const val = this.state.adjustments[s.id];
+        html += `
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <div style="display: flex; justify-content: space-between; font-size: 0.8rem;">
+              <span>${s.label}</span>
+              <span style="color: var(--primary); font-weight: 600;">${val}</span>
+            </div>
+            <input type="range" min="${s.min}" max="${s.max}" value="${val}" 
+              oninput="HubbleEditor.state.adjustments['${s.id}'] = this.value; HubbleEditor.updateRender(); this.previousElementSibling.lastElementChild.innerText = this.value;"
+              onchange="HubbleEditor.pushHistory();"
+              style="width: 100%; accent-color: var(--primary);">
+          </div>
+        `;
+      });
+      
+      html += `<button onclick="HubbleEditor.pushHistory(); Object.keys(HubbleEditor.state.adjustments).forEach(k => HubbleEditor.state.adjustments[k] = (k==='blur'?0:(k==='opacity'?100:100))); HubbleEditor.updateRender(); HubbleEditor.renderPanels('adjust');" style="margin-top: 12px; padding: 10px; border-radius: 8px; background: rgba(255,255,255,0.05); color: white; border: 1px solid rgba(255,255,255,0.1); cursor: pointer;">Reset All</button>`;
+      html += `</div>`;
+    }
+    else if (activeTool === 'rotate') {
+      html += `<h4 style="margin: 0 0 16px 0; font-size: 1.1rem; display: flex; align-items: center; gap: 8px;"><i data-lucide="rotate-cw" style="width: 18px; height: 18px; color: var(--primary);"></i> Rotate</h4>`;
+      html += `<div style="text-align: center; color: rgba(255,255,255,0.7); font-size: 0.9rem;">Rotated ${this.state.rotation}°</div>`;
+    }
+    else if (activeTool === 'crop') {
+      html += `<h4 style="margin: 0 0 16px 0; font-size: 1.1rem; display: flex; align-items: center; gap: 8px;"><i data-lucide="crop" style="width: 18px; height: 18px; color: var(--primary);"></i> Crop & Aspect</h4>`;
+      html += `<div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 24px;">`;
+      const ratios = ['Free', '1:1', '4:5', '3:4', '16:9', '9:16', '1080:1920'];
+      const labels = ['Free', '1:1', '4:5', '3:4', '16:9', '9:16', 'Story'];
+      ratios.forEach((r, i) => {
+        const active = this.tempCrop && this.tempCrop.aspect === r ? 'border: 2px solid var(--primary); background: rgba(168,85,247,0.1);' : 'border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05);';
+        html += `<button onclick="HubbleEditor.setCropAspect('${r}');" style="padding: 12px; border-radius: 12px; color: white; font-weight: 600; font-size: 0.9rem; cursor: pointer; ${active}">${labels[i]}</button>`;
+      });
+      html += `</div>`;
+      
+      html += `<div style="display: flex; flex-direction: column; gap: 12px;">`;
+      html += `<button onclick="HubbleEditor.exitCropMode(true)" style="padding: 12px; border-radius: 12px; background: var(--primary-gradient); color: white; font-weight: bold; border: none; cursor: pointer;">Apply Crop</button>`;
+      html += `<button onclick="HubbleEditor.tempCrop = { x: 0, y: 0, width: 100, height: 100, aspect: 'Free' }; HubbleEditor.renderCropHandles(); HubbleEditor.renderPanels('crop');" style="padding: 12px; border-radius: 12px; background: rgba(255,255,255,0.1); color: white; font-weight: bold; border: none; cursor: pointer;">Reset Crop</button>`;
+      html += `<button onclick="HubbleEditor.exitCropMode(false)" style="padding: 12px; border-radius: 12px; background: transparent; border: 1px solid rgba(255,255,255,0.2); color: white; font-weight: bold; cursor: pointer;">Cancel</button>`;
+      html += `</div>`;
+    }
+    else if (activeTool === 'stickers') {
+      html += `<h4 style="margin: 0 0 16px 0; font-size: 1.1rem; display: flex; align-items: center; gap: 8px;"><i data-lucide="sticker" style="width: 18px; height: 18px; color: var(--primary);"></i> Stickers</h4>`;
+      html += `<div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; max-height: 400px; overflow-y: auto;" class="custom-scrollbar">`;
+      
+      const emojiStickers = ['🔥', '✨', '❤️', '🎉', '🚀', '💯', '😂', '😍', '🎂', '✈️', '🌴', '💎', '👑', '🌈', '⚡️', '🌟'];
+      
+      emojiStickers.forEach(e => {
+        html += `<div onclick="HubbleEditor.addLayer('text', '${e}', { size: 80 });" style="font-size: 32px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.2)'" onmouseout="this.style.transform='scale(1)'">${e}</div>`;
+      });
+      
+      html += `</div>`;
+    }
+    else if (activeTool === 'text') {
+      html += `<h4 style="margin: 0 0 16px 0; font-size: 1.1rem; display: flex; align-items: center; gap: 8px;"><i data-lucide="type" style="width: 18px; height: 18px; color: var(--primary);"></i> Text</h4>`;
+      
+      html += `
+        <div style="display: flex; flex-direction: column; gap: 12px;">
+          <input type="text" id="he-text-input" placeholder="Enter text..." style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.2); color: white; outline: none; font-family: inherit;">
+          
+          <div style="display: flex; justify-content: space-between;">
+            <input type="color" id="he-text-color" value="#ffffff" style="width: 40px; height: 40px; border: none; border-radius: 8px; cursor: pointer; background: transparent; padding: 0;">
+            <select id="he-text-font" style="flex: 1; margin-left: 12px; padding: 0 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.2); color: white; outline: none; -webkit-appearance: none; font-family: inherit;">
+              <option value="inherit">Default</option>
+              <option value="Arial, sans-serif">Arial</option>
+              <option value="'Times New Roman', serif">Serif</option>
+              <option value="'Courier New', monospace">Monospace</option>
+            </select>
+          </div>
+          
+          <div style="display: flex; gap: 8px;">
+            <button onclick="this.classList.toggle('active-style');" id="he-text-bold" style="flex: 1; padding: 8px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: white; font-weight: bold; cursor: pointer;">B</button>
+            <button onclick="this.classList.toggle('active-style');" id="he-text-italic" style="flex: 1; padding: 8px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: white; font-style: italic; cursor: pointer;">I</button>
+            <button onclick="this.classList.toggle('active-style');" id="he-text-shadow" style="flex: 1; padding: 8px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: white; text-shadow: 0 2px 5px black; cursor: pointer;">S</button>
+          </div>
+
+          <button onclick="
+            const t = document.getElementById('he-text-input').value;
+            if(!t) return;
+            HubbleEditor.addLayer('text', t, {
+              color: document.getElementById('he-text-color').value,
+              font: document.getElementById('he-text-font').value,
+              bold: document.getElementById('he-text-bold').classList.contains('active-style'),
+              italic: document.getElementById('he-text-italic').classList.contains('active-style'),
+              shadow: document.getElementById('he-text-shadow').classList.contains('active-style'),
+              size: 32
+            });
+            document.getElementById('he-text-input').value = '';
+          " style="padding: 12px; border-radius: 12px; background: var(--primary-gradient); border: none; color: white; font-weight: 600; cursor: pointer;">Add Text</button>
+        </div>
+      `;
+    }
+    html += `</div>`;
+    container.innerHTML = html;
+    if (window.lucide) window.lucide.createIcons();
+  }
+};
+
+// Initialize after DOM loads
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
+  setTimeout(() => window.HubbleEditor.init(), 500);
+} else {
+  document.addEventListener('DOMContentLoaded', () => setTimeout(() => window.HubbleEditor.init(), 500));
+}
