@@ -9190,9 +9190,12 @@ body.review-hubbs-view-active .main-content {
 .review-validation-modal-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
+  width: 100vw;
+  height: 100vh;
   background: rgba(0,0,0,0.6);
-  backdrop-filter: blur(8px);
-  z-index: 9999;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  z-index: 2147483647 !important;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -9220,10 +9223,20 @@ body.review-hubbs-view-active .main-content {
 .review-validation-modal-overlay.active .review-validation-modal {
   transform: scale(1);
 }
+.review-validation-modal h3 { color: #ffffff; }
+.review-validation-modal p { color: rgba(255,255,255,0.7); }
 .light-theme .review-validation-modal {
   background: rgba(255,255,255,0.95);
   border: 1px solid rgba(130, 80, 255, 0.15);
   box-shadow: 0 20px 50px rgba(125, 80, 255, 0.15);
 }
+.light-theme .review-validation-modal-overlay {
+  background: rgba(255,255,255,0.4);
+}
 .light-theme .review-validation-modal h3 { color: #1F1235; }
 .light-theme .review-validation-modal p { color: #65617C; }
+.light-theme #rv-cancel-btn {
+  color: #1F1235 !important;
+  border-color: rgba(31,18,53,0.15) !important;
+  background: rgba(31,18,53,0.05) !important;
+}

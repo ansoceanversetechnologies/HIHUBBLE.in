@@ -8541,8 +8541,8 @@ function showValidationModal() {
     
     overlay.innerHTML = `
       <div class="review-validation-modal">
-        <h3 style="margin: 0 0 8px 0; font-size: 1.5rem; color: #fff; font-weight: 700;">No HUBB Selected</h3>
-        <p style="margin: 0 0 24px 0; color: rgba(255,255,255,0.7); font-size: 0.95rem;">Please select at least one photo or video before continuing.</p>
+        <h3 style="margin: 0 0 8px 0; font-size: 1.5rem; font-weight: 700;">No HUBB Selected</h3>
+        <p style="margin: 0 0 24px 0; font-size: 0.95rem;">Please select at least one photo or video before continuing.</p>
         <div style="display: flex; gap: 12px; justify-content: center;">
           <button id="rv-cancel-btn" style="padding: 10px 24px; border-radius: 8px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.1); color: #fff; font-weight: 600; cursor: pointer; transition: all 0.2s;">Cancel</button>
           <button id="rv-upload-btn" style="padding: 10px 24px; border-radius: 8px; background: linear-gradient(135deg, var(--primary) 0%, #a855f7 100%); border: none; color: white; font-weight: 600; cursor: pointer; box-shadow: 0 4px 12px rgba(168,85,247,0.3); transition: all 0.2s;">Upload Media</button>
@@ -8940,6 +8940,13 @@ window.HubbleEditor = {
           b.style.background = 'rgba(255,255,255,0.05)';
           b.style.borderColor = 'rgba(255,255,255,0.1)';
           b.style.boxShadow = 'none';
+          b.style.color = 'var(--text-main)';
+          const span = b.nextElementSibling;
+          if(span) {
+             span.style.color = 'var(--text-muted)';
+             span.style.fontWeight = 'normal';
+             span.style.textShadow = 'none';
+          }
         });
         
         // Add active to current
@@ -8947,13 +8954,196 @@ window.HubbleEditor = {
         btn.style.background = 'rgba(168, 85, 247, 0.2)';
         btn.style.borderColor = 'rgba(168, 85, 247, 0.5)';
         btn.style.boxShadow = '0 4px 15px rgba(168, 85, 247, 0.4), inset 0 0 10px rgba(168, 85, 247, 0.2)';
+        btn.style.color = 'var(--primary)';
+        const activeSpan = btn.nextElementSibling;
+        if(activeSpan) {
+           activeSpan.style.color = 'var(--primary)';
+           activeSpan.style.fontWeight = '600';
+           activeSpan.style.textShadow = '0 0 10px rgba(168, 85, 247, 0.3)';
+        }
 
-        this.openTool(tools[index]);
+        if (tools[index] === 'text' && HubbleEditor.activeSelectedLayerId) {
+            this.openTextTool(HubbleEditor.activeSelectedLayerId);
+        } else {
+            this.openTool(tools[index]);
+        }
       };
     });
   },
 
+  // Live Text Editor State
+  textState: { text: '', color: '#ffffff', font: 'inherit', bold: false, italic: false, layerId: null },
+
+  openTextTool(layerId = null) {
+      if (layerId) {
+          const layer = this.state.layers.find(l => l.id === layerId);
+          if (layer) {
+             this.textState = {
+                text: layer.content,
+                color: layer.styles.color || '#ffffff',
+                font: layer.styles.font || 'inherit',
+                bold: !!layer.styles.bold,
+                italic: !!layer.styles.italic,
+                layerId: layer.id
+             };
+          }
+      } else {
+          this.textState = { text: '', color: '#ffffff', font: 'inherit', bold: false, italic: false, layerId: null };
+      }
+      
+      const buttons = document.querySelectorAll('.ch-image-tools .ch-premium-tool-btn');
+      buttons.forEach((b, i) => {
+         if(i === 5) { 
+            b.classList.add('active');
+            b.style.background = 'rgba(168, 85, 247, 0.2)';
+            b.style.borderColor = 'rgba(168, 85, 247, 0.5)';
+            b.style.boxShadow = '0 4px 15px rgba(168, 85, 247, 0.4), inset 0 0 10px rgba(168, 85, 247, 0.2)';
+            b.style.color = 'var(--primary)';
+            const activeSpan = b.nextElementSibling;
+            if(activeSpan) {
+               activeSpan.style.color = 'var(--primary)';
+               activeSpan.style.fontWeight = '600';
+               activeSpan.style.textShadow = '0 0 10px rgba(168, 85, 247, 0.3)';
+            }
+         } else {
+            b.classList.remove('active');
+            b.style.background = 'rgba(255,255,255,0.05)';
+            b.style.borderColor = 'rgba(255,255,255,0.1)';
+            b.style.boxShadow = 'none';
+            b.style.color = 'var(--text-main)';
+            const span = b.nextElementSibling;
+            if(span) {
+               span.style.color = 'var(--text-muted)';
+               span.style.fontWeight = 'normal';
+               span.style.textShadow = 'none';
+            }
+         }
+      });
+      
+      this.openTool('text');
+  },
+
+  updateLiveTextColor(color) {
+      this.textState.color = color;
+      this.updateLiveText();
+      
+      const colorInput = document.getElementById('he-text-color-picker');
+      if (colorInput) colorInput.value = color;
+      
+      const hiddenInput = document.getElementById('he-text-color');
+      if (hiddenInput) hiddenInput.value = color;
+      
+      const swatches = document.querySelectorAll('.he-color-swatch');
+      swatches.forEach(s => {
+         if (s.dataset.color.toLowerCase() === color.toLowerCase()) {
+             s.style.border = '2px solid var(--primary, #a855f7)';
+         } else {
+             s.style.border = '2px solid rgba(255,255,255,0.1)';
+         }
+      });
+  },
+
+  toggleTextFormat(type) {
+      if (type === 'bold') {
+          this.textState.bold = !this.textState.bold;
+          const btn = document.getElementById('he-text-bold');
+          if (btn) {
+             btn.style.border = this.textState.bold ? '1px solid var(--primary, #a855f7)' : '1px solid rgba(255,255,255,0.1)';
+             btn.style.background = this.textState.bold ? 'rgba(168,85,247,0.2)' : 'rgba(255,255,255,0.05)';
+          }
+      }
+      if (type === 'italic') {
+          this.textState.italic = !this.textState.italic;
+          const btn = document.getElementById('he-text-italic');
+          if (btn) {
+             btn.style.border = this.textState.italic ? '1px solid var(--primary, #a855f7)' : '1px solid rgba(255,255,255,0.1)';
+             btn.style.background = this.textState.italic ? 'rgba(168,85,247,0.2)' : 'rgba(255,255,255,0.05)';
+          }
+      }
+      this.updateLiveText();
+  },
+
+  updateLiveText() {
+      const input = document.getElementById('he-text-input');
+      const font = document.getElementById('he-text-font');
+      
+      if (!input || !font) return;
+
+      this.textState.text = input.value;
+      this.textState.font = font.value;
+      
+      let layerToUpdate = null;
+      let shouldRender = false;
+      
+      if (this.textState.text.trim() !== '') {
+          if (this.textState.layerId) {
+             const layer = this.state.layers.find(l => l.id === this.textState.layerId);
+             if (layer) {
+                layer.content = this.textState.text;
+                layer.styles = { ...layer.styles, color: this.textState.color, font: this.textState.font, bold: this.textState.bold, italic: this.textState.italic };
+                layerToUpdate = layer;
+             }
+          } else {
+             const id = Date.now();
+             this.textState.layerId = id;
+             this.state.layers.push({
+               id, type: 'text', content: this.textState.text, x: 50, y: 50, rotation: 0, scale: 1, zIndex: this.state.layers.length + 10,
+               styles: { color: this.textState.color, font: this.textState.font, bold: this.textState.bold, italic: this.textState.italic, size: 32 }
+             });
+             this.activeSelectedLayerId = id;
+             shouldRender = true;
+          }
+      } else {
+          if (this.textState.layerId) {
+             this.state.layers = this.state.layers.filter(l => l.id !== this.textState.layerId);
+             this.textState.layerId = null;
+             this.activeSelectedLayerId = null;
+             shouldRender = true;
+          }
+      }
+      
+      if (shouldRender) {
+          this.updateRender();
+      } else if (layerToUpdate) {
+          // Fast DOM update for color, font, typing
+          const interactionLayer = document.getElementById('he-interaction-layer');
+          if (interactionLayer) {
+              const el = Array.from(interactionLayer.children).find(child => child.dataset.layerId == layerToUpdate.id);
+              if (el && el.firstElementChild) {
+                  const textDiv = el.firstElementChild;
+                  textDiv.style.color = layerToUpdate.styles.color || 'white';
+                  textDiv.style.fontFamily = layerToUpdate.styles.font || 'inherit';
+                  textDiv.style.fontWeight = layerToUpdate.styles.bold ? 'bold' : 'normal';
+                  textDiv.style.fontStyle = layerToUpdate.styles.italic ? 'italic' : 'normal';
+                  textDiv.textContent = layerToUpdate.content;
+              }
+          }
+      }
+
+      const btn = document.getElementById('he-text-add-btn');
+      if (btn) {
+         const hasText = this.textState.text.trim().length > 0;
+         btn.style.background = hasText ? 'linear-gradient(135deg, var(--primary, #a855f7) 0%, #7e22ce 100%)' : 'rgba(255,255,255,0.1)';
+         btn.style.boxShadow = hasText ? '0 8px 20px rgba(168,85,247,0.3)' : 'none';
+         btn.style.color = hasText ? 'white' : 'rgba(255,255,255,0.4)';
+         btn.style.cursor = hasText ? 'pointer' : 'not-allowed';
+         btn.style.pointerEvents = hasText ? 'all' : 'none';
+         const isExisting = this.textState.layerId && this.history && this.history.length > 0 && this.history.some(h => h.layers.some(l => l.id === this.textState.layerId));
+         btn.innerText = isExisting ? 'Update Text' : 'Add Text';
+      }
+  },
+
+  commitLiveText() {
+      if (!this.textState.text.trim()) return;
+      this.pushHistory();
+      this.textState = { text: '', color: '#ffffff', font: 'inherit', bold: false, italic: false, layerId: null };
+      this.renderPanels('text');
+  },
+
   openTool(toolName) {
+    if (toolName === 'text' && (!this.textState || this.textState.layerId === null)) {
+       this.textState = { text: '', color: '#ffffff', font: 'inherit', bold: false, italic: false, layerId: null };
+    }
     this.openCanvas();
     this.renderPanels(toolName);
     
@@ -9245,33 +9435,114 @@ window.HubbleEditor = {
     }
   },
 
-  buildCSSFilterString() {
-    const adj = this.state.adjustments;
-    let str = `brightness(${adj.brightness}%) contrast(${adj.contrast}%) saturate(${adj.saturation}%) blur(${adj.blur}px) opacity(${adj.opacity}%)`;
+  buildCSSFilterString(overrideFilter = null, overrideAdjustments = null) {
+    const activeFilter = overrideFilter !== null ? overrideFilter : this.state.filter;
+    const adj = overrideAdjustments !== null ? overrideAdjustments : this.state.adjustments;
     
-    // Apply preset filters
-    const filters = {
-      'bright': ' brightness(120%) contrast(110%)',
-      'warm': ' sepia(30%) saturate(140%) hue-rotate(-10deg)',
-      'cool': ' saturate(120%) hue-rotate(10deg)',
-      'vintage': ' sepia(50%) contrast(120%)',
-      'black & white': ' grayscale(100%)',
-      'hdr': ' contrast(130%) saturate(120%) brightness(110%)',
-      'cinematic': ' contrast(120%) saturate(80%) sepia(20%) hue-rotate(-5deg)',
-      'soft': ' blur(1px) contrast(90%) brightness(105%)',
-      'dream': ' blur(2px) saturate(150%) brightness(110%)',
-      'purple glow': ' hue-rotate(45deg) saturate(130%) brightness(110%)',
-      'cool blue': ' hue-rotate(20deg) saturate(110%) contrast(105%)',
-      'sepia': ' sepia(100%)',
-      'vivid': ' saturate(200%) contrast(110%)',
-      'mono': ' grayscale(100%) contrast(120%)'
+    const filterPresets = {
+      'original': {},
+      'bright': { brightness: 10, contrast: 10, saturation: 10 },
+      'warm': { temperature: 30, saturation: 10 },
+      'cool': { temperature: -30, tint: 10 },
+      'vintage': { saturation: -20, temperature: 40, shadows: 20, contrast: -10, exposure: 10 },
+      'black & white': { saturation: -100, contrast: 20 },
+      'hdr': { contrast: 20, sharpness: 40, shadows: 30, highlights: -20, saturation: 15 },
+      'cinematic': { saturation: -15, contrast: 10, temperature: 10, tint: -10, shadows: -10 },
+      'soft': { contrast: -15, sharpness: -20, brightness: 5 },
+      'dream': { brightness: 10, saturation: 15, blur: 2, contrast: -10 },
+      'purple glow': { tint: 40, temperature: 20, saturation: 20 },
+      'cool blue': { temperature: -30, shadows: 15, contrast: 10 },
+      'sepia': { temperature: 50, tint: 15, saturation: -40 },
+      'vivid': { saturation: 40, contrast: 10 },
+      'mono': { saturation: -100, contrast: 15 }
     };
+
+    const preset = filterPresets[activeFilter] || {};
     
-    if (this.state.filter !== 'original' && filters[this.state.filter]) {
-      str += filters[this.state.filter];
+    const getVal = (key, defaultVal) => {
+       const manualVal = adj[key] !== undefined ? Number(adj[key]) : defaultVal;
+       const manualDelta = manualVal - defaultVal;
+       const presetDelta = preset[key] || 0;
+       return defaultVal + presetDelta + manualDelta;
+    };
+
+    const p = {
+       brightness: getVal('brightness', 100),
+       contrast: getVal('contrast', 100),
+       exposure: getVal('exposure', 100),
+       highlights: getVal('highlights', 100),
+       shadows: getVal('shadows', 100),
+       temperature: getVal('temperature', 0),
+       tint: getVal('tint', 0),
+       saturation: getVal('saturation', 100),
+       vibrance: getVal('vibrance', 100),
+       sharpness: getVal('sharpness', 0),
+       blur: getVal('blur', 0),
+       opacity: getVal('opacity', 100)
+    };
+
+    const totalSaturate = Math.max(0, p.saturation + (p.vibrance - 100) * 0.5);
+
+    let tableValuesStr = "";
+    for (let i = 0; i <= 15; i++) {
+       let x = i / 15.0;
+       let y = x * (p.exposure / 100);
+
+       let shadowDelta = (p.shadows - 100) / 100; 
+       if (x < 0.5) y += shadowDelta * (0.5 - x);
+
+       let highlightDelta = (p.highlights - 100) / 100; 
+       if (x > 0.5) y += highlightDelta * (x - 0.5);
+
+       y += (p.brightness - 100) / 100;
+       y = (y - 0.5) * (p.contrast / 100) + 0.5;
+
+       y = Math.max(0, Math.min(1, y));
+       tableValuesStr += y.toFixed(3) + " ";
     }
+    let tableValues = tableValuesStr.trim();
+
+    let temp = p.temperature / 100;
+    let tint = p.tint / 100;
     
-    return str;
+    let rMult = 1 + temp * 0.2 + tint * 0.1;
+    let gMult = 1 - tint * 0.2;
+    let bMult = 1 - temp * 0.2 + tint * 0.1;
+
+    let colorMatrix = `
+       ${rMult} 0 0 0 0
+       0 ${gMult} 0 0 0
+       0 0 ${bMult} 0 0
+       0 0 0 1 0
+    `;
+
+    let s = p.sharpness / 100; 
+    s = Math.max(-0.5, Math.min(2, s));
+    let center = 1 + 4 * s;
+    let edge = -s;
+    let kernelMatrix = `
+       0 ${edge} 0
+       ${edge} ${center} ${edge}
+       0 ${edge} 0
+    `;
+
+    let svg = `
+       <svg xmlns="http://www.w3.org/2000/svg">
+          <filter id="f">
+             <feComponentTransfer>
+                <feFuncR type="table" tableValues="${tableValues}" />
+                <feFuncG type="table" tableValues="${tableValues}" />
+                <feFuncB type="table" tableValues="${tableValues}" />
+             </feComponentTransfer>
+             <feColorMatrix type="matrix" values="${colorMatrix}" />
+             ${s !== 0 ? `<feConvolveMatrix order="3" kernelMatrix="${kernelMatrix}" preserveAlpha="true" />` : ''}
+          </filter>
+       </svg>
+    `;
+
+    const encodedSvg = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg.replace(/\s+/g, ' ').trim());
+
+    return `url("${encodedSvg}#f") saturate(${totalSaturate}%) blur(${p.blur}px) opacity(${p.opacity}%)`;
   },
   addLayer(type, content, styles = {}) {
     this.pushHistory();
@@ -9322,6 +9593,7 @@ window.HubbleEditor = {
       }
       node.dataset.url = media.thumbUrl;
       node.style.cssText = 'width: 100%; height: 100%; object-fit: contain; transform-origin: center center; transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);';
+      node.draggable = false;
       mediaLayer.appendChild(node);
     }
     
@@ -9345,6 +9617,7 @@ window.HubbleEditor = {
     interactionLayer.innerHTML = '';
     this.state.layers.forEach((layer, idx) => {
       const el = document.createElement('div');
+      el.dataset.layerId = layer.id;
       el.style.cssText = `position: absolute; left: ${layer.x}%; top: ${layer.y}%; transform: translate(-50%, -50%) rotate(${layer.rotation}deg) scale(${layer.scale}); z-index: ${layer.zIndex}; pointer-events: all; cursor: grab;`;
       
       if (layer.type === 'text') {
@@ -9353,9 +9626,86 @@ window.HubbleEditor = {
         el.innerHTML = `<div style="font-size: ${layer.styles.size || 80}px; pointer-events: none;">${layer.content}</div>`;
       }
       
+      const isActive = HubbleEditor.activeSelectedLayerId === layer.id;
+      if (isActive) {
+          el.style.border = '2px dashed rgba(255,255,255,0.8)';
+          el.style.padding = '8px';
+          el.style.borderRadius = '12px';
+          const deleteBtn = document.createElement('div');
+          deleteBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+          deleteBtn.style.cssText = 'position: absolute; top: -14px; right: -14px; background: rgba(255,59,48,0.9); border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; cursor: pointer; pointer-events: all; box-shadow: 0 4px 10px rgba(0,0,0,0.3); z-index: 100;';
+          deleteBtn.onmousedown = (ev) => {
+              ev.stopPropagation();
+              HubbleEditor.pushHistory();
+              HubbleEditor.state.layers = HubbleEditor.state.layers.filter(l => l.id !== layer.id);
+              if (HubbleEditor.textState && HubbleEditor.textState.layerId === layer.id) {
+                  HubbleEditor.textState = { text: '', color: '#ffffff', font: 'inherit', bold: false, italic: false, layerId: null };
+                  HubbleEditor.renderPanels('text');
+              }
+              HubbleEditor.activeSelectedLayerId = null;
+              HubbleEditor.updateRender();
+          };
+          el.appendChild(deleteBtn);
+      } else {
+          el.style.border = 'none';
+          el.style.padding = '0';
+          el.style.borderRadius = '0';
+      }
+
+      el.ondblclick = (e) => {
+         e.stopPropagation();
+         if (layer.type === 'text') {
+             HubbleEditor.openTextTool(layer.id);
+         }
+      };
+      
       // Drag Logic
       el.onmousedown = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         let isDragging = true;
+        HubbleEditor.activeSelectedLayerId = layer.id;
+        
+        // Fast active state DOM update
+        Array.from(interactionLayer.children).forEach(child => {
+            if (child.dataset.layerId == layer.id) {
+                child.style.border = '2px dashed rgba(255,255,255,0.8)';
+                child.style.padding = '8px';
+                child.style.borderRadius = '12px';
+                if (!child.querySelector('.he-delete-btn')) {
+                    const deleteBtn = document.createElement('div');
+                    deleteBtn.className = 'he-delete-btn';
+                    deleteBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+                    deleteBtn.style.cssText = 'position: absolute; top: -14px; right: -14px; background: rgba(255,59,48,0.9); border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; cursor: pointer; pointer-events: all; box-shadow: 0 4px 10px rgba(0,0,0,0.3); z-index: 100;';
+                    deleteBtn.onmousedown = (ev) => {
+                        ev.stopPropagation();
+                        HubbleEditor.pushHistory();
+                        HubbleEditor.state.layers = HubbleEditor.state.layers.filter(l => l.id !== layer.id);
+                        if (HubbleEditor.textState && HubbleEditor.textState.layerId === layer.id) {
+                            HubbleEditor.textState = { text: '', color: '#ffffff', font: 'inherit', bold: false, italic: false, layerId: null };
+                            HubbleEditor.renderPanels('text');
+                        }
+                        HubbleEditor.activeSelectedLayerId = null;
+                        HubbleEditor.updateRender();
+                    };
+                    child.appendChild(deleteBtn);
+                }
+            } else {
+                child.style.border = 'none';
+                child.style.padding = '0';
+                child.style.borderRadius = '0';
+                const dBtn = child.querySelector('.he-delete-btn');
+                if (dBtn) dBtn.remove();
+            }
+        });
+        
+        if (layer.type === 'text') {
+            const isTextToolOpen = document.getElementById('he-text-input') !== null;
+            if (isTextToolOpen && HubbleEditor.textState && HubbleEditor.textState.layerId !== layer.id) {
+                HubbleEditor.openTextTool(layer.id);
+            }
+        }
+        
         let startX = e.clientX;
         let startY = e.clientY;
         const startLeft = layer.x;
@@ -9372,8 +9722,10 @@ window.HubbleEditor = {
           const dy = ((ev.clientY - startY) / rect.height) * 100;
           layer.x = startLeft + dx;
           layer.y = startTop + dy;
-          el.style.left = layer.x + '%';
-          el.style.top = layer.y + '%';
+          requestAnimationFrame(() => {
+              el.style.left = layer.x + '%';
+              el.style.top = layer.y + '%';
+          });
         };
         const up = () => {
           isDragging = false;
@@ -9387,6 +9739,24 @@ window.HubbleEditor = {
       
       interactionLayer.appendChild(el);
     });
+    
+    if (!interactionLayer.dataset.clickBound) {
+        interactionLayer.addEventListener('mousedown', (e) => {
+           if (e.target === interactionLayer) {
+               if (HubbleEditor.activeSelectedLayerId) {
+                   HubbleEditor.activeSelectedLayerId = null;
+                   Array.from(interactionLayer.children).forEach(child => {
+                       child.style.border = 'none';
+                       child.style.padding = '0';
+                       child.style.borderRadius = '0';
+                       const dBtn = child.querySelector('.he-delete-btn');
+                       if (dBtn) dBtn.remove();
+                   });
+               }
+           }
+        });
+        interactionLayer.dataset.clickBound = "true";
+    }
   },
 
   renderPanels(activeTool) {
@@ -9402,31 +9772,18 @@ window.HubbleEditor = {
       
       const filters = ['Original', 'Bright', 'Warm', 'Cool', 'Vintage', 'Black & White', 'HDR', 'Cinematic', 'Soft', 'Dream', 'Purple Glow', 'Cool Blue', 'Sepia', 'Vivid', 'Mono'];
       
-    const filterStyles = {
-      'bright': 'brightness(120%) contrast(110%)',
-      'warm': 'sepia(30%) saturate(140%) hue-rotate(-10deg)',
-      'cool': 'saturate(120%) hue-rotate(10deg)',
-      'vintage': 'sepia(50%) contrast(120%)',
-      'black & white': 'grayscale(100%)',
-      'hdr': 'contrast(130%) saturate(120%) brightness(110%)',
-      'cinematic': 'contrast(120%) saturate(80%) sepia(20%) hue-rotate(-5deg)',
-      'soft': 'blur(1px) contrast(90%) brightness(105%)',
-      'dream': 'blur(2px) saturate(150%) brightness(110%)',
-      'purple glow': 'hue-rotate(45deg) saturate(130%) brightness(110%)',
-      'cool blue': 'hue-rotate(20deg) saturate(110%) contrast(105%)',
-      'sepia': 'sepia(100%)',
-      'vivid': 'saturate(200%) contrast(110%)',
-      'mono': 'grayscale(100%) contrast(120%)'
-    };
+      const defaultAdjustments = {
+        brightness: 100, contrast: 100, exposure: 100, highlights: 100, shadows: 100,
+        temperature: 0, tint: 0, saturation: 100, vibrance: 100, sharpness: 0, blur: 0, opacity: 100
+      };
 
-      
       const media = window.chUploads[this.activeMediaIndex];
       const mediaUrl = media.thumbUrl || URL.createObjectURL(media.file);
 
       filters.forEach(f => {
         const id = f.toLowerCase();
         const active = this.state.filter === id ? 'border: 2px solid var(--primary); transform: scale(1.05);' : 'border: 2px solid transparent;';
-        const cssFilter = id === 'original' ? 'none' : filterStyles[id];
+        const cssFilter = this.buildCSSFilterString(id, defaultAdjustments);
         
         html += `
           <div onclick="HubbleEditor.pushHistory(); HubbleEditor.state.filter = '${id}'; HubbleEditor.updateRender(); HubbleEditor.renderPanels('filters');" style="display: flex; flex-direction: column; align-items: center; gap: 6px; cursor: pointer; transition: all 0.2s; ${active}">
@@ -9465,14 +9822,14 @@ window.HubbleEditor = {
               <span style="color: var(--primary); font-weight: 600;">${val}</span>
             </div>
             <input type="range" min="${s.min}" max="${s.max}" value="${val}" 
-              oninput="HubbleEditor.state.adjustments['${s.id}'] = this.value; HubbleEditor.updateRender(); this.previousElementSibling.lastElementChild.innerText = this.value;"
+              oninput="HubbleEditor.state.adjustments['${s.id}'] = Number(this.value); HubbleEditor.updateRender(); this.previousElementSibling.lastElementChild.innerText = this.value;"
               onchange="HubbleEditor.pushHistory();"
               style="width: 100%; accent-color: var(--primary);">
           </div>
         `;
       });
       
-      html += `<button onclick="HubbleEditor.pushHistory(); Object.keys(HubbleEditor.state.adjustments).forEach(k => HubbleEditor.state.adjustments[k] = (k==='blur'?0:(k==='opacity'?100:100))); HubbleEditor.updateRender(); HubbleEditor.renderPanels('adjust');" style="margin-top: 12px; padding: 10px; border-radius: 8px; background: rgba(255,255,255,0.05); color: white; border: 1px solid rgba(255,255,255,0.1); cursor: pointer;">Reset All</button>`;
+      html += `<button onclick="HubbleEditor.pushHistory(); HubbleEditor.state.filter = 'original'; HubbleEditor.state.adjustments = { brightness: 100, contrast: 100, exposure: 100, highlights: 100, shadows: 100, temperature: 0, tint: 0, saturation: 100, vibrance: 100, sharpness: 0, blur: 0, opacity: 100 }; HubbleEditor.updateRender(); HubbleEditor.renderPanels('adjust');" style="margin-top: 12px; padding: 10px; border-radius: 8px; background: rgba(255,255,255,0.05); color: white; border: 1px solid rgba(255,255,255,0.1); cursor: pointer;">Reset All</button>`;
       html += `</div>`;
     }
     else if (activeTool === 'rotate') {
@@ -9511,39 +9868,54 @@ window.HubbleEditor = {
     else if (activeTool === 'text') {
       html += `<h4 style="margin: 0 0 16px 0; font-size: 1.1rem; display: flex; align-items: center; gap: 8px;"><i data-lucide="type" style="width: 18px; height: 18px; color: var(--primary);"></i> Text</h4>`;
       
+      const colors = ['#ffffff', '#000000', '#888888', '#ff3b30', '#ff9500', '#ffcc00', '#4cd964', '#5ac8fa', '#007aff', '#5856d6', '#ff2d55'];
+      let currentColor = HubbleEditor.textState ? HubbleEditor.textState.color : '#ffffff';
+      let currentFont = HubbleEditor.textState ? HubbleEditor.textState.font : 'inherit';
+      let isBold = HubbleEditor.textState ? HubbleEditor.textState.bold : false;
+      let isItalic = HubbleEditor.textState ? HubbleEditor.textState.italic : false;
+      let textValue = HubbleEditor.textState ? HubbleEditor.textState.text : '';
+      let isExisting = HubbleEditor.textState && HubbleEditor.textState.layerId && HubbleEditor.history && HubbleEditor.history.length > 0 && HubbleEditor.history.some(h => h.layers.some(l => l.id === HubbleEditor.textState.layerId));
+
       html += `
-        <div style="display: flex; flex-direction: column; gap: 12px;">
-          <input type="text" id="he-text-input" placeholder="Enter text..." style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.2); color: white; outline: none; font-family: inherit;">
+        <div style="display: flex; flex-direction: column; gap: 16px;">
+          <input type="text" id="he-text-input" placeholder="Enter text..." value="${textValue.replace(/"/g, '&quot;')}" oninput="HubbleEditor.updateLiveText()" style="width: 100%; padding: 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.3); color: white; outline: none; font-size: 1rem;">
           
-          <div style="display: flex; justify-content: space-between;">
-            <input type="color" id="he-text-color" value="#ffffff" style="width: 40px; height: 40px; border: none; border-radius: 8px; cursor: pointer; background: transparent; padding: 0;">
-            <select id="he-text-font" style="flex: 1; margin-left: 12px; padding: 0 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.2); color: white; outline: none; -webkit-appearance: none; font-family: inherit;">
-              <option value="inherit">Default</option>
-              <option value="Arial, sans-serif">Arial</option>
-              <option value="'Times New Roman', serif">Serif</option>
-              <option value="'Courier New', monospace">Monospace</option>
-            </select>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+             <span style="font-size: 0.8rem; color: rgba(255,255,255,0.7);">Color</span>
+             <div style="display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px;" class="custom-scrollbar">
+               <input type="color" id="he-text-color-picker" value="${currentColor}" oninput="HubbleEditor.updateLiveTextColor(this.value)" style="width: 32px; height: 32px; flex-shrink: 0; border: 2px solid rgba(255,255,255,0.3); border-radius: 50%; cursor: pointer; background: transparent; padding: 0;">
+               ${colors.map(c => `<div class="he-color-swatch" data-color="${c}" onclick="HubbleEditor.updateLiveTextColor('${c}')" style="width: 32px; height: 32px; flex-shrink: 0; border-radius: 50%; background: ${c}; border: 2px solid ${currentColor === c ? 'var(--primary, #a855f7)' : 'rgba(255,255,255,0.1)'}; cursor: pointer; transition: all 0.2s;"></div>`).join('')}
+             </div>
+             <input type="hidden" id="he-text-color" value="${currentColor}">
           </div>
           
           <div style="display: flex; gap: 8px;">
-            <button onclick="this.classList.toggle('active-style');" id="he-text-bold" style="flex: 1; padding: 8px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: white; font-weight: bold; cursor: pointer;">B</button>
-            <button onclick="this.classList.toggle('active-style');" id="he-text-italic" style="flex: 1; padding: 8px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: white; font-style: italic; cursor: pointer;">I</button>
-            <button onclick="this.classList.toggle('active-style');" id="he-text-shadow" style="flex: 1; padding: 8px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: white; text-shadow: 0 2px 5px black; cursor: pointer;">S</button>
+            <button onclick="HubbleEditor.toggleTextFormat('bold')" id="he-text-bold" style="flex: 1; padding: 10px; border-radius: 8px; border: 1px solid ${isBold ? 'var(--primary, #a855f7)' : 'rgba(255,255,255,0.1)'}; background: ${isBold ? 'rgba(168,85,247,0.2)' : 'rgba(255,255,255,0.05)'}; color: white; font-weight: bold; cursor: pointer; transition: all 0.2s;">B</button>
+            <button onclick="HubbleEditor.toggleTextFormat('italic')" id="he-text-italic" style="flex: 1; padding: 10px; border-radius: 8px; border: 1px solid ${isItalic ? 'var(--primary, #a855f7)' : 'rgba(255,255,255,0.1)'}; background: ${isItalic ? 'rgba(168,85,247,0.2)' : 'rgba(255,255,255,0.05)'}; color: white; font-style: italic; cursor: pointer; transition: all 0.2s;">I</button>
+            
+            <div style="flex: 2; position: relative;">
+               <select id="he-text-font" onchange="HubbleEditor.updateLiveText()" style="width: 100%; height: 100%; padding: 0 12px; appearance: none; -webkit-appearance: none; background: var(--input-bg, rgba(255,255,255,0.05)); border: var(--input-border, 1px solid rgba(255,255,255,0.1)); border-radius: 8px; color: var(--text-main, #fff); cursor: pointer; outline: none; font-size: 0.9rem;">
+                  <option value="inherit" style="background: var(--card-bg, #151515); color: var(--text-main, #fff);" ${currentFont === 'inherit' ? 'selected' : ''}>Default</option>
+                  <option value="'Inter', sans-serif" style="background: var(--card-bg, #151515); color: var(--text-main, #fff);" ${currentFont === "'Inter', sans-serif" ? 'selected' : ''}>Inter</option>
+                  <option value="'Poppins', sans-serif" style="background: var(--card-bg, #151515); color: var(--text-main, #fff);" ${currentFont === "'Poppins', sans-serif" ? 'selected' : ''}>Poppins</option>
+                  <option value="'Montserrat', sans-serif" style="background: var(--card-bg, #151515); color: var(--text-main, #fff);" ${currentFont === "'Montserrat', sans-serif" ? 'selected' : ''}>Montserrat</option>
+                  <option value="'Roboto', sans-serif" style="background: var(--card-bg, #151515); color: var(--text-main, #fff);" ${currentFont === "'Roboto', sans-serif" ? 'selected' : ''}>Roboto</option>
+                  <option value="'Open Sans', sans-serif" style="background: var(--card-bg, #151515); color: var(--text-main, #fff);" ${currentFont === "'Open Sans', sans-serif" ? 'selected' : ''}>Open Sans</option>
+                  <option value="'Lato', sans-serif" style="background: var(--card-bg, #151515); color: var(--text-main, #fff);" ${currentFont === "'Lato', sans-serif" ? 'selected' : ''}>Lato</option>
+                  <option value="'Nunito', sans-serif" style="background: var(--card-bg, #151515); color: var(--text-main, #fff);" ${currentFont === "'Nunito', sans-serif" ? 'selected' : ''}>Nunito</option>
+                  <option value="'Playfair Display', serif" style="background: var(--card-bg, #151515); color: var(--text-main, #fff);" ${currentFont === "'Playfair Display', serif" ? 'selected' : ''}>Playfair Display</option>
+                  <option value="'Merriweather', serif" style="background: var(--card-bg, #151515); color: var(--text-main, #fff);" ${currentFont === "'Merriweather', serif" ? 'selected' : ''}>Merriweather</option>
+                  <option value="'Bebas Neue', sans-serif" style="background: var(--card-bg, #151515); color: var(--text-main, #fff);" ${currentFont === "'Bebas Neue', sans-serif" ? 'selected' : ''}>Bebas Neue</option>
+                  <option value="'Oswald', sans-serif" style="background: var(--card-bg, #151515); color: var(--text-main, #fff);" ${currentFont === "'Oswald', sans-serif" ? 'selected' : ''}>Oswald</option>
+                  <option value="'Raleway', sans-serif" style="background: var(--card-bg, #151515); color: var(--text-main, #fff);" ${currentFont === "'Raleway', sans-serif" ? 'selected' : ''}>Raleway</option>
+                  <option value="'Ubuntu', sans-serif" style="background: var(--card-bg, #151515); color: var(--text-main, #fff);" ${currentFont === "'Ubuntu', sans-serif" ? 'selected' : ''}>Ubuntu</option>
+                  <option value="'Quicksand', sans-serif" style="background: var(--card-bg, #151515); color: var(--text-main, #fff);" ${currentFont === "'Quicksand', sans-serif" ? 'selected' : ''}>Quicksand</option>
+               </select>
+               <div style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); pointer-events: none; color: var(--text-main, #fff); font-size: 10px;">▼</div>
+            </div>
           </div>
 
-          <button onclick="
-            const t = document.getElementById('he-text-input').value;
-            if(!t) return;
-            HubbleEditor.addLayer('text', t, {
-              color: document.getElementById('he-text-color').value,
-              font: document.getElementById('he-text-font').value,
-              bold: document.getElementById('he-text-bold').classList.contains('active-style'),
-              italic: document.getElementById('he-text-italic').classList.contains('active-style'),
-              shadow: document.getElementById('he-text-shadow').classList.contains('active-style'),
-              size: 32
-            });
-            document.getElementById('he-text-input').value = '';
-          " style="padding: 12px; border-radius: 12px; background: var(--primary-gradient); border: none; color: white; font-weight: 600; cursor: pointer;">Add Text</button>
+          <button id="he-text-add-btn" onclick="HubbleEditor.commitLiveText()" style="margin-top: 8px; padding: 14px; border-radius: 12px; background: ${textValue.trim() ? 'linear-gradient(135deg, var(--primary, #a855f7) 0%, #7e22ce 100%)' : 'rgba(255,255,255,0.1)'}; box-shadow: ${textValue.trim() ? '0 8px 20px rgba(168,85,247,0.3)' : 'none'}; border: 1px solid rgba(255,255,255,0.1); color: ${textValue.trim() ? 'white' : 'rgba(255,255,255,0.4)'}; font-weight: 600; cursor: ${textValue.trim() ? 'pointer' : 'not-allowed'}; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); pointer-events: ${textValue.trim() ? 'all' : 'none'};">${isExisting ? 'Update Text' : 'Add Text'}</button>
         </div>
       `;
     }

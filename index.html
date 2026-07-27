@@ -10,7 +10,8 @@
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&amp;family=Outfit:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&amp;family=Inter:wght@300;400;500;600;700&amp;family=Lato&amp;family=Merriweather&amp;family=Montserrat:wght@400;600&amp;family=Nunito&amp;family=Open+Sans&amp;family=Oswald&amp;family=Outfit:wght@400;500;600;700;800&amp;family=Playfair+Display&amp;family=Poppins:wght@400;600&amp;family=Quicksand&amp;family=Raleway&amp;family=Roboto:wght@400;700&amp;family=Ubuntu&amp;display=swap" rel="stylesheet">
+
 
   <!-- Lucide Icons -->
   <script src="https://unpkg.com/lucide@latest"></script>
@@ -517,10 +518,10 @@
                   <h4 class="ch-sub-title" style="margin-bottom: 12px; font-size: 0.95rem;">Image Tools</h4>
                   <div class="ch-image-tools" style="display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 12px 16px;">
                     <div class="ch-tool-container" style="display: flex; flex-direction: column; align-items: center; gap: 6px;">
-                      <button class="ch-premium-tool-btn active" style="width: 42px; height: 42px; border-radius: 12px; border: 1px solid rgba(168, 85, 247, 0.5); background: rgba(168, 85, 247, 0.2); box-shadow: 0 4px 15px rgba(168, 85, 247, 0.4), inset 0 0 10px rgba(168, 85, 247, 0.2); color: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;">
+                      <button class="ch-premium-tool-btn active" style="width: 42px; height: 42px; border-radius: 12px; border: 1px solid rgba(168, 85, 247, 0.5); background: rgba(168, 85, 247, 0.2); box-shadow: 0 4px 15px rgba(168, 85, 247, 0.4), inset 0 0 10px rgba(168, 85, 247, 0.2); color: var(--primary); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;">
                         <i data-lucide="aperture" style="width: 18px; height: 18px;"></i>
                       </button>
-                      <span style="font-size: 0.7rem; color: white; font-weight: 600; text-shadow: 0 0 10px rgba(168, 85, 247, 0.8);">Filters</span>
+                      <span style="font-size: 0.7rem; color: var(--primary); font-weight: 600; text-shadow: 0 0 10px rgba(168, 85, 247, 0.3);">Filters</span>
                     </div>
                     <div class="ch-tool-container" style="display: flex; flex-direction: column; align-items: center; gap: 6px;">
                       <button class="ch-premium-tool-btn" style="width: 42px; height: 42px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: var(--text-main); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;">
@@ -557,29 +558,8 @@
               </div>
 
               <!-- CENTER PANEL -->
-              <div class="ch-panel ch-center-panel" style="gap: 20px; z-index: 2;">
-                <h3 class="ch-panel-title" style="margin: 0; align-self: flex-start; position: relative; z-index: 3; font-size: 1.1rem;">Content Editor</h3>
-                
-                <!-- CAPTION SECTION -->
-                <div class="ch-editor-card" style="padding: 20px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; backdrop-filter: blur(16px);">
-                  <span class="ch-field-label" style="margin-bottom: 10px; display: block; font-weight: 500; font-size: 0.9rem;">Caption</span>
-                  <div class="ch-caption-input-wrapper" style="position: relative;">
-                    <textarea placeholder="#hubbing #launch" style="width: 100%; min-height: 100px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.05); border-radius: 12px; padding: 12px; color: white; resize: none; font-family: inherit; font-size: 0.85rem;"></textarea>
-                    <button class="ch-emoji-btn" style="position: absolute; bottom: 10px; right: 10px; background: transparent; border: none; color: var(--text-muted); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: color 0.2s;"><i data-lucide="smile" style="width: 18px; height: 18px;"></i></button>
-                  </div>
-                </div>
-
-                <!-- HUB SELECTOR -->
-                <div class="ch-editor-card" style="padding: 20px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; backdrop-filter: blur(16px);">
-                  <span class="ch-field-label" style="margin-bottom: 10px; display: block; font-weight: 500; font-size: 0.9rem;">Select Hubs</span>
-                  <div class="ch-hub-selector ch-dropdown" style="padding: 10px 14px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.05); border-radius: 12px; display: flex; justify-content: space-between; align-items: center; cursor: pointer;">
-                    <div class="ch-selected-hubs-inline" style="display: flex; gap: 8px;">
-                      <div class="ch-hub-tag" style="background: rgba(255,255,255,0.1); padding: 4px 12px; border-radius: 20px; font-size: 0.75rem; display: flex; align-items: center; gap: 6px;">Aesthetics <i data-lucide="x" style="width: 12px; height: 12px; cursor: pointer;"></i></div>
-                      <div class="ch-hub-tag" style="background: rgba(255,255,255,0.1); padding: 4px 12px; border-radius: 20px; font-size: 0.75rem; display: flex; align-items: center; gap: 6px;">Tech <i data-lucide="x" style="width: 12px; height: 12px; cursor: pointer;"></i></div>
-                    </div>
-                    <i data-lucide="chevron-down" style="color: var(--text-muted); width: 18px; height: 18px;"></i>
-                  </div>
-                </div>
+              <div class="ch-center-panel" style="display: flex; flex-direction: column; gap: 20px; z-index: 2; flex: 1;">
+                <h3 class="ch-panel-title" style="margin: 0; align-self: flex-start; position: relative; z-index: 3; font-size: 1.1rem; padding-left: 4px;">Content Editor</h3>
                 
                 <!-- SCHEDULING SECTION -->
                 <div class="ch-editor-card" style="padding: 20px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; backdrop-filter: blur(16px);">
