@@ -282,24 +282,34 @@ document.addEventListener('DOMContentLoaded', () => {
 
   window.renderDraftsList = async function() {
     const list = document.getElementById('ch-drafts-list');
+    const hddList = document.getElementById('hdd-list');
     const countLabel = document.getElementById('drafts-count');
     const emptyState = document.getElementById('drafts-empty-state');
+    const hddEmptyState = document.getElementById('hdd-empty-state');
     const seeAllBtn = document.getElementById('see-all-drafts-btn');
-    if (!list) return;
-
+    
     const drafts = await DraftsDB.getDrafts();
     if (countLabel) countLabel.innerText = drafts.length;
     
-    // Remove all current items except the empty state
-    Array.from(list.children).forEach(child => {
-      if (child.id !== 'drafts-empty-state') child.remove();
-    });
+    // Clear both lists (except empty states)
+    if (list) {
+      Array.from(list.children).forEach(child => {
+        if (child.id !== 'drafts-empty-state') child.remove();
+      });
+    }
+    if (hddList) {
+      Array.from(hddList.children).forEach(child => {
+        if (child.id !== 'hdd-empty-state') child.remove();
+      });
+    }
 
     if (drafts.length === 0) {
       if (emptyState) emptyState.style.display = 'flex';
+      if (hddEmptyState) hddEmptyState.style.display = 'flex';
       if (seeAllBtn) seeAllBtn.style.display = 'none';
     } else {
       if (emptyState) emptyState.style.display = 'none';
+      if (hddEmptyState) hddEmptyState.style.display = 'none';
       if (seeAllBtn) seeAllBtn.style.display = 'block';
       
       drafts.slice(0, 3).forEach(d => {
@@ -308,24 +318,60 @@ document.addEventListener('DOMContentLoaded', () => {
         const title = d.caption || 'Untitled HUBB';
         const imgUrl = d.mediaThumbUrl || URL.createObjectURL(d.mediaFile);
         
-        const item = document.createElement('div');
-        item.className = 'ch-draft-item';
-        item.style.cssText = 'display:flex; justify-content:space-between; align-items:center; background: rgba(255,255,255,0.03); padding: 8px; border-radius: 12px;';
-        
-        item.innerHTML = `
-          <div style="display:flex; gap:10px; align-items:center; cursor:pointer;" onclick="window.loadDraft('${d.id}')">
-            <img src="${imgUrl}" style="width:40px; height:40px; border-radius:8px; object-fit:contain; object-position:center;" alt="Draft">
-            <div class="ch-draft-info">
-              <div class="ch-draft-title" style="font-weight:600; font-size:0.85rem; max-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${title}</div>
-              <div class="ch-draft-time" style="color:var(--text-muted); font-size:0.75rem;">${timeStr}</div>
+        // Share HUBBs Panel Item
+        if (list) {
+          const item = document.createElement('div');
+          item.className = 'ch-draft-item';
+          item.style.cssText = 'display:flex; justify-content:space-between; align-items:center; background: rgba(255,255,255,0.03); padding: 8px; border-radius: 12px; transition: all 0.2s ease;';
+          item.innerHTML = `
+            <div style="display:flex; gap:10px; align-items:center; cursor:pointer;" onclick="window.loadDraft('${d.id}')">
+              <img src="${imgUrl}" style="width:40px; height:40px; border-radius:8px; object-fit:contain; object-position:center;" alt="Draft">
+              <div class="ch-draft-info">
+                <div class="ch-draft-title" style="font-weight:600; font-size:0.85rem; max-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-main);">${title}</div>
+                <div class="ch-draft-time" style="color:var(--text-muted); font-size:0.75rem;">${timeStr}</div>
+              </div>
             </div>
-          </div>
-          <div style="display: flex; gap: 4px;">
-            <button onclick="window.duplicateDraft('${d.id}')" style="background:transparent; border:none; color:white; padding:4px; cursor:pointer; opacity: 0.6;"><i data-lucide="copy" style="width:14px; height:14px;"></i></button>
-            <button onclick="window.deleteDraft('${d.id}')" style="background:transparent; border:none; color: #ef4444; padding:4px; cursor:pointer; opacity: 0.6;"><i data-lucide="trash-2" style="width:14px; height:14px;"></i></button>
-          </div>
-        `;
-        list.appendChild(item);
+            <div style="display: flex; gap: 4px;">
+              <button onclick="window.duplicateDraft('${d.id}')" style="background:transparent; border:none; color:var(--text-main); padding:4px; cursor:pointer; opacity: 0.6; transition: opacity 0.2s;"><i data-lucide="copy" style="width:14px; height:14px;"></i></button>
+              <button onclick="window.deleteDraft('${d.id}')" style="background:transparent; border:none; color: #ef4444; padding:4px; cursor:pointer; opacity: 0.6; transition: opacity 0.2s;"><i data-lucide="trash-2" style="width:14px; height:14px;"></i></button>
+            </div>
+          `;
+          list.appendChild(item);
+        }
+
+        // Home Dropdown Panel Item
+        if (hddList) {
+          const hItem = document.createElement('div');
+          hItem.className = 'ch-draft-item';
+          hItem.style.cssText = 'display:flex; justify-content:space-between; align-items:center; background: rgba(255,255,255,0.03); padding: 8px; border-radius: 12px; margin-bottom: 8px; cursor: pointer; transition: all 0.2s ease; border: 1px solid transparent;';
+          hItem.onclick = (e) => {
+            if (e.target.closest('button')) return; // Don't trigger load if clicking delete/duplicate
+            document.getElementById('home-drafts-panel')?.classList.remove('open');
+            window.loadDraft(d.id);
+          };
+          hItem.onmouseover = () => { hItem.style.transform = 'translateY(-2px)'; hItem.style.background = 'rgba(255,255,255,0.08)'; hItem.style.borderColor = 'rgba(168, 85, 247, 0.3)'; };
+          hItem.onmouseout = () => { hItem.style.transform = 'none'; hItem.style.background = 'rgba(255,255,255,0.03)'; hItem.style.borderColor = 'transparent'; };
+          const mediaCount = window.chUploads ? window.chUploads.length : 1;
+          hItem.innerHTML = `
+            <div style="display:flex; gap:12px; align-items:center;">
+              <div style="position: relative;">
+                <img src="${imgUrl}" style="width:48px; height:48px; border-radius:10px; object-fit:cover; object-position:center; box-shadow: 0 4px 12px rgba(0,0,0,0.3);" alt="Draft">
+                <div style="position: absolute; bottom: -4px; right: -4px; background: var(--primary); color: white; font-size: 0.6rem; font-weight: bold; padding: 2px 6px; border-radius: 10px; border: 2px solid rgba(20,20,25,1);">${mediaCount}</div>
+              </div>
+              <div class="ch-draft-info">
+                <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 2px;">
+                  <div class="ch-draft-title" style="font-weight:600; font-size:0.9rem; max-width: 130px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-main);">${title}</div>
+                  <span style="font-size: 0.6rem; background: rgba(255,255,255,0.1); color: var(--text-muted); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.05);">Draft</span>
+                </div>
+                <div class="ch-draft-time" style="color:var(--text-muted); font-size:0.75rem;">Saved ${timeStr}</div>
+              </div>
+            </div>
+            <div style="display: flex; gap: 4px;">
+              <button onclick="window.deleteDraft('${d.id}')" style="background:transparent; border:none; color: #ef4444; padding:8px; cursor:pointer; opacity: 0.8; transition: transform 0.2s;"><i data-lucide="trash-2" style="width:16px; height:16px;"></i></button>
+            </div>
+          `;
+          hddList.appendChild(hItem);
+        }
       });
       if (window.lucide) window.lucide.createIcons();
     }
@@ -389,6 +435,30 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => {
       window.renderDraftsList();
     }, 500);
+
+    // Setup Home Drafts Bubble Toggle
+    const draftsBtn = document.getElementById('story-drafts-container');
+    const draftsPanel = document.getElementById('home-drafts-panel');
+    const closeBtn = document.getElementById('close-hdd-btn');
+    if (draftsBtn && draftsPanel) {
+      draftsBtn.addEventListener('click', (e) => {
+        // Prevent toggling if clicking inside the panel
+        if (e.target.closest('#home-drafts-panel')) return;
+        draftsPanel.classList.toggle('open');
+      });
+    }
+    if (closeBtn) {
+      closeBtn.addEventListener('click', (e) => {
+        e.stopPropagation(); // prevent bubbling to container
+        if(draftsPanel) draftsPanel.classList.remove('open');
+      });
+    }
+    // Close dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+      if (draftsBtn && !draftsBtn.contains(e.target)) {
+        draftsPanel.classList.remove('open');
+      }
+    });
   });
 
   // --- TOAST HELPER ---
@@ -8468,15 +8538,20 @@ function initCreateHubbsUpload() {
 
       const rmBtn = document.createElement('button');
       rmBtn.className = 'ch-remove-media';
-      rmBtn.style.cssText = 'position: absolute; top: -6px; right: -6px; width: 22px; height: 22px; border-radius: 50%; background: #ff3b30; color: white; border: none; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.4); z-index: 10; padding: 0;';
+      rmBtn.style.cssText = 'position: absolute; top: -6px; right: -6px; width: 22px; height: 22px; border-radius: 50%; background: #ff3b30; color: white; border: none; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.4); z-index: 10; padding: 0; transition: transform 0.2s;';
       rmBtn.innerHTML = '<i data-lucide="x" style="width: 12px; height: 12px;"></i>';
+      rmBtn.onmouseover = () => { rmBtn.style.transform = 'scale(1.1)'; };
+      rmBtn.onmouseout = () => { rmBtn.style.transform = 'scale(1)'; };
       rmBtn.onclick = (e) => {
         e.stopPropagation();
-        window.chUploads.splice(index, 1);
-        if (item.type.startsWith('image/')) {
-          URL.revokeObjectURL(item.thumbUrl);
-        }
-        renderMediaPreviews();
+        previewEl.classList.add('exiting'); // Apply animation
+        setTimeout(() => {
+          window.chUploads.splice(index, 1);
+          if (item.type.startsWith('image/')) {
+            URL.revokeObjectURL(item.thumbUrl);
+          }
+          renderMediaPreviews();
+        }, 350); // wait for animation to complete
       };
       previewEl.appendChild(rmBtn);
 
@@ -8531,10 +8606,103 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
 // =========================================================================
 // REVIEW HUBBS - NAVIGATION & VALIDATION
 // =========================================================================
+window.toggleScheduling = function(checked) {
+  const row = document.getElementById('ch-schedule-datetime-row');
+  const dateInput = document.getElementById('ch-schedule-date');
+  const timeInput = document.getElementById('ch-schedule-time');
+  
+  if (checked) {
+    row.style.display = 'flex';
+    // Small delay to allow display:flex to apply before setting opacity for transition
+    setTimeout(() => {
+      row.style.opacity = '1';
+    }, 10);
+    
+    // Set default date/time to now + 1 hour if empty
+    if (!dateInput.value || !timeInput.value) {
+      const now = new Date();
+      now.setHours(now.getHours() + 1);
+      
+      const yyyy = now.getFullYear();
+      const mm = String(now.getMonth() + 1).padStart(2, '0');
+      const dd = String(now.getDate()).padStart(2, '0');
+      dateInput.value = `${yyyy}-${mm}-${dd}`;
+      
+      const hh = String(now.getHours()).padStart(2, '0');
+      const min = String(now.getMinutes()).padStart(2, '0');
+      timeInput.value = `${hh}:${min}`;
+    }
+  } else {
+    row.style.opacity = '0';
+    setTimeout(() => {
+      row.style.display = 'none';
+    }, 300);
+  }
+};
+
 window.handleReviewNavigation = function() {
   if (!window.chUploads || window.chUploads.length === 0) {
     showValidationModal();
     return;
+  }
+  
+  // Validate scheduling if enabled
+  const toggle = document.getElementById('ch-schedule-toggle');
+  let scheduledAtIso = null;
+  
+  if (toggle && toggle.checked) {
+    const dateVal = document.getElementById('ch-schedule-date').value;
+    const timeVal = document.getElementById('ch-schedule-time').value;
+    
+    if (!dateVal || !timeVal) {
+      if (window.showToast) window.showToast('Please select a valid date and time for scheduling.', 'error');
+      return;
+    }
+    
+    const scheduledTime = new Date(`${dateVal}T${timeVal}`);
+    if (isNaN(scheduledTime.getTime())) {
+      if (window.showToast) window.showToast('Invalid date or time selected.', 'error');
+      return;
+    }
+    
+    if (scheduledTime <= new Date()) {
+      if (window.showToast) window.showToast('Scheduled time must be in the future.', 'error');
+      return;
+    }
+    
+    scheduledAtIso = scheduledTime.toISOString();
+    window.chScheduledAt = scheduledAtIso; // Store for publish
+    
+    // Update Review Page Footer
+    const infoBox = document.getElementById('review-scheduled-info');
+    const infoText = document.getElementById('review-scheduled-text');
+    const pubText = document.getElementById('review-publish-text');
+    const pubIcon = document.getElementById('review-publish-icon');
+    
+    if (infoBox && infoText && pubText && pubIcon) {
+      infoBox.style.display = 'flex';
+      const formattedDate = scheduledTime.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      const formattedTime = scheduledTime.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+      infoText.innerText = `${formattedDate} at ${formattedTime}`;
+      
+      pubText.innerText = 'Schedule Hubb';
+      pubIcon.setAttribute('data-lucide', 'calendar-clock');
+      if (window.lucide) window.lucide.createIcons();
+    }
+  } else {
+    window.chScheduledAt = null;
+    
+    // Reset Review Page Footer
+    const infoBox = document.getElementById('review-scheduled-info');
+    const pubText = document.getElementById('review-publish-text');
+    const pubIcon = document.getElementById('review-publish-icon');
+    
+    if (infoBox && pubText && pubIcon) {
+      infoBox.style.display = 'none';
+      pubText.innerText = 'Publish Hubb';
+      pubIcon.setAttribute('data-lucide', 'upload-cloud');
+      if (window.lucide) window.lucide.createIcons();
+    }
   }
   
   // Navigate to review view
@@ -8760,7 +8928,7 @@ window.saveReviewDraft = function(btn) {
   }, 1000);
 };
 
-window.publishHubb = function() {
+window.publishHubb = async function() {
   if (!window.chUploads || window.chUploads.length === 0) {
     if (window.showValidationModal) window.showValidationModal();
     return;
@@ -8771,38 +8939,101 @@ window.publishHubb = function() {
   const caption = document.querySelector('.ch-caption-input')?.value || '';
   const filter = window.HubbleEditor.buildCSSFilterString();
   
-  const newStoryHTML = `
-    <div class="story-card has-story" onclick="window.openPublishedStory(this)">
-      <div class="story-avatar-container">
-        <img src="${url}" alt="My Story" style="filter: ${filter}; object-fit: contain; object-position: center;">
-      </div>
-      <span class="story-username">Your Story</span>
-      <template class="story-data">
-        ${JSON.stringify({
-          url: url,
-          type: media.type,
-          filter: filter,
-          rotation: window.HubbleEditor.state.rotation,
-          zoom: window.HubbleEditor.state.zoom || 1,
-          crop: window.HubbleEditor.state.crop,
-          layers: window.HubbleEditor.state.layers,
-          caption: caption,
-          collaborationEnabled: window.collaborationEnabled !== false,
-          collaboratorIds: window.collaborationEnabled !== false ? (window.selectedCollaborators || []).map(c => c._id || c.id) : [],
-          time: Date.now()
-        })}
-      </template>
-    </div>
-  `;
-  
-  const currentBtn = document.getElementById('story-btn-current');
-  if (currentBtn) {
-    currentBtn.insertAdjacentHTML('afterend', newStoryHTML);
+  const pubBtn = document.getElementById('review-publish-btn');
+  if (pubBtn) {
+    pubBtn.disabled = true;
+    pubBtn.style.opacity = '0.7';
+    pubBtn.innerHTML = '<i data-lucide="loader" class="animate-spin"></i> Processing...';
+    if (window.lucide) window.lucide.createIcons();
   }
   
-  if (window.showToast) window.showToast('Story published! 🚀');
+  if (window.chScheduledAt) {
+    // Scheduled HUBB - Send to backend
+    try {
+      const token = localStorage.getItem('invibe_jwt_token');
+      if (!token) {
+        if (window.showToast) window.showToast('Please log in to schedule a HUBB! 🔐', 'error');
+        throw new Error('No token');
+      }
+      
+      // Convert file to base64
+      const getBase64 = (file) => new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = error => reject(error);
+      });
+      
+      const base64Media = await getBase64(media.file);
+      
+      const API_URL = window.API_URL || '';
+      const res = await fetch(`${API_URL}/api/stories/schedule`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ 
+          mediaUrl: base64Media, 
+          mediaType: media.type || 'image',
+          scheduledAt: window.chScheduledAt 
+        })
+      });
+      
+      if (!res.ok) throw new Error('Failed to schedule HUBB');
+      
+      if (window.showToast) window.showToast('HUBB scheduled successfully! 🗓️✨');
+    } catch (err) {
+      console.error('Scheduling error:', err);
+      if (window.showToast) window.showToast('Failed to schedule HUBB.', 'error');
+      
+      if (pubBtn) {
+        pubBtn.disabled = false;
+        pubBtn.style.opacity = '1';
+        pubBtn.innerHTML = '<span id="review-publish-text">Schedule Hubb</span> <i id="review-publish-icon" data-lucide="calendar-clock" style="width: 18px; height: 18px;"></i>';
+        if (window.lucide) window.lucide.createIcons();
+      }
+      return;
+    }
+  } else {
+    // Non-scheduled HUBB - existing local flow
+    const newStoryHTML = `
+      <div class="story-card has-story" onclick="window.openPublishedStory(this)">
+        <div class="story-avatar-container">
+          <img src="${url}" alt="My Story" style="filter: ${filter}; object-fit: contain; object-position: center;">
+        </div>
+        <span class="story-username">Your Story</span>
+        <template class="story-data">
+          ${JSON.stringify({
+            url: url,
+            type: media.type,
+            filter: filter,
+            rotation: window.HubbleEditor.state.rotation,
+            zoom: window.HubbleEditor.state.zoom || 1,
+            crop: window.HubbleEditor.state.crop,
+            layers: window.HubbleEditor.state.layers,
+            caption: caption,
+            collaborationEnabled: window.collaborationEnabled !== false,
+            collaboratorIds: window.collaborationEnabled !== false ? (window.selectedCollaborators || []).map(c => c._id || c.id) : [],
+            time: Date.now()
+          })}
+        </template>
+      </div>
+    `;
+    
+    const currentBtn = document.getElementById('story-btn-current');
+    if (currentBtn) {
+      currentBtn.insertAdjacentHTML('afterend', newStoryHTML);
+    }
+    
+    if (window.showToast) window.showToast('Story published! 🚀');
+  }
   
   window.chUploads = [];
+  
+  if (pubBtn) {
+    pubBtn.disabled = false;
+    pubBtn.style.opacity = '1';
+    pubBtn.innerHTML = '<span id="review-publish-text">Publish Hubb</span> <i id="review-publish-icon" data-lucide="upload-cloud" style="width: 18px; height: 18px;"></i>';
+  }
+  
   setTimeout(() => {
     switchView('home');
     if (typeof initCreateHubbsUpload === 'function') initCreateHubbsUpload();
@@ -8885,6 +9116,9 @@ window.HubbleEditor = {
   state: {
     filter: 'original',
     rotation: 0,
+    zoom: 1,
+    panX: 0,
+    panY: 0,
     adjustments: {
       brightness: 100, contrast: 100, exposure: 100, highlights: 100, shadows: 100,
       temperature: 0, tint: 0, saturation: 100, vibrance: 100, sharpness: 0, blur: 0, opacity: 100
@@ -8912,7 +9146,24 @@ window.HubbleEditor = {
         <div style="position: absolute; top: 20px; right: 20px; display: flex; gap: 12px; z-index: 9995;">
           <button onclick="HubbleEditor.undo()" id="he-undo-btn" class="ch-premium-tool-btn" style="width: 40px; height: 40px; border-radius: 12px; background: rgba(255,255,255,0.1); color: white; border: none; cursor: pointer; opacity: 0.5; pointer-events: none;"><i data-lucide="undo" style="width: 18px; height: 18px;"></i></button>
           <button onclick="HubbleEditor.redo()" id="he-redo-btn" class="ch-premium-tool-btn" style="width: 40px; height: 40px; border-radius: 12px; background: rgba(255,255,255,0.1); color: white; border: none; cursor: pointer; opacity: 0.5; pointer-events: none;"><i data-lucide="redo" style="width: 18px; height: 18px;"></i></button>
-          <button onclick="HubbleEditor.pushHistory(); HubbleEditor.state.rotation = (HubbleEditor.state.rotation + 90) % 360; HubbleEditor.updateRender();" class="ch-premium-tool-btn" style="padding: 0 16px; height: 40px; border-radius: 12px; background: rgba(255,255,255,0.1); color: white; border: none; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px;"><i data-lucide="rotate-cw" style="width: 16px; height: 16px;"></i> Rotate 90&deg;</button>
+          
+          <div style="position: relative; display: flex; border-radius: 12px; background: rgba(255,255,255,0.1); box-shadow: 0 4px 12px rgba(0,0,0,0.2);">
+            <button onclick="HubbleEditor.pushHistory(); HubbleEditor.state.rotation = (HubbleEditor.state.rotation + 90) % 360; HubbleEditor.updateRender();" class="ch-premium-tool-btn" style="padding: 0 16px; height: 40px; border-radius: 12px 0 0 12px; background: transparent; color: white; border: none; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px;"><i data-lucide="rotate-cw" style="width: 16px; height: 16px;"></i> Rotate 90&deg;</button>
+            <div style="width: 1px; background: rgba(255,255,255,0.1); margin: 6px 0;"></div>
+            <button onclick="HubbleEditor.toggleManualRotate()" class="ch-premium-tool-btn" style="padding: 0 10px; height: 40px; border-radius: 0 12px 12px 0; background: transparent; color: white; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center;"><i data-lucide="chevron-down" style="width: 16px; height: 16px;"></i></button>
+            
+            <div id="he-manual-rotate-panel" class="he-manual-rotate-panel" style="display: none; position: absolute; top: 48px; right: 0; width: 280px; background: rgba(20,20,25,0.85); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.5); z-index: 9996; flex-direction: column;">
+               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                 <span style="font-size: 0.95rem; font-weight: 600; color: white;">Manual Rotate</span>
+                 <span id="he-manual-rotate-val" style="font-size: 0.85rem; color: var(--primary); font-weight: bold; background: rgba(168,85,247,0.15); padding: 4px 10px; border-radius: 8px; font-variant-numeric: tabular-nums;">0&deg;</span>
+               </div>
+               <input type="range" id="he-manual-rotate-slider" class="he-custom-slider" min="-180" max="180" value="0" oninput="HubbleEditor.onManualRotate(this.value)">
+               <div style="display: flex; gap: 12px; margin-top: 24px;">
+                 <button class="he-glass-btn he-cancel-btn" onclick="HubbleEditor.resetManualRotate()">Reset</button>
+                 <button class="he-premium-apply-btn" onclick="HubbleEditor.applyManualRotate()">Apply</button>
+               </div>
+            </div>
+          </div>
           <button onclick="HubbleEditor.closeCanvas()" class="ch-premium-tool-btn" style="padding: 0 20px; height: 40px; border-radius: 12px; background: linear-gradient(135deg, var(--primary) 0%, #a855f7 100%); color: white; border: none; font-weight: 600; cursor: pointer;">Done Editing</button>
         </div>
         
@@ -8933,6 +9184,134 @@ window.HubbleEditor = {
       `;
       document.body.appendChild(modal);
       if (window.lucide) window.lucide.createIcons();
+      
+      const overlay = document.getElementById('he-crop-overlay');
+      if (overlay) {
+        overlay.style.cursor = 'move';
+        
+        // Mouse Wheel Zoom
+        overlay.addEventListener('wheel', (e) => {
+          e.preventDefault();
+          const container = document.getElementById('he-render-container');
+          const rect = container.getBoundingClientRect();
+          
+          const mouseX = ((e.clientX - rect.left) / rect.width * 100) - 50;
+          const mouseY = ((e.clientY - rect.top) / rect.height * 100) - 50;
+          
+          const oldZoom = HubbleEditor.state.zoom || 1;
+          const zoomDelta = e.deltaY > 0 ? -0.05 : 0.05;
+          let newZoom = Math.max(0.5, Math.min(3, oldZoom + zoomDelta));
+          
+          if (newZoom !== oldZoom) {
+             HubbleEditor.state.panX = (HubbleEditor.state.panX || 0) - (mouseX - (HubbleEditor.state.panX || 0)) * (newZoom / oldZoom - 1);
+             HubbleEditor.state.panY = (HubbleEditor.state.panY || 0) - (mouseY - (HubbleEditor.state.panY || 0)) * (newZoom / oldZoom - 1);
+             HubbleEditor.setCropZoom(newZoom);
+          }
+        }, { passive: false });
+        
+        // Mouse Drag Pan
+        let isMousePanning = false;
+        let mousePanStartX, mousePanStartY, mouseInitialPanX, mouseInitialPanY;
+        
+        overlay.addEventListener('mousedown', (e) => {
+          isMousePanning = true;
+          mousePanStartX = e.clientX;
+          mousePanStartY = e.clientY;
+          mouseInitialPanX = HubbleEditor.state.panX || 0;
+          mouseInitialPanY = HubbleEditor.state.panY || 0;
+        });
+        
+        window.addEventListener('mousemove', (e) => {
+          if (isMousePanning) {
+            e.preventDefault();
+            const container = document.getElementById('he-render-container');
+            const rect = container.getBoundingClientRect();
+            const dx = ((e.clientX - mousePanStartX) / rect.width) * 100;
+            const dy = ((e.clientY - mousePanStartY) / rect.height) * 100;
+            
+            HubbleEditor.state.panX = mouseInitialPanX + dx;
+            HubbleEditor.state.panY = mouseInitialPanY + dy;
+            HubbleEditor.enforcePanConstraints();
+            HubbleEditor.updateRender();
+          }
+        });
+        
+        window.addEventListener('mouseup', () => { isMousePanning = false; });
+        
+        // Touch Zoom and Pan
+        let initialPinchDist = null;
+        let initialZoom = 1;
+        let initialPanX = 0, initialPanY = 0;
+        let initialPinchCenter = null;
+        let isTouchPanning = false;
+        let touchPanStartX, touchPanStartY;
+        
+        overlay.addEventListener('touchstart', (e) => {
+          if (e.touches.length === 2) {
+            e.preventDefault();
+            isTouchPanning = false;
+            const dx = e.touches[0].clientX - e.touches[1].clientX;
+            const dy = e.touches[0].clientY - e.touches[1].clientY;
+            initialPinchDist = Math.sqrt(dx*dx + dy*dy);
+            initialZoom = HubbleEditor.state.zoom || 1;
+            initialPanX = HubbleEditor.state.panX || 0;
+            initialPanY = HubbleEditor.state.panY || 0;
+            initialPinchCenter = {
+                x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+                y: (e.touches[0].clientY + e.touches[1].clientY) / 2
+            };
+          } else if (e.touches.length === 1) {
+            isTouchPanning = true;
+            touchPanStartX = e.touches[0].clientX;
+            touchPanStartY = e.touches[0].clientY;
+            initialPanX = HubbleEditor.state.panX || 0;
+            initialPanY = HubbleEditor.state.panY || 0;
+          }
+        }, { passive: false });
+        
+        overlay.addEventListener('touchmove', (e) => {
+          if (e.touches.length === 2 && initialPinchDist) {
+            e.preventDefault();
+            const dx = e.touches[0].clientX - e.touches[1].clientX;
+            const dy = e.touches[0].clientY - e.touches[1].clientY;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            const scale = dist / initialPinchDist;
+            let newZoom = Math.max(0.5, Math.min(3, initialZoom * scale));
+            
+            const container = document.getElementById('he-render-container');
+            const rect = container.getBoundingClientRect();
+            
+            const currentCenterX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+            const currentCenterY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+            
+            const panDeltaX = ((currentCenterX - initialPinchCenter.x) / rect.width) * 100;
+            const panDeltaY = ((currentCenterY - initialPinchCenter.y) / rect.height) * 100;
+            
+            const mouseX = ((initialPinchCenter.x - rect.left) / rect.width * 100) - 50;
+            const mouseY = ((initialPinchCenter.y - rect.top) / rect.height * 100) - 50;
+            
+            HubbleEditor.state.panX = initialPanX - (mouseX - initialPanX) * (newZoom / initialZoom - 1) + panDeltaX;
+            HubbleEditor.state.panY = initialPanY - (mouseY - initialPanY) * (newZoom / initialZoom - 1) + panDeltaY;
+            HubbleEditor.setCropZoom(newZoom);
+          } else if (e.touches.length === 1 && isTouchPanning) {
+            e.preventDefault();
+            const container = document.getElementById('he-render-container');
+            const rect = container.getBoundingClientRect();
+            const dx = ((e.touches[0].clientX - touchPanStartX) / rect.width) * 100;
+            const dy = ((e.touches[0].clientY - touchPanStartY) / rect.height) * 100;
+            
+            HubbleEditor.state.panX = initialPanX + dx;
+            HubbleEditor.state.panY = initialPanY + dy;
+            HubbleEditor.enforcePanConstraints();
+            HubbleEditor.updateRender();
+          }
+        }, { passive: false });
+        
+        overlay.addEventListener('touchend', (e) => {
+          if (e.touches.length < 2) initialPinchDist = null;
+          if (e.touches.length === 0) isTouchPanning = false;
+        });
+      }
     }
   },
 
@@ -9155,6 +9534,61 @@ window.HubbleEditor = {
       this.renderPanels('text');
   },
 
+  toggleManualRotate() {
+      const panel = document.getElementById('he-manual-rotate-panel');
+      if (!panel) return;
+      if (panel.style.display === 'none') {
+          let r = this.state.rotation % 360;
+          if (r > 180) r -= 360;
+          else if (r < -180) r += 360;
+          
+          const slider = document.getElementById('he-manual-rotate-slider');
+          if (slider) slider.value = r;
+          
+          const valEl = document.getElementById('he-manual-rotate-val');
+          if (valEl) valEl.innerText = Math.round(r) + '°';
+          
+          panel.style.display = 'flex';
+          panel.style.opacity = '0';
+          panel.style.transform = 'scale(0.95) translateY(-10px)';
+          requestAnimationFrame(() => {
+              panel.style.transition = 'all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1)';
+              panel.style.opacity = '1';
+              panel.style.transform = 'scale(1) translateY(0)';
+          });
+      } else {
+          panel.style.opacity = '0';
+          panel.style.transform = 'scale(0.95) translateY(-10px)';
+          setTimeout(() => { panel.style.display = 'none'; }, 200);
+      }
+  },
+  
+  onManualRotate(val) {
+      this.state.rotation = parseFloat(val);
+      const valEl = document.getElementById('he-manual-rotate-val');
+      if (valEl) valEl.innerText = Math.round(val) + '°';
+      this.updateRender();
+  },
+  
+  resetManualRotate() {
+      this.state.rotation = 0;
+      const slider = document.getElementById('he-manual-rotate-slider');
+      if (slider) slider.value = 0;
+      const valEl = document.getElementById('he-manual-rotate-val');
+      if (valEl) valEl.innerText = '0°';
+      this.updateRender();
+  },
+  
+  applyManualRotate() {
+      this.pushHistory();
+      const panel = document.getElementById('he-manual-rotate-panel');
+      if (panel) {
+          panel.style.opacity = '0';
+          panel.style.transform = 'scale(0.95) translateY(-10px)';
+          setTimeout(() => { panel.style.display = 'none'; }, 200);
+      }
+  },
+
   openTool(toolName) {
     if (toolName === 'text' && (!this.textState || this.textState.layerId === null)) {
        this.textState = { text: '', color: '#ffffff', font: 'inherit', bold: false, italic: false, layerId: null };
@@ -9230,6 +9664,43 @@ window.HubbleEditor = {
     this.renderPanels('crop'); // update buttons
   },
 
+  enforcePanConstraints() {
+    let crop = this.tempCrop || this.state.crop;
+    if (!crop) return;
+    let z = this.state.zoom || 1;
+    let { x, y, width, height } = crop;
+    
+    let minPanX = x + width - 50 - 50 * z;
+    let maxPanX = x - 50 + 50 * z;
+    if (minPanX > maxPanX) {
+       this.state.panX = (minPanX + maxPanX) / 2;
+    } else {
+       this.state.panX = Math.max(minPanX, Math.min(maxPanX, this.state.panX || 0));
+    }
+    
+    let minPanY = y + height - 50 - 50 * z;
+    let maxPanY = y - 50 + 50 * z;
+    if (minPanY > maxPanY) {
+       this.state.panY = (minPanY + maxPanY) / 2;
+    } else {
+       this.state.panY = Math.max(minPanY, Math.min(maxPanY, this.state.panY || 0));
+    }
+  },
+
+  setCropZoom(val) {
+    let z = Math.max(0.5, Math.min(3, val));
+    this.state.zoom = z;
+    
+    this.enforcePanConstraints();
+    
+    const slider = document.getElementById('he-zoom-slider');
+    if (slider) slider.value = z;
+    const valEl = document.getElementById('he-zoom-val');
+    if (valEl) valEl.innerText = Math.round(z * 100) + '%';
+    
+    this.updateRender();
+  },
+
   renderCropHandles() {
     const overlay = document.getElementById('he-crop-overlay');
     if (!overlay) return;
@@ -9246,8 +9717,7 @@ window.HubbleEditor = {
       height: ${this.tempCrop.height}%;
       border: 2px solid white;
       box-shadow: 0 0 0 9999px rgba(0,0,0,0.7);
-      cursor: move;
-      pointer-events: all;
+      pointer-events: none;
     `;
     
     const handlePositions = [
@@ -9268,6 +9738,7 @@ window.HubbleEditor = {
         width: 12px; height: 12px;
         background: white; border-radius: 50%;
         cursor: ${pos.cursor};
+        pointer-events: all;
         ${pos.top ? `top: ${pos.top};` : ''}
         ${pos.bottom ? `bottom: ${pos.bottom};` : ''}
         ${pos.left ? `left: ${pos.left};` : ''}
@@ -9277,7 +9748,6 @@ window.HubbleEditor = {
       box.appendChild(h);
     });
     
-    this.bindCropDrag(box, 'move');
     overlay.appendChild(box);
   },
 
@@ -9288,6 +9758,8 @@ window.HubbleEditor = {
       let startX = e.clientX;
       let startY = e.clientY;
       const startCrop = JSON.parse(JSON.stringify(this.tempCrop));
+      const startPanX = this.state.panX || 0;
+      const startPanY = this.state.panY || 0;
       
       const move = (ev) => {
         if (!isDragging) return;
@@ -9299,40 +9771,30 @@ window.HubbleEditor = {
         
         let { x, y, width, height, aspect } = startCrop;
         
-        if (type === 'move') {
-          x += dx; y += dy;
-        } else {
-          if (type.includes('l')) { x += dx; width -= dx; }
-          if (type.includes('r')) { width += dx; }
-          if (type.includes('t')) { y += dy; height -= dy; }
-          if (type.includes('b')) { height += dy; }
+        if (type.includes('l')) { x += dx; width -= dx; }
+        if (type.includes('r')) { width += dx; }
+        if (type.includes('t')) { y += dy; height -= dy; }
+        if (type.includes('b')) { height += dy; }
+        
+        if (aspect !== 'Free') {
+          const [wRatio, hRatio] = aspect.split(':').map(Number);
+          const targetRatio = wRatio / hRatio;
+          const containerRatio = rect.width / rect.height;
           
-          if (aspect !== 'Free') {
-            const [wRatio, hRatio] = aspect.split(':').map(Number);
-            const targetRatio = wRatio / hRatio;
-            const containerRatio = rect.width / rect.height;
-            
-            if (type.includes('l') || type.includes('r')) {
-               height = width * (containerRatio / targetRatio);
-               if(type.includes('t')) y = startCrop.y - (height - startCrop.height);
-            } else {
-               width = height * (targetRatio / containerRatio);
-               if(type.includes('l')) x = startCrop.x - (width - startCrop.width);
-            }
+          if (type.includes('l') || type.includes('r')) {
+             height = width * (containerRatio / targetRatio);
+             if(type.includes('t')) y = startCrop.y - (height - startCrop.height);
+          } else {
+             width = height * (targetRatio / containerRatio);
+             if(type.includes('l')) x = startCrop.x - (width - startCrop.width);
           }
         }
         
         // Clamp bounds
         if (x < 0) x = 0;
         if (y < 0) y = 0;
-        if (x + width > 100) {
-            if (type === 'move') x = 100 - width;
-            else width = 100 - x;
-        }
-        if (y + height > 100) {
-            if (type === 'move') y = 100 - height;
-            else height = 100 - y;
-        }
+        if (x + width > 100) { width = 100 - x; }
+        if (y + height > 100) { height = 100 - y; }
         
         width = Math.max(10, width);
         height = Math.max(10, height);
@@ -9615,7 +10077,7 @@ window.HubbleEditor = {
     // Apply Transforms, Filters & Zoom
     const node = mediaLayer.firstChild;
     node.style.filter = this.buildCSSFilterString();
-    node.style.transform = `rotate(${this.state.rotation}deg) scale(${this.state.zoom || 1})`;
+    node.style.transform = `translate(${this.state.panX || 0}%, ${this.state.panY || 0}%) rotate(${this.state.rotation}deg) scale(${this.state.zoom || 1})`;
     
     // Apply Crop Clip-Path to Media and Interaction Layers (but NOT the crop overlay)
     if (this.state.crop) {
@@ -9862,10 +10324,28 @@ window.HubbleEditor = {
       });
       html += `</div>`;
       
+      const currentZoom = this.state.zoom || 1;
+      const zoomPct = Math.round(currentZoom * 100);
+      html += `
+        <div class="he-zoom-panel" style="margin-bottom: 24px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 16px; border-radius: 16px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <span style="font-size: 0.9rem; color: rgba(255,255,255,0.8); font-weight: 600;"><i data-lucide="zoom-in" style="width: 14px; height: 14px; vertical-align: middle; margin-right: 6px;"></i>Zoom</span>
+            <span id="he-zoom-val" style="font-size: 0.85rem; color: var(--primary); font-weight: bold; background: rgba(168,85,247,0.15); padding: 4px 10px; border-radius: 8px; font-variant-numeric: tabular-nums;">${zoomPct}%</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <button onclick="HubbleEditor.setCropZoom((HubbleEditor.state.zoom || 1) - 0.1)" style="width: 32px; height: 32px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.1); color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: transform 0.1s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'"><i data-lucide="minus" style="width: 14px; height: 14px;"></i></button>
+            <input type="range" id="he-zoom-slider" class="he-custom-slider" min="0.5" max="3" step="0.01" value="${currentZoom}" oninput="HubbleEditor.setCropZoom(parseFloat(this.value))">
+            <button onclick="HubbleEditor.setCropZoom((HubbleEditor.state.zoom || 1) + 0.1)" style="width: 32px; height: 32px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.1); color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: transform 0.1s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'"><i data-lucide="plus" style="width: 14px; height: 14px;"></i></button>
+          </div>
+        </div>
+      `;
+      
       html += `<div style="display: flex; flex-direction: column; gap: 12px;">`;
-      html += `<button onclick="HubbleEditor.exitCropMode(true)" style="padding: 12px; border-radius: 12px; background: var(--primary-gradient); color: white; font-weight: bold; border: none; cursor: pointer;">Apply Crop</button>`;
-      html += `<button onclick="HubbleEditor.tempCrop = { x: 0, y: 0, width: 100, height: 100, aspect: 'Free' }; HubbleEditor.renderCropHandles(); HubbleEditor.renderPanels('crop');" style="padding: 12px; border-radius: 12px; background: rgba(255,255,255,0.1); color: white; font-weight: bold; border: none; cursor: pointer;">Reset Crop</button>`;
-      html += `<button onclick="HubbleEditor.exitCropMode(false)" style="padding: 12px; border-radius: 12px; background: transparent; border: 1px solid rgba(255,255,255,0.2); color: white; font-weight: bold; cursor: pointer;">Cancel</button>`;
+      html += `<div style="display: flex; gap: 12px;">
+                 <button class="he-glass-btn" onclick="HubbleEditor.state.zoom = 1; HubbleEditor.state.panX = 0; HubbleEditor.state.panY = 0; HubbleEditor.tempCrop = { x: 0, y: 0, width: 100, height: 100, aspect: 'Free' }; HubbleEditor.renderCropHandles(); HubbleEditor.renderPanels('crop'); HubbleEditor.updateRender();">Reset</button>
+                 <button class="he-premium-apply-btn" onclick="HubbleEditor.exitCropMode(true)">Apply Crop</button>
+               </div>`;
+      html += `<button class="he-glass-btn he-cancel-btn" onclick="HubbleEditor.exitCropMode(false)">Cancel</button>`;
       html += `</div>`;
     }
     else if (activeTool === 'stickers') {

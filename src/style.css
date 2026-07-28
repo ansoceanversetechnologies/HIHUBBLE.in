@@ -9240,3 +9240,972 @@ body.review-hubbs-view-active .main-content {
   border-color: rgba(31,18,53,0.15) !important;
   background: rgba(31,18,53,0.05) !important;
 }
+
+/* ==========================================================================
+   SHARE HUBBS - PREMIUM UI / ANIMATION UPGRADE
+   (Apple Liquid Glass / VisionOS Inspired)
+   ========================================================================== */
+
+/* Hardware acceleration & reduced motion basics */
+.create-hubbs-layout * {
+  will-change: transform, opacity;
+  transform: translateZ(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .create-hubbs-layout * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* 1. IMAGE TOOLS SECTION */
+.ch-premium-tool-btn {
+  position: relative;
+  overflow: hidden;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.15), 0 2px 8px rgba(0,0,0,0.2);
+  transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transform-origin: center center;
+  z-index: 1;
+}
+
+/* Idle subtle float */
+@keyframes toolIdleFloat {
+  0% { transform: translateY(0px); }
+  50% { transform: translateY(-1.5px); }
+  100% { transform: translateY(0px); }
+}
+.ch-tool-container:hover .ch-premium-tool-btn {
+  animation: none; /* stop idle on hover */
+}
+.ch-tool-container {
+  animation: toolIdleFloat 4s ease-in-out infinite;
+}
+.ch-tool-container:nth-child(2) { animation-delay: 0.5s; }
+.ch-tool-container:nth-child(3) { animation-delay: 1.2s; }
+.ch-tool-container:nth-child(4) { animation-delay: 0.8s; }
+.ch-tool-container:nth-child(5) { animation-delay: 1.5s; }
+.ch-tool-container:nth-child(6) { animation-delay: 0.2s; }
+
+/* Tool base states */
+.ch-premium-tool-btn i {
+  transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Hover effects */
+.ch-premium-tool-btn:hover {
+  transform: scale(1.08) translateY(-2px);
+}
+.ch-premium-tool-btn:hover i {
+  transform: rotate(5deg) scale(1.1);
+}
+
+/* Glass reflection sweep */
+.ch-premium-tool-btn::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 50%;
+  height: 100%;
+  background: linear-gradient(to right, rgba(255,255,255,0) 0%, rgba(255,255,255,0.2) 50%, rgba(255,255,255,0) 100%);
+  transform: skewX(-25deg);
+  transition: none;
+  z-index: 2;
+}
+.ch-premium-tool-btn:hover::after {
+  animation: glassSweep 0.8s ease-out;
+}
+@keyframes glassSweep {
+  0% { left: -100%; }
+  100% { left: 200%; }
+}
+
+/* Active & Glow Colors */
+.ch-tool-filter.active, .ch-tool-filter:hover {
+  box-shadow: 0 4px 15px rgba(168, 85, 247, 0.5), inset 0 0 10px rgba(168, 85, 247, 0.3);
+  border-color: rgba(168, 85, 247, 0.6);
+  color: #a855f7;
+}
+.ch-tool-crop.active, .ch-tool-crop:hover {
+  box-shadow: 0 4px 15px rgba(6, 182, 212, 0.5), inset 0 0 10px rgba(6, 182, 212, 0.3);
+  border-color: rgba(6, 182, 212, 0.6);
+  color: #06b6d4;
+}
+.ch-tool-rotate.active, .ch-tool-rotate:hover {
+  box-shadow: 0 4px 15px rgba(59, 130, 246, 0.5), inset 0 0 10px rgba(59, 130, 246, 0.3);
+  border-color: rgba(59, 130, 246, 0.6);
+  color: #3b82f6;
+}
+.ch-tool-adjust.active, .ch-tool-adjust:hover {
+  box-shadow: 0 4px 15px rgba(236, 72, 153, 0.5), inset 0 0 10px rgba(236, 72, 153, 0.3);
+  border-color: rgba(236, 72, 153, 0.6);
+  color: #ec4899;
+}
+.ch-tool-stickers.active, .ch-tool-stickers:hover {
+  box-shadow: 0 4px 15px rgba(245, 158, 11, 0.5), inset 0 0 10px rgba(245, 158, 11, 0.3);
+  border-color: rgba(245, 158, 11, 0.6);
+  color: #f59e0b;
+}
+.ch-tool-text.active, .ch-tool-text:hover {
+  box-shadow: 0 4px 15px rgba(255, 255, 255, 0.5), inset 0 0 10px rgba(255, 255, 255, 0.3);
+  border-color: rgba(255, 255, 255, 0.6);
+  color: #ffffff;
+}
+
+/* Click animation */
+.ch-premium-tool-btn:active {
+  transform: scale(0.95);
+}
+
+/* Animated Neon Ring on Active */
+.ch-premium-tool-btn.active::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, currentColor, transparent, currentColor);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  animation: neonSpin 3s linear infinite;
+  opacity: 0.8;
+}
+@keyframes neonSpin {
+  100% { transform: rotate(360deg); }
+}
+
+
+/* 2. CAMERA / MEDIA UPLOAD CARD */
+.ch-upload-box {
+  position: relative;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.03) !important;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255,255,255,0.08) !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.4s ease;
+}
+
+/* Subtle animated border gradient via pseudo */
+.ch-upload-box::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(45deg, rgba(168, 85, 247, 0.1), rgba(255,255,255,0.05), rgba(168, 85, 247, 0.1));
+  background-size: 200% 200%;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  animation: gradientFlow 6s ease infinite;
+  pointer-events: none;
+}
+@keyframes gradientFlow {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+.ch-upload-box:hover {
+  transform: translateY(-4px) scale(1.01);
+  box-shadow: 0 12px 40px rgba(168, 85, 247, 0.15);
+}
+.ch-upload-box:hover::before {
+  background: linear-gradient(45deg, rgba(168, 85, 247, 0.5), rgba(217, 70, 239, 0.5), rgba(168, 85, 247, 0.5));
+  animation: gradientFlow 2s ease infinite;
+}
+
+/* Icon Animations */
+#ch-camera-btn i {
+  animation: breathePulse 3s ease-in-out infinite;
+}
+@keyframes breathePulse {
+  0%, 100% { transform: scale(1); opacity: 0.8; }
+  50% { transform: scale(1.15); opacity: 1; }
+}
+
+#ch-add-media-btn i {
+  animation: floatUp 3s ease-in-out infinite;
+}
+@keyframes floatUp {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+.ch-upload-box:hover #ch-camera-btn i,
+.ch-upload-box:hover #ch-add-media-btn i {
+  animation-duration: 1s;
+}
+
+/* Drag & Drop state */
+.ch-upload-box.drag-active {
+  transform: scale(1.02);
+  border-color: var(--primary) !important;
+  box-shadow: 0 0 30px rgba(168, 85, 247, 0.4);
+}
+.ch-upload-box.drag-active::before {
+  background: var(--primary);
+  opacity: 0.8;
+}
+
+/* 3. SCHEDULING TOGGLE */
+.ch-switch input:checked + .ch-slider {
+  background: linear-gradient(90deg, var(--primary), #d946ef) !important;
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.3), 0 0 10px rgba(168,85,247,0.3) !important;
+}
+.ch-slider {
+  position: relative;
+  overflow: hidden;
+  transition: all 0.5s cubic-bezier(0.2, 0.8, 0.2, 1);
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.05);
+}
+.ch-switch input:checked + .ch-slider::before {
+  background-color: #fff;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+  transform: translateX(18px) scale(1.1);
+}
+.ch-slider::before {
+  transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), background-color 0.4s !important;
+}
+/* Sparkle */
+.ch-sparkle {
+  position: absolute;
+  top: 50%;
+  left: 6px;
+  width: 4px;
+  height: 4px;
+  background: #fff;
+  border-radius: 50%;
+  transform: translateY(-50%) scale(0);
+  opacity: 0;
+  transition: all 0.3s;
+}
+.ch-switch input:checked + .ch-slider .ch-sparkle {
+  transform: translateY(-50%) scale(1);
+  opacity: 0.8;
+  box-shadow: 0 0 5px #fff;
+  animation: sparkleTwinkle 1.5s infinite;
+}
+@keyframes sparkleTwinkle {
+  0%, 100% { opacity: 0.4; transform: translateY(-50%) scale(0.8); }
+  50% { opacity: 1; transform: translateY(-50%) scale(1.2); }
+}
+
+
+/* 4. COLLABORATORS SECTION */
+.ch-add-collab-btn {
+  position: relative;
+  transition: all 0.3s ease;
+}
+.ch-add-collab-btn::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  width: 0;
+  height: 1px;
+  background: var(--primary);
+  transition: width 0.3s ease;
+}
+.ch-add-collab-btn:hover {
+  text-shadow: 0 0 8px rgba(168, 85, 247, 0.4);
+  transform: translateX(4px);
+}
+.ch-add-collab-btn:hover::after {
+  width: 100%;
+}
+.ch-add-collab-btn i {
+  transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.ch-add-collab-btn:hover i {
+  transform: rotate(90deg) scale(1.1);
+}
+
+/* 5. DRAFTS PANEL */
+#drafts-empty-state i {
+  transition: all 0.5s ease;
+  animation: draftFloat 4s ease-in-out infinite;
+  filter: drop-shadow(0 0 0 transparent);
+}
+@keyframes draftFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+#drafts-empty-state {
+  position: relative;
+  overflow: hidden;
+  transition: all 0.4s ease;
+}
+#drafts-empty-state:hover {
+  transform: translateY(-2px);
+  border-color: rgba(168, 85, 247, 0.3) !important;
+  box-shadow: 0 10px 25px rgba(168, 85, 247, 0.1);
+}
+#drafts-empty-state:hover i {
+  color: rgba(168, 85, 247, 0.8) !important;
+  filter: drop-shadow(0 0 10px rgba(168, 85, 247, 0.4));
+  transform: translateY(-8px) scale(1.05);
+}
+
+/* Particles via pseudo */
+#drafts-empty-state::after {
+  content: '';
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  background: #a855f7;
+  border-radius: 50%;
+  top: 30%;
+  left: 40%;
+  box-shadow: 30px 10px 0 #d946ef, -20px 20px 0 #a855f7, 10px -20px 0 #d946ef;
+  opacity: 0;
+  transition: all 0.5s ease;
+}
+#drafts-empty-state:hover::after {
+  opacity: 0.6;
+  animation: draftParticles 2s ease infinite alternate;
+}
+@keyframes draftParticles {
+  0% { transform: translateY(0) scale(1); }
+  100% { transform: translateY(-10px) scale(1.5); }
+}
+
+
+/* 6. SAVE AS DRAFT BUTTON */
+.ch-save-draft-btn {
+  position: relative;
+  overflow: hidden;
+  z-index: 1;
+}
+.ch-save-draft-btn:hover {
+  transform: translateY(-2px);
+  background: rgba(255,255,255,0.08) !important;
+  border-color: rgba(255,255,255,0.2) !important;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+}
+.ch-save-draft-btn i {
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.ch-save-draft-btn:hover i {
+  transform: translateX(-2px) scale(1.1);
+}
+.ch-save-draft-btn::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 50%;
+  height: 100%;
+  background: linear-gradient(to right, rgba(255,255,255,0) 0%, rgba(255,255,255,0.1) 50%, rgba(255,255,255,0) 100%);
+  transform: skewX(-20deg);
+}
+.ch-save-draft-btn:hover::after {
+  animation: glassSweep 1.2s ease-out infinite;
+}
+.ch-save-draft-btn:active {
+  transform: scale(0.97);
+}
+
+
+/* 7. NEXT BUTTON (Primary CTA) */
+.ch-next-btn {
+  position: relative;
+  overflow: hidden;
+  z-index: 1;
+  background-size: 200% auto !important;
+  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
+}
+.ch-next-btn:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 30px rgba(168,85,247,0.6) !important;
+  background-position: right center !important;
+}
+.ch-next-btn i {
+  transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.ch-next-btn:hover i {
+  transform: translateX(4px) scale(1.1);
+}
+.ch-next-btn:active {
+  transform: scale(0.95);
+}
+.ch-next-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: inherit;
+  filter: blur(8px);
+  opacity: 0;
+  transition: opacity 0.4s;
+  z-index: -1;
+}
+.ch-next-btn:hover::before {
+  opacity: 0.6;
+}
+/* Spring Ripple */
+.ch-next-btn::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  background: rgba(255,255,255,0.3);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  transition: width 0s, height 0s, opacity 0s;
+}
+.ch-next-btn:active::after {
+  width: 200%;
+  height: 200%;
+  opacity: 0;
+  transition: width 0.6s ease-out, height 0.6s ease-out, opacity 0.6s ease-out;
+}
+
+
+/* 8. PAGE TRANSITIONS (To Preview and Back) */
+body.create-hubbs-view-active #view-home {
+  filter: blur(10px);
+  transform: scale(0.98);
+  opacity: 0;
+  transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: none;
+}
+#view-create-hubbs {
+  transition: opacity 0.5s cubic-bezier(0.4, 0, 0.2, 1), transform 0.5s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+#view-create-hubbs:not(.active) {
+  opacity: 0;
+  transform: translateY(20px);
+  pointer-events: none;
+}
+
+body.review-hubbs-view-active #view-create-hubbs {
+  filter: blur(8px);
+  transform: scale(0.95);
+  opacity: 0;
+  transition: all 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: none;
+}
+#view-review-hubbs {
+  transition: opacity 0.6s cubic-bezier(0.4, 0, 0.2, 1), transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+#view-review-hubbs:not(.active) {
+  opacity: 0;
+  transform: translateX(40px);
+  pointer-events: none;
+}
+
+/* 9. MICRO INTERACTIONS - General Layout */
+.ch-panel {
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+.ch-panel:hover {
+  transform: perspective(1000px) rotateX(0.5deg) rotateY(0.5deg);
+}
+
+/* Light tracking on inputs */
+.ch-input-with-icon input:focus {
+  background: rgba(255,255,255,0.08) !important;
+  box-shadow: 0 0 15px rgba(168, 85, 247, 0.2) !important;
+}
+
+/* ==========================================================
+   SHARE HUBBs PHASE 2 - PREMIUM UI POLISH & DRAFT UPGRADE
+   ========================================================== */
+
+/* 1. Custom SVG Icon Styling (Image Tools) */
+.ch-custom-icon {
+  transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  opacity: 0.8;
+  filter: drop-shadow(0 0 0px transparent);
+}
+.ch-premium-tool-btn:hover .ch-custom-icon {
+  opacity: 1;
+  transform: scale(1.1) rotate(2deg);
+  filter: drop-shadow(0 2px 6px rgba(255,255,255,0.4));
+}
+.ch-premium-tool-btn.active .ch-custom-icon {
+  opacity: 1;
+  transform: scale(1.15);
+  filter: drop-shadow(0 0 8px currentColor);
+  animation: svgActiveBreathe 2s infinite ease-in-out;
+}
+@keyframes svgActiveBreathe {
+  0%, 100% { filter: drop-shadow(0 0 8px currentColor); }
+  50% { filter: drop-shadow(0 0 14px currentColor); }
+}
+
+/* 2. Media Preview Enhancements & Deletion Animation */
+.ch-media-preview-item {
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease, filter 0.3s ease;
+  will-change: transform, opacity, filter;
+  position: relative;
+  overflow: hidden;
+}
+.ch-media-preview-item::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  border: 1px solid rgba(255,255,255,0);
+  border-radius: inherit;
+  transition: border-color 0.3s ease;
+  pointer-events: none;
+  z-index: 10;
+}
+.ch-media-preview-item:hover {
+  transform: scale(1.02) translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+}
+.ch-media-preview-item:hover::before {
+  border-color: rgba(255,255,255,0.2);
+}
+.ch-media-preview-item.exiting {
+  animation: mediaExit 0.4s cubic-bezier(0.36, 0, 0.66, -0.56) forwards;
+}
+@keyframes mediaExit {
+  0% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(0.5); opacity: 0; filter: blur(4px); }
+}
+
+/* 3. Collaborators Link Hover Upgrade */
+.ch-add-collab-btn {
+  position: relative;
+  overflow: hidden;
+}
+.ch-add-collab-btn::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 1px;
+  background: var(--primary);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 0.3s ease;
+}
+.ch-add-collab-btn:hover::after {
+  transform: scaleX(1);
+}
+.ch-add-collab-btn .add-collab-icon,
+.ch-add-collab-btn .add-collab-arrow {
+  transition: transform 0.3s ease, opacity 0.3s ease;
+}
+.ch-add-collab-btn:hover .add-collab-icon {
+  transform: rotate(90deg);
+}
+.ch-add-collab-btn:hover .add-collab-text {
+  text-shadow: 0 0 10px rgba(108, 59, 255, 0.5);
+}
+.ch-add-collab-btn:hover .add-collab-arrow {
+  opacity: 1 !important;
+  transform: translateX(4px);
+}
+
+/* 4. Home Draft Bubble */
+.draft-bubble-container {
+  position: relative;
+}
+.home-draft-bubble {
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05));
+  border: 1px solid rgba(255,255,255,0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 4px 15px rgba(0,0,0,0.2), inset 0 0 15px rgba(168, 85, 247, 0.2);
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  position: relative;
+  overflow: visible; /* To allow glow out */
+}
+.home-draft-bubble::before {
+  content: '';
+  position: absolute;
+  top: -2px; left: -2px; right: -2px; bottom: -2px;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent, rgba(168, 85, 247, 0.6), transparent);
+  animation: gradientFlow 4s linear infinite;
+  z-index: -1;
+  opacity: 0.5;
+  transition: opacity 0.3s ease;
+}
+.home-draft-bubble:hover {
+  transform: scale(1.05) translateY(-4px);
+  box-shadow: 0 8px 25px rgba(168, 85, 247, 0.4), inset 0 0 25px rgba(168, 85, 247, 0.4);
+}
+.home-draft-bubble:hover::before {
+  opacity: 1;
+}
+.home-draft-bubble:active {
+  transform: scale(0.95);
+}
+.home-draft-bubble i {
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.home-draft-bubble:hover i {
+  transform: translateY(-2px) scale(1.1);
+}
+
+/* 5. Home Floating Drafts Panel */
+.home-drafts-dropdown {
+  position: absolute;
+  top: 90px; /* Below the bubble */
+  left: 50%;
+  transform: translateX(-50%) translateY(10px) scale(0.95);
+  width: 320px;
+  background: rgba(20, 20, 25, 0.85); /* Dark glass */
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 20px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(168, 85, 247, 0.2);
+  z-index: 1000;
+  opacity: 0;
+  pointer-events: none;
+  transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.home-drafts-dropdown.open {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(-50%) translateY(0) scale(1);
+}
+.hdd-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.hdd-content {
+  max-height: 350px;
+  overflow-y: auto;
+}
+.hdd-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 12px;
+}
+.hdd-empty i {
+  animation: draftArchiveFloat 3s infinite ease-in-out;
+}
+@keyframes draftArchiveFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+/* Secondary Button Hover */
+.hdd-primary-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(168, 85, 247, 0.4);
+}
+
+/* Draft Item (Dropdown specific overrides) */
+.hdd-content .ch-draft-item {
+  background: rgba(255,255,255,0.03);
+  margin-bottom: 8px;
+}
+.hdd-content .ch-draft-item:last-child {
+  margin-bottom: 0;
+}
+
+/* 6. Light Theme Overrides */
+html.light-theme .home-draft-bubble {
+  background: linear-gradient(135deg, rgba(255,255,255,0.9), rgba(255,255,255,0.5));
+  border-color: rgba(0,0,0,0.1);
+  color: var(--primary);
+  box-shadow: 0 4px 15px rgba(0,0,0,0.1), inset 0 0 15px rgba(168, 85, 247, 0.1);
+}
+html.light-theme .home-draft-bubble::before {
+  background: conic-gradient(from 0deg, transparent, rgba(168, 85, 247, 0.3), transparent);
+}
+html.light-theme .home-drafts-dropdown {
+  background: rgba(255,255,255,0.85);
+  border-color: rgba(0,0,0,0.1);
+  box-shadow: 0 20px 40px rgba(0,0,0,0.1), 0 0 0 1px rgba(168, 85, 247, 0.2);
+}
+html.light-theme .hdd-header {
+  border-bottom-color: rgba(0,0,0,0.05);
+  color: #111;
+}
+html.light-theme #close-hdd-btn {
+  background: rgba(0,0,0,0.05);
+  color: #111;
+}
+html.light-theme .hdd-empty h4 {
+  color: #111;
+}
+html.light-theme .hdd-empty p {
+  color: #666;
+}
+html.light-theme .ch-custom-icon {
+  opacity: 0.7;
+}
+html.light-theme .ch-premium-tool-btn:hover .ch-custom-icon {
+  filter: drop-shadow(0 2px 6px rgba(0,0,0,0.2));
+}
+html.light-theme .ch-premium-tool-btn.active .ch-custom-icon {
+  filter: drop-shadow(0 0 8px currentColor);
+}
+html.light-theme .ch-premium-tool-btn.active {
+  box-shadow: 0 4px 15px rgba(168, 85, 247, 0.2), inset 0 0 10px rgba(168, 85, 247, 0.1);
+  background: rgba(168, 85, 247, 0.1);
+}
+html.light-theme #drafts-empty-state {
+  background: rgba(255,255,255,0.5);
+  border-color: rgba(0,0,0,0.1);
+}
+html.light-theme .drafts-empty-icon {
+  color: var(--primary) !important;
+  opacity: 0.5;
+}
+html.light-theme .hdd-content .ch-draft-item {
+  background: rgba(255,255,255,0.5);
+  border-color: rgba(0,0,0,0.05);
+}
+html.light-theme .hdd-content .ch-draft-item:hover {
+  background: #fff;
+  border-color: var(--primary);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+}
+html.light-theme .ch-add-collab-btn:hover .add-collab-text {
+  text-shadow: none;
+}
+
+/* 7. HiHubble Toggle Switch Restoration */
+.ch-switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+}
+.ch-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.ch-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.2);
+  transition: .22s cubic-bezier(0.34, 1.56, 0.64, 1);
+  border-radius: 24px;
+}
+.ch-slider:before {
+  position: absolute;
+  content: "";
+  height: 18px;
+  width: 18px;
+  left: 2px;
+  bottom: 2px;
+  background-color: white;
+  transition: .22s cubic-bezier(0.34, 1.56, 0.64, 1);
+  border-radius: 50%;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+  z-index: 2;
+}
+input:checked + .ch-slider {
+  background: linear-gradient(135deg, #c084fc, #9333ea);
+  border-color: #a855f7;
+  box-shadow: 0 0 10px rgba(168, 85, 247, 0.4), inset 0 2px 5px rgba(255,255,255,0.2);
+}
+input:checked + .ch-slider:before {
+  transform: translateX(20px);
+  box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+}
+.ch-sparkle {
+  position: absolute;
+  top: 50%;
+  left: 12px;
+  width: 6px;
+  height: 6px;
+  background: white;
+  border-radius: 50%;
+  transform: translateY(-50%) scale(0);
+  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+  opacity: 0;
+  box-shadow: 0 0 6px white;
+}
+input:checked + .ch-slider .ch-sparkle {
+  transform: translateY(-50%) scale(1);
+  opacity: 0.8;
+  animation: twinkle 1.5s infinite;
+}
+@keyframes twinkle {
+  0%, 100% { opacity: 0.5; transform: translateY(-50%) scale(0.8); }
+  50% { opacity: 1; transform: translateY(-50%) scale(1.2); }
+}
+/* Light Theme Toggle */
+html.light-theme .ch-slider {
+  background-color: rgba(0,0,0,0.1);
+  border-color: rgba(0,0,0,0.15);
+}
+html.light-theme input:checked + .ch-slider {
+  background: linear-gradient(135deg, #d8b4fe, #a855f7);
+  box-shadow: 0 2px 8px rgba(168, 85, 247, 0.3), inset 0 2px 5px rgba(255,255,255,0.5);
+}
+
+/* 8. Manual Rotate Floating Panel */
+.he-custom-slider {
+  -webkit-appearance: none;
+  width: 100%;
+  height: 6px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 4px;
+  outline: none;
+  transition: all 0.2s;
+}
+.he-custom-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: white;
+  cursor: pointer;
+  border: 2px solid var(--primary);
+  box-shadow: 0 0 10px rgba(168,85,247,0.5);
+  transition: transform 0.1s;
+}
+.he-custom-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+.he-manual-btn {
+  border: none;
+  font-family: inherit;
+  font-size: 0.9rem;
+}
+.he-manual-btn:hover {
+  transform: translateY(-2px);
+}
+.he-btn-apply:hover {
+  box-shadow: 0 4px 12px rgba(168,85,247,0.4);
+}
+.he-btn-reset:hover {
+  background: rgba(255,255,255,0.1) !important;
+}
+
+html.light-theme .he-manual-rotate-panel {
+  background: rgba(255,255,255,0.95) !important;
+  border-color: rgba(0,0,0,0.1) !important;
+}
+html.light-theme .he-manual-rotate-panel span {
+  color: #1a1a1a !important;
+}
+html.light-theme #he-manual-rotate-val {
+  color: var(--primary) !important;
+  background: rgba(168,85,247,0.1) !important;
+}
+html.light-theme .he-btn-reset {
+  background: rgba(0,0,0,0.05) !important;
+  color: #1a1a1a !important;
+  border-color: rgba(0,0,0,0.1) !important;
+}
+html.light-theme .he-btn-reset:hover {
+  background: rgba(0,0,0,0.1) !important;
+}
+html.light-theme .he-custom-slider {
+  background: rgba(0,0,0,0.1);
+}
+
+/* Premium Crop Editor Enhancements */
+.he-zoom-panel {
+  transition: all 0.2s;
+}
+.he-glass-btn {
+  flex: 1;
+  padding: 12px;
+  border-radius: 12px;
+  background: transparent;
+  color: white;
+  font-weight: 600;
+  border: 1px solid rgba(168,85,247, 0.4);
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: inherit;
+  font-size: 0.95rem;
+}
+.he-glass-btn:hover {
+  background: rgba(168,85,247, 0.1);
+  box-shadow: 0 4px 12px rgba(168,85,247, 0.2);
+}
+.he-glass-btn.he-cancel-btn {
+  border-color: rgba(255,255,255,0.2);
+}
+.he-glass-btn.he-cancel-btn:hover {
+  background: rgba(255,255,255,0.05);
+  box-shadow: none;
+}
+.he-premium-apply-btn {
+  flex: 2;
+  padding: 12px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--primary) 0%, #7e22ce 100%);
+  color: white;
+  font-weight: bold;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: inherit;
+  font-size: 0.95rem;
+  box-shadow: 0 4px 15px rgba(168,85,247, 0.3);
+}
+.he-premium-apply-btn:hover {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 0 8px 25px rgba(168,85,247, 0.5);
+  filter: brightness(1.1);
+}
+.he-premium-apply-btn:active {
+  transform: translateY(1px) scale(0.98);
+}
+
+html.light-theme .he-glass-btn {
+  color: #1a1a1a;
+  border-color: rgba(168,85,247, 0.5);
+}
+html.light-theme .he-glass-btn:hover {
+  background: rgba(168,85,247, 0.05);
+}
+html.light-theme .he-glass-btn.he-cancel-btn {
+  border-color: rgba(0,0,0,0.15);
+}
+html.light-theme .he-glass-btn.he-cancel-btn:hover {
+  background: rgba(0,0,0,0.05);
+}
+html.light-theme .he-zoom-panel {
+  background: rgba(255,255,255,0.95) !important;
+  border-color: rgba(0,0,0,0.1) !important;
+  color: #1a1a1a;
+}
+html.light-theme .he-zoom-panel span {
+  color: #1a1a1a !important;
+}
+html.light-theme .he-zoom-panel button {
+  border-color: rgba(0,0,0,0.1) !important;
+  background: rgba(0,0,0,0.05) !important;
+  color: #1a1a1a !important;
+}
+html.light-theme #he-zoom-val {
+  color: var(--primary) !important;
+  background: rgba(168,85,247,0.15) !important;
+}
+

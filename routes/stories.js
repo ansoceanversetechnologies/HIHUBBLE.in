@@ -24,6 +24,30 @@ router.post('/api/stories', authenticateToken, async (req, res) => {
   }
 });
 
+router.post('/api/stories/schedule', authenticateToken, async (req, res) => {
+  const { mediaUrl, mediaType, scheduledAt } = req.body;
+  if (!mediaUrl) return res.status(400).json({ error: 'Media URL is required.' });
+  if (!scheduledAt) return res.status(400).json({ error: 'Scheduled time is required.' });
+
+  try {
+    const finalMediaType = mediaType || 'image';
+    
+    const { data: newStory, error } = await supabase.from('stories').insert([{
+      author: req.user.id,
+      mediaUrl,
+      mediaType: finalMediaType,
+      isScheduled: true,
+      scheduledAt: new Date(scheduledAt).toISOString(),
+      status: 'scheduled'
+    }]).select('*, author:users!author(_id, fullName, username, profileImage)').single();
+    if (error) throw error;
+
+    res.status(201).json({ ...newStory, likes: [] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/api/stories', authenticateToken, async (req, res) => {
   try {
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
@@ -37,6 +61,7 @@ router.get('/api/stories', authenticateToken, async (req, res) => {
     if (storiesData) {
       for (const s of storiesData) {
         if (s.mediaType && s.mediaType.startsWith('draft-')) continue;
+        if (s.status === 'scheduled') continue;
         const { data: likes } = await supabase.from('story_likes').select('userId').eq('storyId', s._id);
         stories.push({ ...s, likes: likes ? likes.map(l => l.userId) : [] });
       }

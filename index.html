@@ -379,11 +379,28 @@
                     <i data-lucide="chevron-down" style="width: 14px; height: 14px; color: var(--text-muted);"></i>
                   </div>
                 </div>
-                <div class="story-card" id="story-drafts-btn" style="display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer;">
-                  <div class="story-avatar-container" style="background: rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center; width: 68px; height: 68px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2);">
-                    <i data-lucide="file-edit" style="color: white;"></i>
-                  </div>
+                <div class="story-card draft-bubble-container" id="story-drafts-container" style="position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; cursor: pointer;">
+                  <button class="home-draft-bubble" id="story-drafts-btn" title="Saved Drafts">
+                    <i data-lucide="inbox" style="width: 22px; height: 22px;"></i>
+                  </button>
                   <span class="story-username" style="margin-top: 4px;">Drafts</span>
+                  
+                  <!-- Floating Drafts Panel -->
+                  <div class="home-drafts-dropdown glass-panel" id="home-drafts-panel">
+                    <div class="hdd-header">
+                      <h3 style="margin: 0; font-size: 1rem; font-weight: 600;">Your Drafts</h3>
+                      <button id="close-hdd-btn" class="icon-btn" style="width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.1); border: none; border-radius: 50%; color: var(--text-main); cursor: pointer;"><i data-lucide="x" style="width: 14px; height: 14px;"></i></button>
+                    </div>
+                    <div class="hdd-content" id="hdd-list">
+                      <!-- Empty State (will be overridden by JS if drafts exist) -->
+                      <div class="hdd-empty" id="hdd-empty-state">
+                        <i data-lucide="archive" style="width: 48px; height: 48px; margin-bottom: 16px; color: var(--primary);"></i>
+                        <h4 style="margin: 0 0 8px 0; font-size: 1.1rem; font-weight: 600;">No Drafts Here</h4>
+                        <p style="margin: 0 0 20px 0; font-size: 0.85rem; color: var(--text-muted); text-align: center; line-height: 1.5;">You haven't saved any HUBBs yet.<br>Save a HUBB as Draft and it will appear here.</p>
+                        <button class="hdd-primary-btn" onclick="document.getElementById('close-hdd-btn').click(); window.switchView('create-hubbs');" style="width: 100%; padding: 12px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: var(--text-main); font-weight: 600; cursor: pointer; transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1); backdrop-filter: blur(10px);">Go to Share HUBBs</button>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
               </div>
@@ -518,38 +535,38 @@
                   <h4 class="ch-sub-title" style="margin-bottom: 12px; font-size: 0.95rem;">Image Tools</h4>
                   <div class="ch-image-tools" style="display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 12px 16px;">
                     <div class="ch-tool-container" style="display: flex; flex-direction: column; align-items: center; gap: 6px;">
-                      <button class="ch-premium-tool-btn active" style="width: 42px; height: 42px; border-radius: 12px; border: 1px solid rgba(168, 85, 247, 0.5); background: rgba(168, 85, 247, 0.2); box-shadow: 0 4px 15px rgba(168, 85, 247, 0.4), inset 0 0 10px rgba(168, 85, 247, 0.2); color: var(--primary); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;">
-                        <i data-lucide="aperture" style="width: 18px; height: 18px;"></i>
+                      <button class="ch-premium-tool-btn ch-tool-filter active" style="width: 42px; height: 42px; border-radius: 12px; border: 1px solid rgba(168, 85, 247, 0.5); background: rgba(168, 85, 247, 0.2); box-shadow: 0 4px 15px rgba(168, 85, 247, 0.4), inset 0 0 10px rgba(168, 85, 247, 0.2); color: var(--primary); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;">
+                        <svg class="ch-custom-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M14.31 8l5.74 9.94M9.69 8h11.48M7.38 12l5.74-9.94M9.69 16L3.95 6.06M14.31 16H2.83M16.62 12l-5.74 9.94"/></svg>
                       </button>
                       <span style="font-size: 0.7rem; color: var(--primary); font-weight: 600; text-shadow: 0 0 10px rgba(168, 85, 247, 0.3);">Filters</span>
                     </div>
                     <div class="ch-tool-container" style="display: flex; flex-direction: column; align-items: center; gap: 6px;">
-                      <button class="ch-premium-tool-btn" style="width: 42px; height: 42px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: var(--text-main); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;">
-                        <i data-lucide="crop" style="width: 18px; height: 18px;"></i>
+                      <button class="ch-premium-tool-btn ch-tool-crop" style="width: 42px; height: 42px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: var(--text-main); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;">
+                        <svg class="ch-custom-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.13 1L6 16a2 2 0 002 2h15"/><path d="M1 6.13L16 6a2 2 0 012 2v15"/></svg>
                       </button>
                       <span style="font-size: 0.7rem; color: var(--text-muted);">Crop</span>
                     </div>
                     <div class="ch-tool-container" style="display: flex; flex-direction: column; align-items: center; gap: 6px;">
-                      <button class="ch-premium-tool-btn" style="width: 42px; height: 42px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: var(--text-main); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;">
-                        <i data-lucide="rotate-cw" style="width: 18px; height: 18px;"></i>
+                      <button class="ch-premium-tool-btn ch-tool-rotate" style="width: 42px; height: 42px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: var(--text-main); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;">
+                        <svg class="ch-custom-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 11-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
                       </button>
                       <span style="font-size: 0.7rem; color: var(--text-muted);">Rotate</span>
                     </div>
                     <div class="ch-tool-container" style="display: flex; flex-direction: column; align-items: center; gap: 6px;">
-                      <button class="ch-premium-tool-btn" style="width: 42px; height: 42px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: var(--text-main); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;">
-                        <i data-lucide="sliders" style="width: 18px; height: 18px;"></i>
+                      <button class="ch-premium-tool-btn ch-tool-adjust" style="width: 42px; height: 42px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: var(--text-main); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;">
+                        <svg class="ch-custom-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7"/><path d="M4 10V3"/><path d="M12 21v-9"/><path d="M12 8V3"/><path d="M20 21v-5"/><path d="M20 12V3"/><path d="M1 14h6"/><path d="M9 8h6"/><path d="M17 16h6"/></svg>
                       </button>
                       <span style="font-size: 0.7rem; color: var(--text-muted);">Adjust</span>
                     </div>
                     <div class="ch-tool-container" style="display: flex; flex-direction: column; align-items: center; gap: 6px;">
-                      <button class="ch-premium-tool-btn" style="width: 42px; height: 42px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: var(--text-main); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;">
-                        <i data-lucide="sticker" style="width: 18px; height: 18px;"></i>
+                      <button class="ch-premium-tool-btn ch-tool-stickers" style="width: 42px; height: 42px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: var(--text-main); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;">
+                        <svg class="ch-custom-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3 7h7l-5 5 2 7-7-4-7 4 2-7-5-5h7z"/></svg>
                       </button>
                       <span style="font-size: 0.7rem; color: var(--text-muted);">Stickers</span>
                     </div>
                     <div class="ch-tool-container" style="display: flex; flex-direction: column; align-items: center; gap: 6px;">
-                      <button class="ch-premium-tool-btn" style="width: 42px; height: 42px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: var(--text-main); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;">
-                        <i data-lucide="type" style="width: 18px; height: 18px;"></i>
+                      <button class="ch-premium-tool-btn ch-tool-text" style="width: 42px; height: 42px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: var(--text-main); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;">
+                        <svg class="ch-custom-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V4h16v3"/><path d="M12 4v16"/><path d="M9 20h6"/></svg>
                       </button>
                       <span style="font-size: 0.7rem; color: var(--text-muted);">Text</span>
                     </div>
@@ -566,22 +583,21 @@
                   <div class="ch-setting-row" style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
                     <span class="ch-setting-label" style="font-weight: 600; font-size: 0.9rem;">Scheduling</span>
                     <label class="ch-switch" style="transform: scale(0.9);">
-                      <input type="checkbox" checked>
-                      <span class="ch-slider"></span>
+                      <input type="checkbox" id="ch-schedule-toggle" onchange="window.toggleScheduling(this.checked)">
+                      <span class="ch-slider"><span class="ch-sparkle"></span></span>
                     </label>
                   </div>
-                  <div class="ch-datetime-row" style="margin-top: 12px; display: flex; gap: 12px;">
+                  <div id="ch-schedule-datetime-row" class="ch-datetime-row" style="margin-top: 12px; display: none; gap: 12px; opacity: 0; transition: opacity 0.3s ease;">
                     <div class="ch-datetime-group" style="flex: 1;">
                       <span class="ch-datetime-label" style="margin-bottom: 6px; display: block; font-size: 0.75rem; color: var(--text-muted);">Date / dated</span>
                       <div class="ch-input-with-icon ch-date-input" style="position: relative;">
-                        <input type="text" value="Sep 11, 2023" class="ch-time-input" style="width: 100%; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.05); border-radius: 12px; padding: 10px 36px 10px 14px; color: white; font-family: inherit; font-size: 0.85rem;">
-                        <i data-lucide="calendar" style="position: absolute; right: 14px; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; color: var(--text-muted);"></i>
+                        <input type="date" id="ch-schedule-date" class="ch-time-input" style="width: 100%; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.05); border-radius: 12px; padding: 10px 14px; color: white; font-family: inherit; font-size: 0.85rem; color-scheme: dark;">
                       </div>
                     </div>
                     <div class="ch-datetime-group" style="flex: 1;">
                       <span class="ch-datetime-label" style="margin-bottom: 6px; display: block; font-size: 0.75rem; color: var(--text-muted);">Time</span>
                       <div class="ch-input-with-icon ch-time-input" style="position: relative;">
-                        <input type="text" value="08:00 PM" class="ch-time-input" style="width: 100%; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.05); border-radius: 12px; padding: 10px 14px; color: white; font-family: inherit; font-size: 0.85rem;">
+                        <input type="time" id="ch-schedule-time" class="ch-time-input" style="width: 100%; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.05); border-radius: 12px; padding: 10px 14px; color: white; font-family: inherit; font-size: 0.85rem; color-scheme: dark;">
                       </div>
                     </div>
                   </div>
@@ -593,7 +609,7 @@
                     <span class="ch-setting-label" style="font-weight: 600; font-size: 0.9rem;">Collaborate with Hubbers</span>
                     <label class="ch-switch" style="transform: scale(0.9);">
                       <input type="checkbox" id="ch-collab-toggle" checked onchange="window.toggleCollaboration(this.checked)">
-                      <span class="ch-slider"></span>
+                      <span class="ch-slider"><span class="ch-sparkle"></span></span>
                     </label>
                   </div>
                   <div id="ch-collab-content" style="transition: all 0.2s;">
@@ -610,7 +626,7 @@
                       </div>
                       <div style="margin-top: 12px;">
                         <button id="btn-add-collaborators" class="ch-add-collab-btn" onclick="openCollaboratorModal()" style="background:transparent; border:none; color:var(--primary); display:flex; align-items:center; gap:6px; font-weight:600; cursor:pointer; padding: 0; font-size: 0.85rem;">
-                          <i data-lucide="plus" style="width:14px; height:14px;"></i> Add more collaborators
+                          <i data-lucide="plus" style="width:14px; height:14px;" class="add-collab-icon"></i> <span class="add-collab-text">Add more collaborators</span> <i data-lucide="chevron-right" style="width:12px; height:12px; margin-left: -2px;" class="add-collab-arrow"></i>
                         </button>
                       </div>
                     </div>
@@ -627,9 +643,10 @@
                 <div class="ch-drafts-list" id="ch-drafts-list" style="display: flex; flex-direction: column; gap: 12px;">
                   <!-- Empty State -->
                   <div id="drafts-empty-state" style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px 16px; text-align: center; border: 1px dashed rgba(255,255,255,0.1); border-radius: 12px; background: rgba(0,0,0,0.2);">
-                    <i data-lucide="inbox" style="width: 48px; height: 48px; color: rgba(255,255,255,0.2); margin-bottom: 16px;"></i>
-                    <h4 style="margin: 0 0 8px 0; font-size: 1.1rem; color: #fff;">No Drafts Yet</h4>
-                    <p style="margin: 0 0 16px 0; font-size: 0.85rem; color: rgba(255,255,255,0.6);">Your saved HUBBs will appear here.</p>
+                    <i data-lucide="archive" style="width: 48px; height: 48px; color: rgba(255,255,255,0.2); margin-bottom: 16px;" class="drafts-empty-icon"></i>
+                    <h4 style="margin: 0 0 8px 0; font-size: 1.1rem; color: var(--text-main);">No Drafts Yet</h4>
+                    <p style="margin: 0 0 16px 0; font-size: 0.85rem; color: var(--text-muted);">Your saved HUBBs will appear here.</p>
+                    <button class="ch-see-all-drafts hdd-primary-btn" onclick="document.getElementById('ch-hidden-file-input').click()" style="margin-top:4px; padding:10px 16px; background: rgba(255,255,255,0.05); color: var(--text-main); border: 1px solid rgba(255,255,255,0.1); border-radius:8px; font-weight:600; cursor:pointer; font-size: 0.85rem; transition: all 0.2s;">Start a new HUBB</button>
                   </div>
                 </div>
                 <button class="ch-see-all-drafts text-btn" id="see-all-drafts-btn" style="display: none; width:100%; margin-top:16px; padding:8px; background:rgba(108,59,255,0.1); color:var(--primary); border:none; border-radius:8px; font-weight:600; cursor:pointer; font-size: 0.85rem;">See All Drafts</button>
@@ -732,10 +749,16 @@
                 </div>
               </button>
 
-              <!-- Publish Button -->
-              <button id="review-publish-btn" onclick="publishHubb()" style="display: flex; align-items: center; justify-content: center; gap: 8px; height: 42px; padding: 0 24px; border-radius: 12px; background: linear-gradient(135deg, var(--primary) 0%, #d946ef 100%); border: none; color: white; cursor: pointer; font-weight: 600; font-size: 0.9rem; box-shadow: 0 4px 15px rgba(168,85,247,0.3); transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1); flex-shrink: 0;">
-                Publish Hubb <i data-lucide="upload-cloud" style="width: 18px; height: 18px;"></i>
-              </button>
+              <div style="display: flex; gap: 12px; align-items: center;">
+                <div id="review-scheduled-info" style="display: none; align-items: center; gap: 10px; height: 42px; padding: 0 16px; border-radius: 12px; background: rgba(168,85,247,0.1); border: 1px solid rgba(168,85,247,0.3); color: #e879f9;">
+                  <i data-lucide="clock" style="width: 16px; height: 16px;"></i>
+                  <span id="review-scheduled-text" style="font-weight: 600; font-size: 0.85rem;">Scheduled</span>
+                </div>
+                <!-- Publish Button -->
+                <button id="review-publish-btn" onclick="publishHubb()" style="display: flex; align-items: center; justify-content: center; gap: 8px; height: 42px; padding: 0 24px; border-radius: 12px; background: linear-gradient(135deg, var(--primary) 0%, #d946ef 100%); border: none; color: white; cursor: pointer; font-weight: 600; font-size: 0.9rem; box-shadow: 0 4px 15px rgba(168,85,247,0.3); transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1); flex-shrink: 0;">
+                  <span id="review-publish-text">Publish Hubb</span> <i id="review-publish-icon" data-lucide="upload-cloud" style="width: 18px; height: 18px;"></i>
+                </button>
+              </div>
             </div>
           </div>
         </div>
