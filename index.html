@@ -590,26 +590,30 @@
                 <!-- COLLABORATION SECTION -->
                 <div class="ch-editor-card" style="padding: 20px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; backdrop-filter: blur(16px);">
                   <div class="ch-setting-row" style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
-                    <span class="ch-setting-label" style="font-weight: 600; font-size: 0.9rem;">Collaboration</span>
+                    <span class="ch-setting-label" style="font-weight: 600; font-size: 0.9rem;">Collaborate with Hubbers</span>
                     <label class="ch-switch" style="transform: scale(0.9);">
-                      <input type="checkbox" checked>
+                      <input type="checkbox" id="ch-collab-toggle" checked onchange="window.toggleCollaboration(this.checked)">
                       <span class="ch-slider"></span>
                     </label>
                   </div>
-                  <div style="margin-top: 12px;">
-                    <span class="ch-datetime-label" style="display:block; margin-bottom:6px; font-size: 0.75rem; color: var(--text-muted);">Invite Hubbers</span>
-                    <div class="ch-hub-selector ch-dropdown" style="padding: 8px 14px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.05); border-radius: 12px; width: 100%; display: flex; justify-content: space-between; align-items: center;">
-                      <div style="display:flex; align-items:center; gap: 10px;">
-                        <img src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&amp;fit=crop&amp;w=30&amp;q=80" style="width:24px; height:24px; border-radius:50%; object-fit:cover;" alt="Avatar">
-                        <span style="color: white; font-size: 0.85rem;">Marcus</span>
-                      </div>
-                      <i data-lucide="x" style="width: 14px; height: 14px; cursor: pointer; color: var(--text-muted);"></i>
+                  <div id="ch-collab-content" style="transition: all 0.2s;">
+                    <div id="ch-collab-disabled-msg" style="display: none; padding: 20px; text-align: center; color: var(--text-muted); font-size: 0.85rem;">
+                      <div style="font-size: 1.2rem; margin-bottom: 8px;">🔒</div>
+                      <div style="font-weight: 600; margin-bottom: 4px; color: var(--text);">Collaboration is currently turned OFF.</div>
+                      <div>Turn on Collaboration to invite Hubbers to this HUBB.</div>
                     </div>
-                  </div>
-                  <div style="margin-top: 12px;">
-                    <button class="ch-add-collab-btn" style="background:transparent; border:none; color:var(--primary); display:flex; align-items:center; gap:6px; font-weight:600; cursor:pointer; padding: 0; font-size: 0.85rem;">
-                      <i data-lucide="plus" style="width:14px; height:14px;"></i> Add more collaborators
-                    </button>
+                    
+                    <div id="ch-collab-active-area">
+                      <div style="margin-top: 12px;">
+                        <span class="ch-datetime-label" id="ch-collaborators-label" style="display:block; margin-bottom:6px; font-size: 0.75rem; color: var(--text-muted); display: none;">Selected Hubbers</span>
+                        <div id="ch-selected-collaborators" style="display: flex; gap: 8px; flex-wrap: wrap;"></div>
+                      </div>
+                      <div style="margin-top: 12px;">
+                        <button id="btn-add-collaborators" class="ch-add-collab-btn" onclick="openCollaboratorModal()" style="background:transparent; border:none; color:var(--primary); display:flex; align-items:center; gap:6px; font-weight:600; cursor:pointer; padding: 0; font-size: 0.85rem;">
+                          <i data-lucide="plus" style="width:14px; height:14px;"></i> Add more collaborators
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -674,8 +678,8 @@
           </div>
 
           <!-- MAIN PREVIEW CONTAINER (scrollable) -->
-          <div style="flex: 1; overflow-y: auto; padding: 0 24px 16px 24px; display: flex; flex-direction: column; align-items: center;">
-            <div style="width: 100%; max-width: 1400px; height: 100%; margin: 0 auto; display: flex; justify-content: center; align-items: center; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); border-radius: 20px; padding: 16px; box-shadow: 0 16px 40px rgba(0,0,0,0.2);">
+          <div style="flex: 1; overflow: hidden; padding: 24px; display: flex; flex-direction: column; align-items: stretch; min-height: 0;">
+            <div style="flex: 1; min-height: 0; width: 100%; margin: 0 auto; display: flex; flex-direction: column; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); border-radius: 20px; padding: 12px; box-shadow: 0 16px 40px rgba(0,0,0,0.2);">
               
               <!-- EMPTY STATE (Hidden by default) -->
               <div id="review-empty-state" style="display: none; width: 100%; height: 100%; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 16px;">
@@ -691,7 +695,7 @@
               </div>
 
               <!-- COMPARISON SLIDER CONTAINER -->
-              <div id="review-slider-wrapper" style="position: relative; height: 100%; max-width: 100%; min-height: 400px; max-height: calc(100vh - 220px); aspect-ratio: 9/16; border-radius: 12px; overflow: hidden; box-shadow: 0 20px 50px rgba(0,0,0,0.5); background: #000;">
+              <div id="review-slider-wrapper" style="position: relative; flex: 1; min-height: 0; width: 100%; min-width: 900px; border-radius: 12px; overflow: hidden; box-shadow: 0 20px 50px rgba(0,0,0,0.5); background: #000;">
                 
                 <!-- After Media (Full background, Edited) -->
                 <div id="review-after-container" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;">
@@ -2058,6 +2062,48 @@
       <div class="incoming-call-actions">
         <button id="accept-call-btn" class="call-action-btn accept"><i data-lucide="phone"></i> Accept</button>
         <button id="decline-call-btn" class="call-action-btn decline"><i data-lucide="phone-off"></i> Decline</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== VIEW: COLLABORATE WITH HUBBERS MODAL ==================== -->
+  <style>
+    .light-theme #collaborator-modal h3 {
+      color: #FFFFFF !important;
+    }
+    .light-theme #collaborator-search-input {
+      color: #FFFFFF !important;
+    }
+    .light-theme #collaborator-search-input::placeholder {
+      color: rgba(255, 255, 255, 0.65) !important;
+    }
+    .light-theme #collaborator-modal h4 {
+      color: #FFFFFF !important;
+      font-weight: 600 !important;
+    }
+    .light-theme #collaborator-modal p {
+      color: rgba(255, 255, 255, 0.80) !important;
+    }
+    .light-theme #collaborator-modal svg.lucide-x {
+      color: #FFFFFF !important;
+      transition: color 0.2s ease;
+    }
+    .light-theme #collaborator-modal svg.lucide-x:hover {
+      color: #A855F7 !important;
+    }
+    .light-theme #collaborator-modal svg.lucide-users {
+      color: #A855F7 !important;
+    }
+  </style>
+  <div id="collaborator-modal" class="modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 9999; background: rgba(0,0,0,0.5); align-items: center; justify-content: center; backdrop-filter: blur(5px);">
+    <div style="background: var(--bg-card, #1a1a1a); border: 1px solid rgba(255,255,255,0.05); border-radius: 16px; width: 90%; max-width: 400px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); display: flex; flex-direction: column; max-height: 80vh;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h3 style="margin: 0; font-size: 1.1rem; color: var(--text);">Collaborate with Hubbers</h3>
+        <i data-lucide="x" style="cursor: pointer; color: var(--text-muted);" onclick="closeCollaboratorModal()"></i>
+      </div>
+      <input type="text" id="collaborator-search-input" placeholder="Search by name or username..." oninput="renderCollaboratorModalList(this.value)" style="width: 100%; padding: 10px 14px; border-radius: 12px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); margin-bottom: 16px; color: var(--text);">
+      <div id="collaborator-list-container" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;">
+         <!-- Users injected here -->
       </div>
     </div>
   </div>

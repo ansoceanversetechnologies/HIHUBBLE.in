@@ -259,7 +259,9 @@ document.addEventListener('DOMContentLoaded', () => {
       mediaType: media.type,
       mediaThumbUrl: media.thumbUrl,
       editorState: JSON.parse(JSON.stringify(window.HubbleEditor.state)),
-      caption: document.querySelector('.ch-caption-input')?.value || ''
+      caption: document.querySelector('.ch-caption-input')?.value || '',
+      collaborationEnabled: window.collaborationEnabled !== false,
+      collaborators: window.selectedCollaborators ? JSON.parse(JSON.stringify(window.selectedCollaborators)) : []
     };
     
     // Check if we are editing an existing draft
@@ -312,7 +314,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
         item.innerHTML = `
           <div style="display:flex; gap:10px; align-items:center; cursor:pointer;" onclick="window.loadDraft('${d.id}')">
-            <img src="${imgUrl}" style="width:40px; height:40px; border-radius:8px; object-fit:cover;" alt="Draft">
+            <img src="${imgUrl}" style="width:40px; height:40px; border-radius:8px; object-fit:contain; object-position:center;" alt="Draft">
             <div class="ch-draft-info">
               <div class="ch-draft-title" style="font-weight:600; font-size:0.85rem; max-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${title}</div>
               <div class="ch-draft-time" style="color:var(--text-muted); font-size:0.75rem;">${timeStr}</div>
@@ -352,6 +354,17 @@ document.addEventListener('DOMContentLoaded', () => {
     // Switch view to editor
     if (window.switchView) window.switchView('create-hubbs');
     window.initCreateHubbsUpload();
+    
+    // Restore collaborators
+    window.collaborationEnabled = d.collaborationEnabled !== false;
+    const toggleEl = document.getElementById('ch-collab-toggle');
+    if (toggleEl) {
+      toggleEl.checked = window.collaborationEnabled;
+      if (window.toggleCollaboration) window.toggleCollaboration(window.collaborationEnabled);
+    }
+    
+    window.selectedCollaborators = d.collaborators || [];
+    if (window.renderCollaboratorChips) window.renderCollaboratorChips();
   };
 
   window.deleteDraft = async function(id) {
@@ -1413,7 +1426,7 @@ document.addEventListener('DOMContentLoaded', () => {
           const div = document.createElement('div');
           div.style = 'display: flex; gap: 12px; align-items: center; background: rgba(255,255,255,0.05); padding: 12px; border-radius: 12px;';
           div.innerHTML = `
-            <img src="${draft.mediaUrl}" style="width: 60px; height: 60px; object-fit: cover; border-radius: 8px;" />
+            <img src="${draft.mediaUrl}" style="width: 60px; height: 60px; object-fit: contain; object-position: center; border-radius: 8px;" />
             <div style="flex: 1; color: white;">
               <p style="margin: 0; font-size: 14px; color: var(--text-muted);">${formatTimeAgo(draft.createdAt)}</p>
             </div>
@@ -8443,7 +8456,7 @@ function initCreateHubbsUpload() {
       
       const img = document.createElement('img');
       img.src = item.thumbUrl;
-      img.style.cssText = 'width: 100%; height: 100%; object-fit: cover; border-radius: 10px; pointer-events: none;';
+      img.style.cssText = 'width: 100%; height: 100%; object-fit: contain; object-position: center; border-radius: 10px; pointer-events: none;';
       previewEl.appendChild(img);
 
       if (item.type.startsWith('video/')) {
@@ -8611,7 +8624,7 @@ window.initReviewSlider = function() {
     
     [beforeMediaNode, afterMediaNode].forEach(v => {
       v.src = url;
-      v.style.cssText = 'width: 100%; height: 100%; object-fit: cover;';
+      v.style.cssText = 'width: 100%; height: 100%; object-fit: contain; object-position: center;';
       v.loop = true;
       v.muted = true;
       v.playsInline = true;
@@ -8646,7 +8659,7 @@ window.initReviewSlider = function() {
     
     [beforeMediaNode, afterMediaNode].forEach(img => {
       img.src = url;
-      img.style.cssText = 'width: 100%; height: 100%; object-fit: cover;';
+      img.style.cssText = 'width: 100%; height: 100%; object-fit: contain; object-position: center;';
     });
     
     // Apply Actual Edits from Editor State
@@ -8761,7 +8774,7 @@ window.publishHubb = function() {
   const newStoryHTML = `
     <div class="story-card has-story" onclick="window.openPublishedStory(this)">
       <div class="story-avatar-container">
-        <img src="${url}" alt="My Story" style="filter: ${filter}; object-fit: cover;">
+        <img src="${url}" alt="My Story" style="filter: ${filter}; object-fit: contain; object-position: center;">
       </div>
       <span class="story-username">Your Story</span>
       <template class="story-data">
@@ -8774,6 +8787,8 @@ window.publishHubb = function() {
           crop: window.HubbleEditor.state.crop,
           layers: window.HubbleEditor.state.layers,
           caption: caption,
+          collaborationEnabled: window.collaborationEnabled !== false,
+          collaboratorIds: window.collaborationEnabled !== false ? (window.selectedCollaborators || []).map(c => c._id || c.id) : [],
           time: Date.now()
         })}
       </template>
@@ -8824,7 +8839,7 @@ window.openPublishedStory = function(card) {
     mediaNode = document.createElement('img');
     mediaNode.src = data.url;
   }
-  mediaNode.style.cssText = 'width: 100%; height: 100%; object-fit: cover;';
+  mediaNode.style.cssText = 'width: 100%; height: 100%; object-fit: contain; object-position: center;';
   mediaNode.style.filter = data.filter;
   mediaNode.style.transform = "rotate(" + data.rotation + "deg) scale(" + data.zoom + ")";
   
@@ -9931,3 +9946,183 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
 } else {
   document.addEventListener('DOMContentLoaded', () => setTimeout(() => window.HubbleEditor.init(), 500));
 }
+
+// ==================== COLLABORATOR SELECTION LOGIC ====================
+window.selectedCollaborators = [];
+window.collaborationEnabled = true;
+let cachedHubbers = null;
+
+window.toggleCollaboration = function(enabled) {
+  window.collaborationEnabled = enabled;
+  const contentDiv = document.getElementById('ch-collab-content');
+  const msgDiv = document.getElementById('ch-collab-disabled-msg');
+  const addBtn = document.getElementById('btn-add-collaborators');
+  
+  if (window.renderCollaboratorChips) window.renderCollaboratorChips();
+  
+  if (!contentDiv || !msgDiv || !addBtn) return;
+  
+  if (enabled) {
+    contentDiv.style.opacity = '1';
+    contentDiv.style.pointerEvents = 'auto';
+    msgDiv.style.display = 'none';
+    addBtn.style.display = 'flex';
+  } else {
+    contentDiv.style.opacity = '0.55';
+    addBtn.style.display = 'none';
+    
+    if (window.selectedCollaborators.length === 0) {
+      msgDiv.style.display = 'block';
+    } else {
+      msgDiv.style.display = 'none';
+    }
+  }
+};
+
+window.openCollaboratorModal = async function() {
+  if (window.collaborationEnabled === false) return;
+  
+  const modal = document.getElementById('collaborator-modal');
+  const searchInput = document.getElementById('collaborator-search-input');
+  if(searchInput) searchInput.value = '';
+  modal.style.display = 'flex';
+  
+  if (cachedHubbers === null) {
+    const listContainer = document.getElementById('collaborator-list-container');
+    listContainer.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-muted);">Loading Hubbers...</div>';
+    
+    const token = localStorage.getItem('invibe_jwt_token');
+    const currentUserStr = localStorage.getItem('invibeUser');
+    if (!token || !currentUserStr) return;
+    
+    const currentUser = JSON.parse(currentUserStr);
+    const userId = currentUser.id || currentUser._id;
+    
+    try {
+      const res = await fetch(`${API_URL}/api/users/${userId}/followers-list`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error('Failed to load hubbers');
+      cachedHubbers = await res.json();
+    } catch (err) {
+      console.error(err);
+      cachedHubbers = [];
+    }
+  }
+  
+  window.renderCollaboratorModalList();
+};
+
+window.closeCollaboratorModal = function() {
+  const modal = document.getElementById('collaborator-modal');
+  modal.style.display = 'none';
+};
+
+window.renderCollaboratorModalList = function(query = '') {
+  const listContainer = document.getElementById('collaborator-list-container');
+  if (!listContainer) return;
+  
+  if (!cachedHubbers || cachedHubbers.length === 0) {
+    listContainer.innerHTML = `
+      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 20px; text-align: center;">
+        <i data-lucide="users" style="width: 48px; height: 48px; color: var(--text-muted); margin-bottom: 16px;"></i>
+        <h4 style="margin: 0 0 8px 0; font-size: 1.1rem; color: var(--text);">No Hubbers Found</h4>
+        <p style="margin: 0; color: var(--text-muted); font-size: 0.9rem;">You don't have any Hubbers yet.<br>Connect with people first before collaborating.</p>
+      </div>
+    `;
+    if(window.lucide) window.lucide.createIcons();
+    return;
+  }
+  
+  const lowerQuery = query.toLowerCase();
+  const filtered = cachedHubbers.filter(h => {
+    const name = (h.name || '').toLowerCase();
+    const username = (h.username || '').toLowerCase();
+    return name.includes(lowerQuery) || username.includes(lowerQuery);
+  });
+  
+  if (filtered.length === 0) {
+    listContainer.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-muted);">No matching Hubbers found.</div>';
+    return;
+  }
+  
+  const selectedIds = window.selectedCollaborators.map(c => c._id || c.id);
+  
+  listContainer.innerHTML = filtered.map(h => {
+    const isSelected = selectedIds.includes(h._id || h.id);
+    const avatar = h.profilePic || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=40&q=80';
+    return `
+      <div onclick='window.toggleCollaboratorSelection(${JSON.stringify(h).replace(/'/g, "&#39;")})' style="display: flex; align-items: center; justify-content: space-between; padding: 10px; border-radius: 12px; cursor: ${isSelected ? 'default' : 'pointer'}; background: ${isSelected ? 'rgba(168,85,247,0.1)' : 'transparent'}; border: 1px solid ${isSelected ? 'var(--primary)' : 'transparent'}; transition: all 0.2s; opacity: ${isSelected ? '0.6' : '1'};">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <img src="${avatar}" style="width: 36px; height: 36px; border-radius: 50%; object-fit: cover;">
+          <div style="display: flex; flex-direction: column;">
+            <span style="font-weight: 600; font-size: 0.9rem; color: var(--text);">${h.name || h.username}</span>
+            <span style="font-size: 0.8rem; color: var(--text-muted);">@${h.username}</span>
+          </div>
+        </div>
+        ${isSelected ? '<span style="font-size: 0.8rem; color: var(--primary); font-weight: 600;">Added</span>' : '<i data-lucide="plus" style="width: 16px; height: 16px; color: var(--text-muted);"></i>'}
+      </div>
+    `;
+  }).join('');
+  
+  if(window.lucide) window.lucide.createIcons();
+};
+
+window.toggleCollaboratorSelection = function(hubberObj) {
+  const hubberId = hubberObj._id || hubberObj.id;
+  const isSelected = window.selectedCollaborators.some(c => (c._id || c.id) === hubberId);
+  
+  if (isSelected) {
+    return; // Prevent duplicates / already added
+  } else {
+    window.selectedCollaborators.push(hubberObj);
+  }
+  
+  window.renderCollaboratorChips();
+  // Re-render modal to reflect "Added" state if modal is open
+  const searchInput = document.getElementById('collaborator-search-input');
+  if(searchInput) {
+    window.renderCollaboratorModalList(searchInput.value);
+  } else {
+    window.renderCollaboratorModalList();
+  }
+};
+
+window.removeCollaborator = function(hubberId) {
+  window.selectedCollaborators = window.selectedCollaborators.filter(c => (c._id || c.id) !== hubberId);
+  window.renderCollaboratorChips();
+  
+  // Re-render modal if open
+  const searchInput = document.getElementById('collaborator-search-input');
+  if(document.getElementById('collaborator-modal').style.display === 'flex') {
+    window.renderCollaboratorModalList(searchInput ? searchInput.value : '');
+  }
+};
+
+window.renderCollaboratorChips = function() {
+  const container = document.getElementById('ch-selected-collaborators');
+  const label = document.getElementById('ch-collaborators-label');
+  if (!container) return;
+  
+  if (window.selectedCollaborators.length > 0) {
+    if(label) label.style.display = 'block';
+  } else {
+    if(label) label.style.display = 'none';
+  }
+  
+  const isEnabled = window.collaborationEnabled !== false;
+  
+  container.innerHTML = window.selectedCollaborators.map(c => {
+    const id = c._id || c.id;
+    const avatar = c.profilePic || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=30&q=80';
+    return `
+      <div style="display: flex; align-items: center; gap: 8px; padding: 6px 12px 6px 6px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); border-radius: 20px;">
+        <img src="${avatar}" style="width: 20px; height: 20px; border-radius: 50%; object-fit: cover;">
+        <span style="font-size: 0.8rem; color: var(--text);">${c.name || c.username}</span>
+        ${isEnabled ? `<i data-lucide="x" style="width: 12px; height: 12px; cursor: pointer; color: var(--text-muted);" onclick="window.removeCollaborator('${id}')"></i>` : ''}
+      </div>
+    `;
+  }).join('');
+  
+  if (window.lucide) window.lucide.createIcons();
+};
