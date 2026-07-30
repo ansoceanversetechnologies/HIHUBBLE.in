@@ -471,7 +471,7 @@
           <!-- FIXED HEADER -->
           <div class="create-hubbs-header" style="flex-shrink: 0; border-bottom: 1px solid rgba(255,255,255,0.08); background: rgba(18,18,18,0.95); z-index: 10;">
             <div style="display: flex; align-items: center; justify-content: flex-start; max-width: 1400px; margin: 0 auto; padding: 12px 20px; min-height: 68px; gap: 20px;">
-              <button class="back-btn-new" onclick="document.getElementById('view-create-hubbs').classList.remove('active'); document.getElementById('view-home').classList.add('active'); document.body.classList.remove('create-hubbs-view-active')" style="display: flex; align-items: center; justify-content: center; gap: 8px; height: 38px; padding: 0 16px; border-radius: 999px; background: linear-gradient(135deg, var(--primary) 0%, #d946ef 100%); border: none; color: white; cursor: pointer; font-weight: 500; font-size: 0.85rem; white-space: nowrap; box-shadow: 0 4px 15px rgba(168,85,247,0.3); transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1); flex-shrink: 0;">
+              <button class="back-btn-new" onclick="if (window.chUploads && window.chUploads.length > 0) { window._silentDraftSave = true; if (window.saveCurrentDraft) window.saveCurrentDraft(); } document.getElementById('view-create-hubbs').classList.remove('active'); document.getElementById('view-home').classList.add('active'); document.body.classList.remove('create-hubbs-view-active')" style="display: flex; align-items: center; justify-content: center; gap: 8px; height: 38px; padding: 0 16px; border-radius: 999px; background: linear-gradient(135deg, var(--primary) 0%, #d946ef 100%); border: none; color: white; cursor: pointer; font-weight: 500; font-size: 0.85rem; white-space: nowrap; box-shadow: 0 4px 15px rgba(168,85,247,0.3); transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1); flex-shrink: 0;">
                 <i data-lucide="arrow-left" style="width: 16px; height: 16px;"></i> Back to Home
               </button>
               <div style="display: flex; flex-direction: column; justify-content: center;">
@@ -569,6 +569,18 @@
                         <svg class="ch-custom-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V4h16v3"/><path d="M12 4v16"/><path d="M9 20h6"/></svg>
                       </button>
                       <span style="font-size: 0.7rem; color: var(--text-muted);">Text</span>
+                    </div>
+                    <div class="ch-tool-container" style="display: flex; flex-direction: column; align-items: center; gap: 6px;">
+                      <button id="ch-tool-music-btn" class="ch-premium-tool-btn ch-tool-music" style="width: 42px; height: 42px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: var(--text-main); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;" onclick="if(window.HubbleEditor) window.HubbleEditor.openMusicSelector();">
+                        <svg class="ch-custom-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
+                      </button>
+                      <span style="font-size: 0.7rem; color: var(--text-muted);">Music</span>
+                    </div>
+                    <div class="ch-tool-container" style="display: flex; flex-direction: column; align-items: center; gap: 6px;">
+                      <button id="ch-tool-location-btn" class="ch-premium-tool-btn ch-tool-location" style="width: 42px; height: 42px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: var(--text-main); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;" onclick="if(window.HubbleEditor) window.HubbleEditor.openLocationSelector();">
+                        <svg class="ch-custom-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+                      </button>
+                      <span style="font-size: 0.7rem; color: var(--text-muted);">Location</span>
                     </div>
                   </div>
                 </div>
@@ -2171,4 +2183,19 @@
 
 
 
+  <!-- Music Selector Modal -->
+  <div id="he-music-modal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); backdrop-filter: blur(12px); z-index: 10000; display: none; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.3s;">
+    <div style="width: 90%; max-width: 400px; background: rgba(20,20,25,0.85); border: 1px solid rgba(255,255,255,0.1); border-radius: 24px; padding: 24px; box-shadow: 0 20px 50px rgba(0,0,0,0.5); display: flex; flex-direction: column; gap: 16px; position: relative;">
+      <h3 style="margin: 0; font-size: 1.2rem; color: white; display: flex; align-items: center; gap: 8px;">
+        <i data-lucide="music" style="color: var(--primary);"></i> Add Music
+      </h3>
+      <button onclick="document.getElementById('he-music-modal').style.opacity = '0'; setTimeout(() => document.getElementById('he-music-modal').style.display = 'none', 300);" style="position: absolute; top: 20px; right: 20px; background: none; border: none; color: white; cursor: pointer; opacity: 0.7;"><i data-lucide="x"></i></button>
+      
+      <div id="he-music-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto;">
+        <!-- Tracks injected here via JS -->
+      </div>
+      
+      <button id="he-music-remove-btn" onclick="if(window.HubbleEditor) window.HubbleEditor.removeMusic();" style="display: none; padding: 12px; border-radius: 12px; background: rgba(255,59,48,0.1); color: #ff3b30; border: 1px solid rgba(255,59,48,0.2); font-weight: 600; cursor: pointer; transition: all 0.2s;">Remove Music</button>
+    </div>
+  </div>
 </body></html>

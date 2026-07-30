@@ -261,7 +261,10 @@ document.addEventListener('DOMContentLoaded', () => {
       editorState: JSON.parse(JSON.stringify(window.HubbleEditor.state)),
       caption: document.querySelector('.ch-caption-input')?.value || '',
       collaborationEnabled: window.collaborationEnabled !== false,
-      collaborators: window.selectedCollaborators ? JSON.parse(JSON.stringify(window.selectedCollaborators)) : []
+      collaborators: window.selectedCollaborators ? JSON.parse(JSON.stringify(window.selectedCollaborators)) : [],
+      scheduleEnabled: document.getElementById('ch-schedule-toggle')?.checked || false,
+      scheduleDate: document.getElementById('ch-schedule-date')?.value || '',
+      scheduleTime: document.getElementById('ch-schedule-time')?.value || ''
     };
     
     // Check if we are editing an existing draft
@@ -272,11 +275,17 @@ document.addEventListener('DOMContentLoaded', () => {
     
     try {
       await DraftsDB.saveDraft(draft);
-      showToast('Saved as draft! 📝');
+      if (!window._silentDraftSave) {
+        showToast('Saved as draft! 📝');
+      }
+      window._silentDraftSave = false;
       window.renderDraftsList();
     } catch(err) {
       console.error(err);
-      showToast('Failed to save draft');
+      if (!window._silentDraftSave) {
+        showToast('Failed to save draft');
+      }
+      window._silentDraftSave = false;
     }
   };
 
@@ -411,6 +420,17 @@ document.addEventListener('DOMContentLoaded', () => {
     
     window.selectedCollaborators = d.collaborators || [];
     if (window.renderCollaboratorChips) window.renderCollaboratorChips();
+    
+    // Restore scheduling
+    const schedToggle = document.getElementById('ch-schedule-toggle');
+    if (schedToggle) {
+      schedToggle.checked = d.scheduleEnabled === true;
+      if (window.toggleScheduling) window.toggleScheduling(schedToggle.checked);
+    }
+    const schedDate = document.getElementById('ch-schedule-date');
+    if (schedDate) schedDate.value = d.scheduleDate || '';
+    const schedTime = document.getElementById('ch-schedule-time');
+    if (schedTime) schedTime.value = d.scheduleTime || '';
   };
 
   window.deleteDraft = async function(id) {
@@ -430,8 +450,37 @@ document.addEventListener('DOMContentLoaded', () => {
     window.renderDraftsList();
   };
 
+  // --- AUTO SAVE DEBOUNCE ---
+  let autoSaveTimeout = null;
+  window.triggerAutoSave = function() {
+    if (state.activeView === 'create-hubbs' && window.chUploads && window.chUploads.length > 0) {
+      clearTimeout(autoSaveTimeout);
+      autoSaveTimeout = setTimeout(() => {
+        window._silentDraftSave = true;
+        if (window.saveCurrentDraft) window.saveCurrentDraft();
+      }, 3000);
+    }
+  };
+
   // Run on init
   document.addEventListener('DOMContentLoaded', () => {
+    document.addEventListener('input', (e) => {
+      if (e.target.closest('#view-create-hubbs') || e.target.closest('#view-review-hubbs')) {
+        window.triggerAutoSave();
+      }
+    });
+    document.addEventListener('change', (e) => {
+      if (e.target.closest('#view-create-hubbs') || e.target.closest('#view-review-hubbs')) {
+        window.triggerAutoSave();
+      }
+    });
+    window.addEventListener('beforeunload', (e) => {
+      if (state.activeView === 'create-hubbs' && window.chUploads && window.chUploads.length > 0) {
+        window._silentDraftSave = true;
+        if (window.saveCurrentDraft) window.saveCurrentDraft();
+      }
+    });
+
     setTimeout(() => {
       window.renderDraftsList();
     }, 500);
@@ -482,6 +531,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function switchView(viewName, userId) {
     if (!viewName) return;
+
+    if (state.activeView === 'create-hubbs' && viewName !== 'create-hubbs' && window.chUploads && window.chUploads.length > 0) {
+      window._silentDraftSave = true;
+      if (window.saveCurrentDraft) window.saveCurrentDraft();
+    }
 
     state.activeView = viewName;
 
@@ -8550,6 +8604,9 @@ function initCreateHubbsUpload() {
           if (item.type.startsWith('image/')) {
             URL.revokeObjectURL(item.thumbUrl);
           }
+          if (window.HubbleEditor && window.HubbleEditor.cleanupMedia) {
+            window.HubbleEditor.cleanupMedia();
+          }
           renderMediaPreviews();
         }, 350); // wait for animation to complete
       };
@@ -8775,6 +8832,11 @@ window.initReviewSlider = function() {
   [beforeContainer, afterContainer].forEach(container => {
     Array.from(container.children).forEach(child => {
       if (!child.style.position.includes('absolute')) {
+        if (child.tagName === 'VIDEO') {
+          child.pause();
+          child.removeAttribute('src');
+          child.load();
+        }
         child.remove();
       }
     });
@@ -8794,7 +8856,7 @@ window.initReviewSlider = function() {
       v.src = url;
       v.style.cssText = 'width: 100%; height: 100%; object-fit: contain; object-position: center;';
       v.loop = true;
-      v.muted = true;
+      v.muted = window.HubbleEditor.state.isMuted;
       v.playsInline = true;
       v.autoplay = true;
     });
@@ -8805,22 +8867,59 @@ window.initReviewSlider = function() {
     afterMediaNode.style.transform = `rotate(${window.HubbleEditor.state.rotation}deg) scale(${zoom})`;
     
     // Sync Logic: The BEFORE (Left/Raw) controls the AFTER (Right/Edited)
-    beforeMediaNode.addEventListener('play', () => afterMediaNode.play());
-    beforeMediaNode.addEventListener('pause', () => afterMediaNode.pause());
-    beforeMediaNode.addEventListener('seeking', () => afterMediaNode.currentTime = beforeMediaNode.currentTime);
-    beforeMediaNode.addEventListener('seeked', () => afterMediaNode.currentTime = beforeMediaNode.currentTime);
+    beforeMediaNode.addEventListener('play', () => { 
+      afterMediaNode.play(); 
+      window.HubbleEditor.GlobalAudio.sync(beforeMediaNode.currentTime);
+      window.HubbleEditor.GlobalAudio.play(); 
+    });
+    beforeMediaNode.addEventListener('pause', () => { 
+      afterMediaNode.pause(); 
+      window.HubbleEditor.GlobalAudio.pause(); 
+    });
+    beforeMediaNode.addEventListener('seeking', () => {
+      afterMediaNode.currentTime = beforeMediaNode.currentTime;
+      window.HubbleEditor.GlobalAudio.sync(beforeMediaNode.currentTime);
+    });
+    beforeMediaNode.addEventListener('seeked', () => {
+      afterMediaNode.currentTime = beforeMediaNode.currentTime;
+      window.HubbleEditor.GlobalAudio.sync(beforeMediaNode.currentTime);
+    });
 
     // Provide minimal playback control on clicking the wrapper
     sliderWrapper.onclick = (e) => {
-      if (e.target.id === 'review-slider-handle' || e.target.closest('#review-slider-handle')) return;
+      if (e.target.id === 'review-slider-handle' || e.target.closest('#review-slider-handle') || e.target.closest('#he-speaker-btn')) return;
       if (beforeMediaNode.paused) {
         beforeMediaNode.play();
+        const btn = document.getElementById('he-review-play-btn');
+        if (btn) {
+            btn.innerHTML = '<i data-lucide="pause" style="color: white; width: 32px; height: 32px;"></i>';
+            if (window.lucide) window.lucide.createIcons();
+            btn.style.opacity = '1';
+            btn.style.transform = 'scale(1)';
+            setTimeout(() => { btn.style.opacity = '0'; btn.style.transform = 'scale(0.9)'; }, 2000);
+        }
       } else {
         beforeMediaNode.pause();
+        const btn = document.getElementById('he-review-play-btn');
+        if (btn) {
+            btn.innerHTML = '<i data-lucide="play" style="color: white; width: 32px; height: 32px;"></i>';
+            if (window.lucide) window.lucide.createIcons();
+            btn.style.opacity = '1';
+            btn.style.transform = 'scale(1)';
+        }
       }
     };
     
+    // Create Controls Overlay for Review
+    let reviewControls = document.getElementById('he-review-controls');
+    if (reviewControls) {
+        reviewControls.remove();
+    }
+    reviewControls = window.HubbleEditor.buildVideoControls(sliderWrapper, beforeMediaNode, true);
+
   } else {
+    let reviewControls = document.getElementById('he-review-controls');
+    if (reviewControls) reviewControls.remove();
     // Render Images
     beforeMediaNode = document.createElement('img');
     afterMediaNode = document.createElement('img');
@@ -9028,6 +9127,14 @@ window.publishHubb = async function() {
   
   window.chUploads = [];
   
+  if (window.currentDraftId) {
+    DraftsDB.deleteDraft(window.currentDraftId).then(() => {
+      window.currentDraftId = null;
+      window.currentDraftCreatedAt = null;
+      window.renderDraftsList();
+    }).catch(console.error);
+  }
+  
   if (pubBtn) {
     pubBtn.disabled = false;
     pubBtn.style.opacity = '1';
@@ -9124,7 +9231,10 @@ window.HubbleEditor = {
       temperature: 0, tint: 0, saturation: 100, vibrance: 100, sharpness: 0, blur: 0, opacity: 100
     },
     crop: null, // { x, y, width, height, aspect }
-    layers: [] // { id, type, content, x, y, rotation, scale, zIndex, styles }
+    layers: [], // { id, type, content, x, y, rotation, scale, zIndex, styles }
+    isMuted: false,
+    musicTrack: null, // { url, title, artist }
+    selectedLocation: null // { displayName, type, lat, lon }
   },
   history: [],
   redoStack: [],
@@ -9186,13 +9296,17 @@ window.HubbleEditor = {
       if (window.lucide) window.lucide.createIcons();
       
       const overlay = document.getElementById('he-crop-overlay');
-      if (overlay) {
-        overlay.style.cursor = 'move';
+      const container = document.getElementById('he-render-container');
+      
+      if (overlay) overlay.style.cursor = 'move';
+      
+      if (container && !container.dataset.zoomPanBound) {
+        container.dataset.zoomPanBound = "true";
         
         // Mouse Wheel Zoom
-        overlay.addEventListener('wheel', (e) => {
+        container.addEventListener('wheel', (e) => {
+          if (e.target.closest('#he-video-controls') || e.target.closest('#he-review-controls') || e.target.closest('.he-delete-btn') || e.target.closest('.ch-premium-tool-btn')) return;
           e.preventDefault();
-          const container = document.getElementById('he-render-container');
           const rect = container.getBoundingClientRect();
           
           const mouseX = ((e.clientX - rect.left) / rect.width * 100) - 50;
@@ -9213,7 +9327,9 @@ window.HubbleEditor = {
         let isMousePanning = false;
         let mousePanStartX, mousePanStartY, mouseInitialPanX, mouseInitialPanY;
         
-        overlay.addEventListener('mousedown', (e) => {
+        container.addEventListener('mousedown', (e) => {
+          if (e.target.closest('#he-video-controls') || e.target.closest('#he-review-controls') || e.target.closest('.he-delete-btn') || e.target.closest('.ch-premium-tool-btn')) return;
+          if ((HubbleEditor.state.zoom || 1) <= 1) return;
           isMousePanning = true;
           mousePanStartX = e.clientX;
           mousePanStartY = e.clientY;
@@ -9224,7 +9340,6 @@ window.HubbleEditor = {
         window.addEventListener('mousemove', (e) => {
           if (isMousePanning) {
             e.preventDefault();
-            const container = document.getElementById('he-render-container');
             const rect = container.getBoundingClientRect();
             const dx = ((e.clientX - mousePanStartX) / rect.width) * 100;
             const dy = ((e.clientY - mousePanStartY) / rect.height) * 100;
@@ -9246,7 +9361,8 @@ window.HubbleEditor = {
         let isTouchPanning = false;
         let touchPanStartX, touchPanStartY;
         
-        overlay.addEventListener('touchstart', (e) => {
+        container.addEventListener('touchstart', (e) => {
+          if (e.target.closest('#he-video-controls') || e.target.closest('#he-review-controls') || e.target.closest('.he-delete-btn') || e.target.closest('.ch-premium-tool-btn')) return;
           if (e.touches.length === 2) {
             e.preventDefault();
             isTouchPanning = false;
@@ -9261,6 +9377,7 @@ window.HubbleEditor = {
                 y: (e.touches[0].clientY + e.touches[1].clientY) / 2
             };
           } else if (e.touches.length === 1) {
+            if ((HubbleEditor.state.zoom || 1) <= 1) return;
             isTouchPanning = true;
             touchPanStartX = e.touches[0].clientX;
             touchPanStartY = e.touches[0].clientY;
@@ -9269,7 +9386,7 @@ window.HubbleEditor = {
           }
         }, { passive: false });
         
-        overlay.addEventListener('touchmove', (e) => {
+        container.addEventListener('touchmove', (e) => {
           if (e.touches.length === 2 && initialPinchDist) {
             e.preventDefault();
             const dx = e.touches[0].clientX - e.touches[1].clientX;
@@ -9278,7 +9395,6 @@ window.HubbleEditor = {
             const scale = dist / initialPinchDist;
             let newZoom = Math.max(0.5, Math.min(3, initialZoom * scale));
             
-            const container = document.getElementById('he-render-container');
             const rect = container.getBoundingClientRect();
             
             const currentCenterX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
@@ -9295,7 +9411,6 @@ window.HubbleEditor = {
             HubbleEditor.setCropZoom(newZoom);
           } else if (e.touches.length === 1 && isTouchPanning) {
             e.preventDefault();
-            const container = document.getElementById('he-render-container');
             const rect = container.getBoundingClientRect();
             const dx = ((e.touches[0].clientX - touchPanStartX) / rect.width) * 100;
             const dy = ((e.touches[0].clientY - touchPanStartY) / rect.height) * 100;
@@ -9307,7 +9422,7 @@ window.HubbleEditor = {
           }
         }, { passive: false });
         
-        overlay.addEventListener('touchend', (e) => {
+        container.addEventListener('touchend', (e) => {
           if (e.touches.length < 2) initialPinchDist = null;
           if (e.touches.length === 0) isTouchPanning = false;
         });
@@ -9665,8 +9780,7 @@ window.HubbleEditor = {
   },
 
   enforcePanConstraints() {
-    let crop = this.tempCrop || this.state.crop;
-    if (!crop) return;
+    let crop = this.tempCrop || this.state.crop || { x: 0, y: 0, width: 100, height: 100 };
     let z = this.state.zoom || 1;
     let { x, y, width, height } = crop;
     
@@ -9823,22 +9937,6 @@ window.HubbleEditor = {
 
   openCanvas() {
     const modal = document.getElementById('he-canvas-modal');
-    if (modal && !modal.dataset.wheelBound) {
-       modal.dataset.wheelBound = 'true';
-       const container = document.getElementById('he-render-container');
-       container.addEventListener('wheel', (e) => {
-          e.preventDefault();
-          if (!this.state.zoom) this.state.zoom = 1;
-          this.state.zoom -= e.deltaY * 0.01;
-          this.state.zoom = Math.max(1, Math.min(this.state.zoom, 5));
-          this.updateRender();
-          if (document.querySelector('input[type="range"]')) {
-             // Re-render panels to update slider UI if active
-             const activeBtn = document.querySelector('.ch-premium-tool-btn.active');
-             if(activeBtn && activeBtn.innerText.includes('Crop')) this.renderPanels('crop');
-          }
-       }, { passive: false });
-    }
     if (!modal) return;
     modal.style.display = 'flex';
     requestAnimationFrame(() => modal.style.opacity = '1');
@@ -9850,6 +9948,25 @@ window.HubbleEditor = {
     this.updateRender();
   },
 
+  cleanupMedia() {
+    const videos = [
+      ...document.querySelectorAll('#he-media-layer video'),
+      ...document.querySelectorAll('#review-slider-wrapper video')
+    ];
+    videos.forEach(v => {
+      v.pause();
+      v.removeAttribute('src');
+      v.load();
+    });
+    const mediaLayer = document.getElementById('he-media-layer');
+    if (mediaLayer) mediaLayer.innerHTML = '';
+    
+    if (this.GlobalAudio) {
+      this.GlobalAudio.pause();
+      this.GlobalAudio.audio.currentTime = 0;
+    }
+  },
+
   closeCanvas() {
     const overlay = document.getElementById('he-crop-overlay');
     if (overlay && overlay.style.display !== 'none') {
@@ -9858,6 +9975,10 @@ window.HubbleEditor = {
     }
     const modal = document.getElementById('he-canvas-modal');
     if (!modal) return;
+
+    // HALT Editor Video & Audio
+    this.cleanupMedia();
+
     modal.style.opacity = '0';
     setTimeout(() => {
       modal.style.display = 'none';
@@ -10058,12 +10179,27 @@ window.HubbleEditor = {
     
     // Render Media Node
     if (!mediaLayer.firstChild || mediaLayer.firstChild.dataset.url !== media.thumbUrl) {
+      if (mediaLayer.firstChild && mediaLayer.firstChild.tagName === 'VIDEO') {
+        mediaLayer.firstChild.pause();
+        mediaLayer.firstChild.removeAttribute('src');
+        mediaLayer.firstChild.load();
+      }
       mediaLayer.innerHTML = '';
       let node;
       if (media.type.startsWith('video/')) {
         node = document.createElement('video');
         node.src = URL.createObjectURL(media.file);
-        node.loop = true; node.muted = true; node.autoplay = true; node.playsInline = true;
+        node.loop = true; node.muted = window.HubbleEditor.state.isMuted; node.autoplay = true; node.playsInline = true;
+        
+        // Sync Audio
+        node.addEventListener('play', () => {
+           window.HubbleEditor.GlobalAudio.sync(node.currentTime);
+           window.HubbleEditor.GlobalAudio.play();
+        });
+        node.addEventListener('pause', () => window.HubbleEditor.GlobalAudio.pause());
+        node.addEventListener('seeking', () => window.HubbleEditor.GlobalAudio.sync(node.currentTime));
+        node.addEventListener('seeked', () => window.HubbleEditor.GlobalAudio.sync(node.currentTime));
+        
       } else {
         node = document.createElement('img');
         node.src = media.thumbUrl;
@@ -10074,10 +10210,27 @@ window.HubbleEditor = {
       mediaLayer.appendChild(node);
     }
     
+    // Ensure we have a reference to the active media node
+    const activeMediaNode = mediaLayer.firstChild;
+    
+    // Video Controls overlay
+    let videoControls = document.getElementById('he-video-controls');
+    if (media.type.startsWith('video/')) {
+      if (!videoControls) {
+        videoControls = this.buildVideoControls(container, activeMediaNode, false);
+      } else {
+        videoControls.remove();
+        videoControls = this.buildVideoControls(container, activeMediaNode, false);
+      }
+    } else {
+      if (videoControls) {
+        videoControls.remove();
+      }
+    }
+
     // Apply Transforms, Filters & Zoom
-    const node = mediaLayer.firstChild;
-    node.style.filter = this.buildCSSFilterString();
-    node.style.transform = `translate(${this.state.panX || 0}%, ${this.state.panY || 0}%) rotate(${this.state.rotation}deg) scale(${this.state.zoom || 1})`;
+    activeMediaNode.style.filter = this.buildCSSFilterString();
+    activeMediaNode.style.transform = `translate(${this.state.panX || 0}%, ${this.state.panY || 0}%) rotate(${this.state.rotation}deg) scale(${this.state.zoom || 1})`;
     
     // Apply Crop Clip-Path to Media and Interaction Layers (but NOT the crop overlay)
     if (this.state.crop) {
@@ -10417,8 +10570,634 @@ window.HubbleEditor = {
     html += `</div>`;
     container.innerHTML = html;
     if (window.lucide) window.lucide.createIcons();
+  },
+
+  GlobalAudio: {
+    audio: new Audio(),
+    init() {
+      this.audio.loop = true;
+    },
+    play() {
+      if (window.HubbleEditor.state.musicTrack) {
+        this.audio.play().catch(e => console.error("Audio play error", e));
+      }
+    },
+    pause() {
+      this.audio.pause();
+    },
+    setTrack(trackUrl) {
+      this.audio.src = trackUrl;
+      this.audio.load();
+    },
+    sync(time) {
+      if (Math.abs(this.audio.currentTime - time) > 0.2) {
+        this.audio.currentTime = time;
+      }
+    },
+    stop() {
+      this.audio.pause();
+      this.audio.currentTime = 0;
+    }
+  },
+
+  openLocationSelector() {
+    const renderContainer = document.getElementById('he-render-container');
+    if (!renderContainer) return;
+    
+    let locationOverlay = document.getElementById('he-location-overlay');
+    
+    if (locationOverlay) {
+        // Toggle off if already open
+        locationOverlay.remove();
+        if (this._locationSearchTimeout) clearTimeout(this._locationSearchTimeout);
+        this.state.selectedLocation = null;
+        return;
+    }
+    
+    locationOverlay = document.createElement('div');
+    locationOverlay.id = 'he-location-overlay';
+    // Style as a glassmorphism widget placed at top-left inside media preview
+    locationOverlay.style.cssText = `
+        position: absolute;
+        top: 20px;
+        left: 20px;
+        width: 280px;
+        max-width: calc(100% - 40px);
+        z-index: 50; /* Ensure it's above canvas but inside render container */
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    `;
+    
+    // Prevent dragging/zooming when interacting with search overlay
+    locationOverlay.addEventListener('mousedown', e => e.stopPropagation());
+    locationOverlay.addEventListener('wheel', e => e.stopPropagation());
+    locationOverlay.addEventListener('touchstart', e => e.stopPropagation());
+
+    const searchInputWrapper = document.createElement('div');
+    searchInputWrapper.style.cssText = `
+        position: relative;
+        width: 100%;
+        background: rgba(0,0,0,0.5);
+        backdrop-filter: blur(12px);
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 12px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        transition: border-color 0.2s;
+    `;
+    
+    const searchIcon = document.createElement('i');
+    searchIcon.setAttribute('data-lucide', 'map-pin');
+    searchIcon.style.cssText = 'position: absolute; left: 14px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: rgba(255,255,255,0.6);';
+    searchInputWrapper.appendChild(searchIcon);
+    
+    const searchInput = document.createElement('input');
+    searchInput.id = 'he-location-search-input';
+    searchInput.type = 'text';
+    searchInput.placeholder = '📍 Search location...';
+    // If we have a selected location, show its name
+    if (this.state.selectedLocation && this.state.selectedLocation.displayName) {
+        searchInput.value = this.state.selectedLocation.displayName;
+    }
+    searchInput.style.cssText = `
+        width: 100%;
+        background: transparent;
+        border: none;
+        padding: 12px 14px 12px 38px;
+        color: white;
+        font-family: inherit;
+        font-size: 0.9rem;
+        outline: none;
+        box-sizing: border-box;
+        pointer-events: auto;
+        user-select: auto;
+    `;
+    
+    // Ensure clicking the input actually focuses it, bypassing any global preventDefault
+    searchInput.addEventListener('mousedown', e => {
+        e.stopPropagation();
+    });
+    searchInput.addEventListener('click', e => {
+        e.stopPropagation();
+        searchInput.focus();
+    });
+    
+    // Prevent typing from triggering editor shortcuts (e.g. Backspace deleting layers)
+    searchInput.addEventListener('keydown', e => {
+        e.stopPropagation();
+        if (e.key === 'Escape') {
+            document.getElementById('he-location-results-container').style.display = 'none';
+            searchInput.blur();
+        }
+    });
+    
+    searchInput.addEventListener('input', e => {
+        if (window.HubbleEditor) window.HubbleEditor.handleLocationSearch(e.target.value);
+    });
+    
+    searchInput.addEventListener('focus', () => {
+        searchInputWrapper.style.borderColor = 'var(--primary)';
+        document.getElementById('he-location-results-container').style.display = 'flex';
+        // Only trigger search if there is a query, else show empty
+        if (searchInput.value.trim().length >= 2) {
+            this.handleLocationSearch(searchInput.value);
+        } else {
+            this.renderLocationResults(null, 'empty_default');
+        }
+    });
+    
+    searchInput.addEventListener('blur', () => {
+        searchInputWrapper.style.borderColor = 'rgba(255,255,255,0.1)';
+    });
+
+    searchInputWrapper.appendChild(searchInput);
+    
+    const resultsContainer = document.createElement('div');
+    resultsContainer.id = 'he-location-results-container';
+    resultsContainer.style.cssText = `
+        display: none;
+        flex-direction: column;
+        gap: 8px;
+        width: 100%;
+        background: rgba(0,0,0,0.6);
+        backdrop-filter: blur(12px);
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 12px;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+        /* Approx height for 3 items (approx 58px each + gaps/padding) */
+        max-height: 200px;
+        overflow-y: auto;
+        padding: 8px;
+        box-sizing: border-box;
+    `;
+    
+    // Add custom thin scrollbar css rules for this container implicitly
+    // (We will add the scrollbar styling in style.css or rely on the global one if it exists)
+    resultsContainer.classList.add('he-thin-scrollbar');
+    
+    locationOverlay.appendChild(searchInputWrapper);
+    locationOverlay.appendChild(resultsContainer);
+    
+    renderContainer.appendChild(locationOverlay);
+    
+    if (window.lucide) window.lucide.createIcons();
+    
+    // Close dropdown on outside click
+    const outsideClickListener = (e) => {
+        if (!locationOverlay.contains(e.target)) {
+            resultsContainer.style.display = 'none';
+        }
+    };
+    document.addEventListener('mousedown', outsideClickListener);
+    
+    // Cleanup listener when overlay is removed
+    const observer = new MutationObserver((mutations) => {
+        mutations.forEach((mutation) => {
+            mutation.removedNodes.forEach((node) => {
+                if (node === locationOverlay) {
+                    document.removeEventListener('mousedown', outsideClickListener);
+                    observer.disconnect();
+                }
+            });
+        });
+    });
+    observer.observe(renderContainer, { childList: true });
+    
+    // Initial render empty
+    this.renderLocationResults(null, 'empty_default');
+    
+    searchInput.focus();
+  },
+
+  _locationSearchTimeout: null,
+  _locationSearchAbortController: null,
+  _lastLocationResults: null,
+  _lastLocationState: 'default',
+
+  handleLocationSearch(query) {
+    if (this._locationSearchTimeout) clearTimeout(this._locationSearchTimeout);
+    if (this._locationSearchAbortController) this._locationSearchAbortController.abort();
+    
+    if (!query || query.trim().length < 2) {
+      this.renderLocationResults(null, 'empty_default');
+      return;
+    }
+
+    this.renderLocationResults(null, 'loading');
+
+    this._locationSearchTimeout = setTimeout(async () => {
+      this._locationSearchAbortController = new AbortController();
+      try {
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&addressdetails=1&limit=5`, {
+          signal: this._locationSearchAbortController.signal,
+          headers: { 'Accept-Language': 'en-US,en;q=0.9' }
+        });
+        if (!res.ok) throw new Error('Network error');
+        const data = await res.json();
+        
+        if (data && data.length > 0) {
+          const results = data.map(item => {
+            const addr = item.address;
+            const mainName = item.name || addr.city || addr.town || addr.village || 'Unknown';
+            const parts = [];
+            if (addr.city && addr.city !== mainName) parts.push(addr.city);
+            if (addr.state) parts.push(addr.state);
+            if (addr.country) parts.push(addr.country);
+            return {
+              id: item.place_id,
+              displayName: mainName,
+              subText: parts.join(', '),
+              lat: item.lat,
+              lon: item.lon,
+              type: item.type
+            };
+          });
+          this.renderLocationResults(results, 'results');
+        } else {
+          this.renderLocationResults(null, 'empty');
+        }
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          console.error("Location search error:", err);
+          this.renderLocationResults(null, 'error');
+        }
+      }
+    }, 300);
+  },
+
+  renderLocationResults(results, state) {
+    this._lastLocationResults = results;
+    this._lastLocationState = state;
+    
+    const container = document.getElementById('he-location-results-container');
+    if (!container) return;
+    
+    const buildItemHTML = (id, mainText, subText, isSelected) => {
+        const bg = isSelected ? 'rgba(168,85,247,0.15)' : 'rgba(255,255,255,0.02)';
+        const border = isSelected ? 'rgba(168,85,247,0.5)' : 'transparent';
+        const checkIcon = isSelected ? `<i data-lucide="check" style="color: var(--primary); width: 16px; height: 16px; margin-left: auto;"></i>` : '';
+        return `
+          <div onclick="if(window.HubbleEditor) window.HubbleEditor.selectLocation('${id.replace(/'/g, "\\'")}', '${mainText.replace(/'/g, "\\'")}', '${subText ? subText.replace(/'/g, "\\'") : ''}')" style="display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 12px; background: ${bg}; border: 1px solid ${border}; cursor: pointer; transition: all 0.2s;" onmouseover="if(!${isSelected}){this.style.background='rgba(255,255,255,0.05)'; this.style.borderColor='rgba(255,255,255,0.1)';}" onmouseout="if(!${isSelected}){this.style.background='rgba(255,255,255,0.02)'; this.style.borderColor='transparent';}">
+            <div style="width: 32px; height: 32px; border-radius: 50%; background: rgba(255,255,255,0.05); display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+              <i data-lucide="map-pin" style="color: ${isSelected ? 'var(--primary)' : 'rgba(255,255,255,0.6)'}; width: 14px; height: 14px;"></i>
+            </div>
+            <div style="display: flex; flex-direction: column; overflow: hidden; text-align: left;">
+                <span style="color: white; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${mainText}</span>
+                ${subText ? `<span style="color: rgba(255,255,255,0.4); font-size: 0.75rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${subText}</span>` : ''}
+            </div>
+            ${checkIcon}
+          </div>
+        `;
+    };
+
+    if (state === 'empty_default') {
+        container.style.display = 'none'; // hide if nothing typed
+    } else if (state === 'loading') {
+        container.style.display = 'flex';
+        container.innerHTML = `
+        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 16px; gap: 12px; color: rgba(255,255,255,0.6);">
+            <div class="he-spinner" style="width: 20px; height: 20px; border: 2px solid rgba(255,255,255,0.2); border-top-color: var(--primary); border-radius: 50%; animation: he-spin 1s linear infinite;"></div>
+        </div>`;
+    } else if (state === 'empty') {
+        container.style.display = 'flex';
+        container.innerHTML = `
+        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 16px; gap: 8px; color: rgba(255,255,255,0.6);">
+            <span style="font-size: 0.85rem;">No locations found.</span>
+        </div>`;
+    } else if (state === 'error') {
+        container.style.display = 'flex';
+        container.innerHTML = `
+        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 16px; gap: 8px; color: rgba(255,255,255,0.6);">
+            <span style="font-size: 0.85rem;">Couldn't load locations.</span>
+        </div>`;
+    } else if (state === 'results' && results) {
+        container.style.display = 'flex';
+        let html = `<div style="display: flex; flex-direction: column; gap: 8px;">`;
+        results.forEach(res => {
+            const isSelected = this.state.selectedLocation && String(this.state.selectedLocation.id) === String(res.id);
+            html += buildItemHTML(String(res.id), res.displayName, res.subText, isSelected);
+        });
+        html += `</div>`;
+        container.innerHTML = html;
+        if (window.lucide) window.lucide.createIcons();
+    }
+  },
+
+  selectLocation(id, displayName, subText) {
+    this.state.selectedLocation = {
+        id: id,
+        displayName: displayName,
+        subText: subText
+    };
+    
+    const searchInput = document.getElementById('he-location-search-input');
+    if (searchInput) {
+        searchInput.value = displayName;
+    }
+    
+    const resultsContainer = document.getElementById('he-location-results-container');
+    if (resultsContainer) {
+        resultsContainer.style.display = 'none';
+    }
+  },
+
+  openMusicSelector() {
+    const modal = document.getElementById('he-music-modal');
+    const list = document.getElementById('he-music-list');
+    const removeBtn = document.getElementById('he-music-remove-btn');
+    if(!modal || !list) return;
+    
+    // Mock Tracks
+    const tracks = [
+      { id: 'm1', title: 'Summer Vibes', artist: 'Chill Wave', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3' },
+      { id: 'm2', title: 'Urban Flow', artist: 'Beat Maker', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3' },
+      { id: 'm3', title: 'Ambient Journey', artist: 'Space Echo', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3' },
+      { id: 'm4', title: 'Acoustic Sunrise', artist: 'Folk Tales', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3' }
+    ];
+    
+    list.innerHTML = '';
+    tracks.forEach(t => {
+      const isSelected = window.HubbleEditor.state.musicTrack && window.HubbleEditor.state.musicTrack.id === t.id;
+      const el = document.createElement('div');
+      el.style.cssText = `display: flex; align-items: center; justify-content: space-between; padding: 12px; border-radius: 12px; background: ${isSelected ? 'rgba(168,85,247,0.2)' : 'rgba(255,255,255,0.05)'}; border: 1px solid ${isSelected ? 'var(--primary)' : 'rgba(255,255,255,0.1)'}; cursor: pointer; transition: all 0.2s;`;
+      el.innerHTML = `
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+          <span style="color: white; font-weight: 600; font-size: 0.95rem;">${t.title}</span>
+          <span style="color: rgba(255,255,255,0.5); font-size: 0.8rem;">${t.artist}</span>
+        </div>
+        ${isSelected ? '<i data-lucide="check-circle" style="color: var(--primary); width: 20px; height: 20px;"></i>' : '<i data-lucide="play-circle" style="color: rgba(255,255,255,0.5); width: 20px; height: 20px;"></i>'}
+      `;
+      el.onclick = () => {
+        window.HubbleEditor.pushHistory();
+        window.HubbleEditor.state.musicTrack = t;
+        window.HubbleEditor.GlobalAudio.setTrack(t.url);
+        window.HubbleEditor.openMusicSelector(); // re-render
+        
+        const canvasVideo = document.querySelector('#he-media-layer video');
+        if(canvasVideo && !canvasVideo.paused) {
+           window.HubbleEditor.GlobalAudio.play();
+        }
+      };
+      list.appendChild(el);
+    });
+    
+    removeBtn.style.display = window.HubbleEditor.state.musicTrack ? 'block' : 'none';
+    
+    modal.style.display = 'flex';
+    setTimeout(() => modal.style.opacity = '1', 10);
+    if(window.lucide) window.lucide.createIcons();
+  },
+
+  removeMusic() {
+    window.HubbleEditor.pushHistory();
+    window.HubbleEditor.state.musicTrack = null;
+    window.HubbleEditor.GlobalAudio.stop();
+    const modal = document.getElementById('he-music-modal');
+    if (modal) {
+      modal.style.opacity = '0';
+      setTimeout(() => modal.style.display = 'none', 300);
+    }
+  },
+
+  toggleSpeaker(e, forceMute = null) {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    
+    if (window.HubbleEditor._isTogglingSpeaker) return;
+    window.HubbleEditor._isTogglingSpeaker = true;
+    setTimeout(() => { window.HubbleEditor._isTogglingSpeaker = false; }, 150);
+
+    const state = window.HubbleEditor.state;
+    if (forceMute !== null) {
+      state.isMuted = forceMute;
+    } else {
+      state.isMuted = !state.isMuted;
+    }
+    
+    // Smooth Mute: Update volume to 0/1 to prevent decoder stutter on some browsers
+    const videos = [
+      document.querySelector('#he-media-layer video'),
+      ...document.querySelectorAll('#review-slider-wrapper video')
+    ];
+    
+    videos.forEach(v => {
+      if (v) {
+        v.muted = state.isMuted;
+        v.volume = state.isMuted ? 0 : 1;
+      }
+    });
+    
+    // Update speaker UI efficiently
+    const mutedIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>';
+    const unmutedIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>';
+    
+    document.querySelectorAll('.he-speaker-icon').forEach(icon => {
+      icon.innerHTML = state.isMuted ? mutedIcon : unmutedIcon;
+    });
+  },
+
+  buildVideoControls(container, videoNode, isReview = false) {
+    const controlsId = isReview ? 'he-review-controls' : 'he-video-controls';
+    let controls = document.createElement('div');
+    controls.id = controlsId;
+    controls.style.cssText = 'position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1000; display: flex; flex-direction: column; justify-content: flex-end; padding-bottom: 24px;';
+    
+    const playBtn = document.createElement('div');
+    playBtn.id = isReview ? 'he-review-play-btn' : 'he-play-btn';
+    playBtn.style.cssText = 'position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) scale(0.9); width: 64px; height: 64px; border-radius: 50%; background: rgba(0,0,0,0.4); backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; pointer-events: all; cursor: pointer; transition: all 0.3s; opacity: 0; box-shadow: 0 8px 32px rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1);';
+    playBtn.innerHTML = '<i data-lucide="pause" style="color: white; width: 32px; height: 32px;"></i>';
+    
+    let hideTimeout;
+    const showPlayBtn = (icon) => {
+      playBtn.innerHTML = `<i data-lucide="${icon}" style="color: white; width: 32px; height: 32px;"></i>`;
+      if (window.lucide) window.lucide.createIcons();
+      playBtn.style.opacity = '1';
+      playBtn.style.transform = 'scale(1)';
+      clearTimeout(hideTimeout);
+      if (icon === 'pause') {
+        hideTimeout = setTimeout(() => {
+          playBtn.style.opacity = '0';
+          playBtn.style.transform = 'scale(0.9)';
+        }, 2000);
+      }
+    };
+
+    const togglePlay = (e) => {
+      if (e) { e.preventDefault(); e.stopPropagation(); }
+      const vid = videoNode;
+      if (!vid) return;
+      if (vid.paused) {
+        vid.play();
+        showPlayBtn('pause');
+      } else {
+        vid.pause();
+        showPlayBtn('play');
+      }
+    };
+
+    playBtn.onclick = togglePlay;
+    container.addEventListener('mousemove', () => {
+      if (videoNode && !videoNode.paused) {
+        showPlayBtn('pause');
+      }
+    });
+    
+    showPlayBtn('pause'); // Set initial state
+
+    const bottomRow = document.createElement('div');
+    bottomRow.style.cssText = 'display: flex; align-items: center; justify-content: space-between; padding: 0 20px; pointer-events: all; gap: 16px; margin-top: auto; width: 100%; box-sizing: border-box;';
+
+    // Timeline container
+    const timelineContainer = document.createElement('div');
+    timelineContainer.id = isReview ? 'he-review-timeline' : 'he-timeline';
+    timelineContainer.style.cssText = 'flex-grow: 1; display: flex; flex-direction: column; gap: 8px; cursor: pointer; position: relative; padding: 10px 0;';
+
+    const timeText = document.createElement('div');
+    timeText.id = isReview ? 'he-review-time-text' : 'he-time-text';
+    timeText.style.cssText = 'color: white; font-size: 11px; font-weight: 600; font-family: monospace; text-shadow: 0 1px 4px rgba(0,0,0,0.8); display: flex; justify-content: space-between; opacity: 0.9;';
+    timeText.innerHTML = '<span>00:00</span><span>00:00</span>';
+    
+    const track = document.createElement('div');
+    track.style.cssText = 'width: 100%; height: 6px; border-radius: 4px; background: rgba(255,255,255,0.3); backdrop-filter: blur(4px); position: relative; overflow: hidden;';
+    
+    const fill = document.createElement('div');
+    fill.id = isReview ? 'he-review-timeline-fill' : 'he-timeline-fill';
+    fill.style.cssText = 'position: absolute; top: 0; left: 0; height: 100%; width: 0%; background: var(--primary, #a855f7); box-shadow: 0 0 10px rgba(168,85,247,0.5); border-radius: 4px; transition: width 0.1s linear;';
+    
+    track.appendChild(fill);
+    timelineContainer.appendChild(track);
+    timelineContainer.appendChild(timeText);
+
+    // Controls right side (Volume + Speaker)
+    const rightControls = document.createElement('div');
+    rightControls.style.cssText = 'display: flex; align-items: center; gap: 12px;';
+
+    // Volume Slider
+    const volumeSlider = document.createElement('input');
+    volumeSlider.type = 'range';
+    volumeSlider.min = '0';
+    volumeSlider.max = '1';
+    volumeSlider.step = '0.01';
+    volumeSlider.value = this.state.isMuted ? '0' : (this.state.volume || '1');
+    volumeSlider.id = isReview ? 'he-review-volume' : 'he-volume';
+    volumeSlider.className = 'he-glass-slider';
+    
+    volumeSlider.oninput = (e) => {
+      const val = parseFloat(e.target.value);
+      this.state.volume = val;
+      
+      const videos = [
+        document.querySelector('#he-media-layer video'),
+        ...document.querySelectorAll('#review-slider-wrapper video')
+      ];
+      videos.forEach(v => {
+        if (v) {
+          v.volume = val;
+          if (val > 0 && v.muted) v.muted = false;
+        }
+      });
+      
+      if (this.GlobalAudio && this.GlobalAudio.audio) {
+         this.GlobalAudio.audio.volume = val;
+      }
+
+      if (val === 0 && !this.state.isMuted) {
+         this.toggleSpeaker(null, true);
+      } else if (val > 0 && this.state.isMuted) {
+         this.toggleSpeaker(null, false);
+      }
+    };
+
+    // Speaker btn
+    const speakerBtn = document.createElement('div');
+    speakerBtn.id = 'he-speaker-btn';
+    speakerBtn.className = 'he-speaker-icon';
+    speakerBtn.style.cssText = 'width: 44px; height: 44px; border-radius: 50%; background: rgba(168,85,247,0.25); backdrop-filter: blur(12px); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1); box-shadow: 0 4px 15px rgba(168,85,247,0.4), inset 0 0 10px rgba(168,85,247,0.2); border: 1px solid rgba(168,85,247,0.5); color: white; flex-shrink: 0;';
+    speakerBtn.innerHTML = this.state.isMuted ? '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>' : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>';
+    
+    speakerBtn.onclick = (e) => {
+      this.toggleSpeaker(e);
+      if (this.state.isMuted) {
+        volumeSlider.value = '0';
+      } else {
+        volumeSlider.value = this.state.volume || '1';
+        
+        const videos = [
+          document.querySelector('#he-media-layer video'),
+          ...document.querySelectorAll('#review-slider-wrapper video')
+        ];
+        videos.forEach(v => { if (v) v.volume = parseFloat(volumeSlider.value); });
+      }
+    };
+    
+    rightControls.appendChild(volumeSlider);
+    rightControls.appendChild(speakerBtn);
+
+    bottomRow.appendChild(timelineContainer);
+    bottomRow.appendChild(rightControls);
+
+    controls.appendChild(playBtn);
+    controls.appendChild(bottomRow);
+    container.appendChild(controls);
+
+    if (window.lucide) window.lucide.createIcons();
+
+    // Timeline Drag Logic
+    const updateTimeline = (e) => {
+       const rect = timelineContainer.getBoundingClientRect();
+       let pos = (e.clientX - rect.left) / rect.width;
+       pos = Math.max(0, Math.min(pos, 1));
+       
+       if (videoNode && videoNode.duration) {
+          videoNode.currentTime = pos * videoNode.duration;
+       }
+    };
+    
+    let isDragging = false;
+    timelineContainer.onmousedown = (e) => {
+       isDragging = true;
+       updateTimeline(e);
+    };
+    window.addEventListener('mousemove', (e) => {
+       if (isDragging) updateTimeline(e);
+    });
+    window.addEventListener('mouseup', () => {
+       isDragging = false;
+    });
+
+    // RAF Update Loop for UI
+    const formatTime = (time) => {
+       if (isNaN(time)) return '00:00';
+       const m = Math.floor(time / 60).toString().padStart(2, '0');
+       const s = Math.floor(time % 60).toString().padStart(2, '0');
+       return `${m}:${s}`;
+    };
+
+    const updateUI = () => {
+       if (!controls.parentElement) return; // Cleanup when unmounted
+       
+       if (videoNode && videoNode.duration) {
+          const perc = (videoNode.currentTime / videoNode.duration) * 100;
+          fill.style.width = `${perc}%`;
+          timeText.innerHTML = `<span>${formatTime(videoNode.currentTime)}</span><span>${formatTime(videoNode.duration)}</span>`;
+       }
+
+       if (this.state.isMuted && volumeSlider.value !== '0') {
+          volumeSlider.value = '0';
+       }
+
+       requestAnimationFrame(updateUI);
+    };
+    requestAnimationFrame(updateUI);
+
+    return controls;
   }
 };
+
+// Initialize GlobalAudio once on startup
+window.HubbleEditor.GlobalAudio.init();
 
 // Initialize after DOM loads
 if (document.readyState === 'complete' || document.readyState === 'interactive') {

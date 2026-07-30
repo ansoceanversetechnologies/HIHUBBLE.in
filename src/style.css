@@ -10054,6 +10054,9 @@ input:checked + .ch-slider .ch-sparkle {
   0%, 100% { opacity: 0.5; transform: translateY(-50%) scale(0.8); }
   50% { opacity: 1; transform: translateY(-50%) scale(1.2); }
 }
+@keyframes he-spin {
+  to { transform: rotate(360deg); }
+}
 /* Light Theme Toggle */
 html.light-theme .ch-slider {
   background-color: rgba(0,0,0,0.1);
@@ -10207,5 +10210,33 @@ html.light-theme .he-zoom-panel button {
 html.light-theme #he-zoom-val {
   color: var(--primary) !important;
   background: rgba(168,85,247,0.15) !important;
+}
+
+
+/* Share HUBBs Volume Slider */
+.he-glass-slider {
+  -webkit-appearance: none;
+  width: 80px;
+  height: 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(4px);
+  outline: none;
+  transition: all 0.2s;
+  cursor: pointer;
+}
+.he-glass-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--primary, #a855f7);
+  box-shadow: 0 0 10px rgba(168, 85, 247, 0.6);
+  cursor: pointer;
+  transition: transform 0.1s;
+}
+.he-glass-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
 }
 
