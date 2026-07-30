@@ -8485,14 +8485,25 @@ function initCreateHubbsUpload() {
       // Generate Thumbnail
       let thumbUrl = '';
       let duration = 0;
+      let originalWidth = 1000;
+      let originalHeight = 1000;
 
       try {
         if (file.type.startsWith('video/')) {
           const vData = await generateVideoThumbnail(file);
           thumbUrl = vData.thumb;
           duration = vData.duration;
+          originalWidth = vData.width;
+          originalHeight = vData.height;
         } else {
           thumbUrl = URL.createObjectURL(file);
+          const img = new Image();
+          img.src = thumbUrl;
+          await new Promise(r => { img.onload = r; img.onerror = r; });
+          if (img.naturalWidth) {
+              originalWidth = img.naturalWidth;
+              originalHeight = img.naturalHeight;
+          }
         }
 
         window.chUploads.push({
@@ -8500,8 +8511,15 @@ function initCreateHubbsUpload() {
           type: file.type,
           thumbUrl: thumbUrl,
           duration: duration,
+          originalWidth: originalWidth,
+          originalHeight: originalHeight,
           name: file.name,
-          size: file.size
+          size: file.size,
+          editorState: {
+             filter: 'original', rotation: 0, zoom: 1, panX: 0, panY: 0,
+             adjustments: { brightness: 100, contrast: 100, exposure: 100, highlights: 100, shadows: 100, temperature: 0, tint: 0, saturation: 100, vibrance: 100, sharpness: 0, blur: 0, opacity: 100 },
+             crop: null, layers: [], isMuted: false, musicTrack: null, selectedLocation: null
+          }
         });
       } catch (err) {
         console.error("Error generating thumbnail:", err);
@@ -8536,7 +8554,7 @@ function initCreateHubbsUpload() {
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
           const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
           URL.revokeObjectURL(url);
-          resolve({ thumb: dataUrl, duration: video.duration });
+          resolve({ thumb: dataUrl, duration: video.duration, width: video.videoWidth || 320, height: video.videoHeight || 240 });
         } catch (e) {
           reject(e);
         }
@@ -8556,10 +8574,35 @@ function initCreateHubbsUpload() {
     return `${m}:${s.toString().padStart(2, '0')}`;
   }
 
+  window.getEffectiveLayout = function(layoutName, uploads) {
+      if (layoutName !== 'auto') return layoutName;
+      if (!uploads || uploads.length === 0) return layoutName;
+      const count = uploads.length;
+      let portraits = 0, landscapes = 0, squares = 0;
+      uploads.forEach(item => {
+          const ar = (window.HubbleEditor && window.HubbleEditor.getEditedAspectRatio) ? window.HubbleEditor.getEditedAspectRatio(item) : 1;
+          if (ar < 0.9) portraits++;
+          else if (ar > 1.1) landscapes++;
+          else squares++;
+      });
+      if (count === 1) return 'single';
+      if (count === 2) {
+          if (portraits >= 1 && landscapes === 0 && squares === 0) return 'vertical-split';
+          if (portraits === 2) return 'vertical-split';
+          return 'side-by-side';
+      }
+      return '2x2-grid';
+  };
+
   function renderMediaPreviews() {
-    // Remove existing previews except the Add More button
-    const existingItems = previewRow.querySelectorAll('.ch-preview-item');
-    existingItems.forEach(el => el.remove());
+    // Remove existing previews and layout rows except the Add More button
+    const existingItems = previewRow.querySelectorAll('.ch-layout-row, .ch-preview-item');
+    existingItems.forEach(el => {
+       // Ensure we don't accidentally remove the addMoreBtn if it somehow matches
+       if (el.id !== 'ch-add-more-media-btn') {
+          el.remove();
+       }
+    });
 
     if (window.chUploads.length === 0) {
       uploadBox.style.display = 'block';
@@ -8569,6 +8612,8 @@ function initCreateHubbsUpload() {
 
     uploadBox.style.display = 'none';
     previewContainer.style.display = 'block';
+
+    const previewBlocks = [];
 
     window.chUploads.forEach((item, index) => {
       const previewEl = document.createElement('div');
@@ -8607,6 +8652,32 @@ function initCreateHubbsUpload() {
           if (window.HubbleEditor && window.HubbleEditor.cleanupMedia) {
             window.HubbleEditor.cleanupMedia();
           }
+          
+          if (window.HubbleEditor) {
+             if (window.chUploads.length === 0) {
+                window.HubbleEditor.activeMediaIndex = 0;
+                window.HubbleEditor.state = {
+                     filter: 'original', rotation: 0, zoom: 1, panX: 0, panY: 0,
+                     adjustments: { brightness: 100, contrast: 100, exposure: 100, highlights: 100, shadows: 100, temperature: 0, tint: 0, saturation: 100, vibrance: 100, sharpness: 0, blur: 0, opacity: 100 },
+                     crop: null, layers: [], isMuted: false, musicTrack: null, selectedLocation: null
+                };
+                window.HubbleEditor.history = [JSON.parse(JSON.stringify(window.HubbleEditor.state))];
+                window.HubbleEditor.redoStack = [];
+                window.HubbleEditor.activeSelectedLayerId = null;
+                window.HubbleEditor.updateRender();
+             } else {
+                if (window.HubbleEditor.activeMediaIndex === index) {
+                   window.HubbleEditor.activeMediaIndex = 0;
+                   if (window.chUploads[0].editorState) {
+                       window.HubbleEditor.state = JSON.parse(JSON.stringify(window.chUploads[0].editorState));
+                   }
+                   window.HubbleEditor.updateRender();
+                } else if (window.HubbleEditor.activeMediaIndex > index) {
+                   window.HubbleEditor.activeMediaIndex--;
+                }
+             }
+          }
+          
           renderMediaPreviews();
         }, 350); // wait for animation to complete
       };
@@ -8639,16 +8710,94 @@ function initCreateHubbsUpload() {
         }
       });
 
-      // Simple Click to view larger (mock behavior as per requirements)
+      // Click to select and edit this specific media item
       previewEl.addEventListener('click', () => {
-        if (window.showToast) window.showToast(`Previewing ${item.name} 🔍`);
+        if (window.HubbleEditor) {
+           // Save current state to the previously active media
+           if (window.chUploads[window.HubbleEditor.activeMediaIndex]) {
+               window.chUploads[window.HubbleEditor.activeMediaIndex].editorState = JSON.parse(JSON.stringify(window.HubbleEditor.state));
+           }
+           // Switch active media index
+           window.HubbleEditor.activeMediaIndex = index;
+           // Load the state for the new media, or reset if none exists
+           if (item.editorState) {
+               window.HubbleEditor.state = JSON.parse(JSON.stringify(item.editorState));
+           } else {
+               window.HubbleEditor.state = {
+                 filter: 'original', rotation: 0, zoom: 1, panX: 0, panY: 0,
+                 adjustments: { brightness: 100, contrast: 100, exposure: 100, highlights: 100, shadows: 100, temperature: 0, tint: 0, saturation: 100, vibrance: 100, sharpness: 0, blur: 0, opacity: 100 },
+                 crop: null, layers: [], isMuted: false, musicTrack: null, selectedLocation: null
+               };
+           }
+           window.HubbleEditor.updateRender();
+        }
+        
+        // Highlight active preview visually
+        document.querySelectorAll('.ch-preview-item').forEach(el => el.style.border = '1px solid rgba(255,255,255,0.08)');
+        previewEl.style.border = '2px solid var(--primary, #a855f7)';
+        
+        if (window.showToast) window.showToast(`Editing ${item.name} 🔍`);
       });
 
-      previewRow.insertBefore(previewEl, addMoreBtn);
+      // Update this thumbnail to reflect any existing edits visually BEFORE grouping
+      if (window.HubbleEditor && typeof window.HubbleEditor.updatePreviewThumbnail === 'function') {
+         window.HubbleEditor.updatePreviewThumbnail(index, previewEl);
+      }
+      
+      previewBlocks.push({ mediaItem: item, el: previewEl });
     });
+
+    // Grouping Logic
+    let layout = (window.HubbleEditor && window.HubbleEditor.activeLayout) || 'original';
+    let effectiveLayout = window.getEffectiveLayout(layout, window.chUploads);
+
+    previewBlocks.forEach(b => previewRow.insertBefore(b.el, addMoreBtn));
+    // Ensure the currently active media item is highlighted
+    const activeIndex = window.HubbleEditor ? window.HubbleEditor.activeMediaIndex : 0;
+    const activeEl = previewRow.querySelector(`.ch-preview-item[data-index="${activeIndex}"]`);
+    if (activeEl) {
+       activeEl.style.border = '2px solid var(--primary, #a855f7)';
+    }
 
     if (window.lucide) {
       window.lucide.createIcons();
+    }
+    
+    // Toggle Media Layouts visibility
+    const layoutsDisabledMsg = document.getElementById('ch-layouts-disabled-msg');
+    const layoutsOptions = document.getElementById('ch-layouts-options');
+    if (layoutsDisabledMsg && layoutsOptions) {
+      if (window.chUploads.length >= 2) {
+        layoutsDisabledMsg.style.display = 'none';
+        layoutsOptions.style.display = 'flex';
+        
+        const btnSideBySide = document.querySelector('.ch-layout-btn[data-layout="side-by-side"]');
+        const btnVerticalSplit = document.querySelector('.ch-layout-btn[data-layout="vertical-split"]');
+        const btn2x2Grid = document.querySelector('.ch-layout-btn[data-layout="2x2-grid"]');
+        
+        if (window.chUploads.length === 2) {
+           if (btnSideBySide) btnSideBySide.style.display = 'block';
+           if (btnVerticalSplit) btnVerticalSplit.style.display = 'block';
+           if (btn2x2Grid) btn2x2Grid.style.display = 'none';
+           
+           if (window.HubbleEditor && window.HubbleEditor.activeLayout === '2x2-grid') {
+               window.HubbleEditor.setLayout('auto');
+           }
+        } else {
+           if (btnSideBySide) btnSideBySide.style.display = 'none';
+           if (btnVerticalSplit) btnVerticalSplit.style.display = 'none';
+           if (btn2x2Grid) btn2x2Grid.style.display = 'block';
+           
+           if (window.HubbleEditor && (window.HubbleEditor.activeLayout === 'side-by-side' || window.HubbleEditor.activeLayout === 'vertical-split')) {
+               window.HubbleEditor.setLayout('auto');
+           }
+        }
+      } else {
+        layoutsDisabledMsg.style.display = 'block';
+        layoutsOptions.style.display = 'none';
+        // Reset to original layout internally
+        if (window.HubbleEditor) window.HubbleEditor.setLayout('original');
+      }
     }
   }
 
@@ -8842,128 +8991,206 @@ window.initReviewSlider = function() {
     });
   });
 
-  const mediaItem = window.chUploads[0];
-  const url = URL.createObjectURL(mediaItem.file);
+  const hasMultiple = window.chUploads.length >= 2;
+  let layout = (window.HubbleEditor && window.HubbleEditor.activeLayout) || 'original';
   
-  let beforeMediaNode, afterMediaNode;
+  layout = window.getEffectiveLayout(layout, window.chUploads);
 
-  if (mediaItem.type.startsWith('video/')) {
-    // Render Videos
-    beforeMediaNode = document.createElement('video');
-    afterMediaNode = document.createElement('video');
-    
-    [beforeMediaNode, afterMediaNode].forEach(v => {
-      v.src = url;
-      v.style.cssText = 'width: 100%; height: 100%; object-fit: contain; object-position: center;';
-      v.loop = true;
-      v.muted = window.HubbleEditor.state.isMuted;
-      v.playsInline = true;
-      v.autoplay = true;
-    });
-    
-    // Apply Actual Edits from Editor State
-    afterMediaNode.style.filter = window.HubbleEditor.buildCSSFilterString();
-    const zoom = window.HubbleEditor.state.zoom || 1;
-    afterMediaNode.style.transform = `rotate(${window.HubbleEditor.state.rotation}deg) scale(${zoom})`;
-    
-    // Sync Logic: The BEFORE (Left/Raw) controls the AFTER (Right/Edited)
-    beforeMediaNode.addEventListener('play', () => { 
-      afterMediaNode.play(); 
-      window.HubbleEditor.GlobalAudio.sync(beforeMediaNode.currentTime);
-      window.HubbleEditor.GlobalAudio.play(); 
-    });
-    beforeMediaNode.addEventListener('pause', () => { 
-      afterMediaNode.pause(); 
-      window.HubbleEditor.GlobalAudio.pause(); 
-    });
-    beforeMediaNode.addEventListener('seeking', () => {
-      afterMediaNode.currentTime = beforeMediaNode.currentTime;
-      window.HubbleEditor.GlobalAudio.sync(beforeMediaNode.currentTime);
-    });
-    beforeMediaNode.addEventListener('seeked', () => {
-      afterMediaNode.currentTime = beforeMediaNode.currentTime;
-      window.HubbleEditor.GlobalAudio.sync(beforeMediaNode.currentTime);
-    });
+  const layoutClass = (hasMultiple && layout !== 'original' && layout !== 'single') ? `layout-${layout}` : '';
 
-    // Provide minimal playback control on clicking the wrapper
-    sliderWrapper.onclick = (e) => {
-      if (e.target.id === 'review-slider-handle' || e.target.closest('#review-slider-handle') || e.target.closest('#he-speaker-btn')) return;
-      if (beforeMediaNode.paused) {
-        beforeMediaNode.play();
-        const btn = document.getElementById('he-review-play-btn');
-        if (btn) {
-            btn.innerHTML = '<i data-lucide="pause" style="color: white; width: 32px; height: 32px;"></i>';
-            if (window.lucide) window.lucide.createIcons();
-            btn.style.opacity = '1';
-            btn.style.transform = 'scale(1)';
-            setTimeout(() => { btn.style.opacity = '0'; btn.style.transform = 'scale(0.9)'; }, 2000);
-        }
-      } else {
-        beforeMediaNode.pause();
-        const btn = document.getElementById('he-review-play-btn');
-        if (btn) {
-            btn.innerHTML = '<i data-lucide="play" style="color: white; width: 32px; height: 32px;"></i>';
-            if (window.lucide) window.lucide.createIcons();
-            btn.style.opacity = '1';
-            btn.style.transform = 'scale(1)';
-        }
-      }
+  const beforeWrapper = document.createElement('div');
+  beforeWrapper.style.cssText = 'width: 100%; height: 100%;';
+  if (layoutClass) beforeWrapper.className = layoutClass;
+
+  const afterWrapper = document.createElement('div');
+  afterWrapper.style.cssText = 'width: 100%; height: 100%;';
+  if (layoutClass) afterWrapper.className = layoutClass;
+  
+  let firstVideoBefore = null;
+  let firstVideoAfter = null;
+
+  const beforeBlocks = [];
+  const afterBlocks = [];
+
+  window.chUploads.forEach((mediaItem) => {
+    const url = URL.createObjectURL(mediaItem.file);
+    const state = mediaItem.editorState || {
+       filter: 'original', rotation: 0, zoom: 1, panX: 0, panY: 0,
+       adjustments: { brightness: 100, contrast: 100, exposure: 100, highlights: 100, shadows: 100, temperature: 0, tint: 0, saturation: 100, vibrance: 100, sharpness: 0, blur: 0, opacity: 100 },
+       crop: null, layers: [], isMuted: false, musicTrack: null, selectedLocation: null
     };
-    
-    // Create Controls Overlay for Review
-    let reviewControls = document.getElementById('he-review-controls');
-    if (reviewControls) {
-        reviewControls.remove();
-    }
-    reviewControls = window.HubbleEditor.buildVideoControls(sliderWrapper, beforeMediaNode, true);
 
-  } else {
-    let reviewControls = document.getElementById('he-review-controls');
-    if (reviewControls) reviewControls.remove();
-    // Render Images
-    beforeMediaNode = document.createElement('img');
-    afterMediaNode = document.createElement('img');
+    const ar = (window.HubbleEditor && window.HubbleEditor.getEditedAspectRatio) ? window.HubbleEditor.getEditedAspectRatio(mediaItem) : 1;
+    const beforeCell = document.createElement('div');
+    beforeCell.className = 'ch-preview-item';
+    beforeCell.style.cssText = `position: relative; width: 100%; height: 100%; overflow: hidden; display: flex; align-items: center; justify-content: center;`;
     
-    [beforeMediaNode, afterMediaNode].forEach(img => {
-      img.src = url;
-      img.style.cssText = 'width: 100%; height: 100%; object-fit: contain; object-position: center;';
-    });
-    
-    // Apply Actual Edits from Editor State
-    afterMediaNode.style.filter = window.HubbleEditor.buildCSSFilterString();
-    const zoom = window.HubbleEditor.state.zoom || 1;
-    afterMediaNode.style.transform = `rotate(${window.HubbleEditor.state.rotation}deg) scale(${zoom})`;
-  }
-  
-  // Insert at the beginning so they sit behind the absolute positioned labels
-  beforeContainer.insertBefore(beforeMediaNode, beforeContainer.firstChild);
-  afterContainer.insertBefore(afterMediaNode, afterContainer.firstChild);
+    const afterCell = document.createElement('div');
+    afterCell.className = 'ch-preview-item';
+    afterCell.style.cssText = `position: relative; width: 100%; height: 100%; overflow: hidden; display: flex; align-items: center; justify-content: center;`;
 
-  // Create a wrapper for the layers so we can clip them together with the media
-  const interactionWrapper = document.createElement('div');
-  interactionWrapper.style.cssText = 'position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;';
-  
-  // Inject Layers (Stickers / Text) into After Container wrapper
-  window.HubbleEditor.state.layers.forEach((layer) => {
-    const el = document.createElement('div');
-    el.style.cssText = `position: absolute; left: ${layer.x}%; top: ${layer.y}%; transform: translate(-50%, -50%) rotate(${layer.rotation}deg) scale(${layer.scale}); z-index: ${layer.zIndex}; pointer-events: none;`;
-    if (layer.type === 'text') {
-      el.innerHTML = `<div style="color: ${layer.styles.color || 'white'}; font-family: ${layer.styles.font || 'inherit'}; font-size: ${layer.styles.size || 24}px; font-weight: ${layer.styles.bold ? 'bold' : 'normal'}; font-style: ${layer.styles.italic ? 'italic' : 'normal'}; text-shadow: ${layer.styles.shadow ? '0 2px 10px rgba(0,0,0,0.5)' : 'none'}; text-align: center; white-space: pre-wrap;">${layer.content}</div>`;
-    } else if (layer.type === 'sticker') {
-      el.innerHTML = `<div style="font-size: ${layer.styles.size || 80}px; pointer-events: none;">${layer.content}</div>`;
+    const beforeFrame = document.createElement('div');
+    beforeFrame.className = 'edited-frame';
+    beforeFrame.style.cssText = `position: relative; overflow: hidden; aspect-ratio: ${ar}; border-radius: 10px; background: #1a1a1a; display: flex; align-items: center; justify-content: center; margin: auto; width: min(100cqw, calc(100cqh * ${ar})); height: min(100cqh, calc(100cqw / ${ar}));`;
+
+    const afterFrame = document.createElement('div');
+    afterFrame.className = 'edited-frame';
+    afterFrame.style.cssText = `position: relative; overflow: hidden; aspect-ratio: ${ar}; border-radius: 10px; background: #1a1a1a; display: flex; align-items: center; justify-content: center; margin: auto; width: min(100cqw, calc(100cqh * ${ar})); height: min(100cqh, calc(100cqw / ${ar}));`;
+
+
+    let cw = 100, ch = 100, cx = 0, cy = 0;
+    if (state.crop) {
+       cw = state.crop.width; ch = state.crop.height; cx = state.crop.x; cy = state.crop.y;
     }
-    interactionWrapper.appendChild(el);
+    const cropScaleCSS = state.crop ? `position: absolute; width: ${10000/cw}%; height: ${10000/ch}%; left: -${(cx/cw)*100}%; top: -${(cy/ch)*100}%;` : `position: absolute; width: 100%; height: 100%; left: 0; top: 0;`;
+
+    const beforeInner = document.createElement('div');
+    beforeInner.style.cssText = 'position: absolute; width: 100%; height: 100%; left: 0; top: 0;';
+
+    const afterInner = document.createElement('div');
+    afterInner.style.cssText = cropScaleCSS;
+
+    let beforeMediaNode, afterMediaNode;
+
+    if (mediaItem.type.startsWith('video/')) {
+      beforeMediaNode = document.createElement('video');
+      afterMediaNode = document.createElement('video');
+      
+      [beforeMediaNode, afterMediaNode].forEach(v => {
+        v.src = url;
+        v.style.cssText = 'position: absolute; width: 100%; height: 100%; object-fit: contain; object-position: center;';
+        v.loop = true;
+        v.muted = state.isMuted || false;
+        v.playsInline = true;
+        v.autoplay = true;
+      });
+      
+      if (!firstVideoBefore) {
+         firstVideoBefore = beforeMediaNode;
+         firstVideoAfter = afterMediaNode;
+      } else {
+         // Sync secondary videos to the first one just by playing them together
+         firstVideoBefore.addEventListener('play', () => beforeMediaNode.play());
+         firstVideoBefore.addEventListener('pause', () => beforeMediaNode.pause());
+         firstVideoBefore.addEventListener('seeking', () => beforeMediaNode.currentTime = firstVideoBefore.currentTime);
+         firstVideoAfter.addEventListener('play', () => afterMediaNode.play());
+         firstVideoAfter.addEventListener('pause', () => afterMediaNode.pause());
+         firstVideoAfter.addEventListener('seeking', () => afterMediaNode.currentTime = firstVideoAfter.currentTime);
+      }
+    } else {
+      beforeMediaNode = document.createElement('img');
+      afterMediaNode = document.createElement('img');
+      [beforeMediaNode, afterMediaNode].forEach(img => {
+        img.src = url;
+        img.style.cssText = 'position: absolute; width: 100%; height: 100%; object-fit: contain; object-position: center;';
+      });
+    }
+
+    // Apply Edits to After node
+    if (window.HubbleEditor) {
+        afterMediaNode.style.filter = window.HubbleEditor.buildCSSFilterString(state.filter, state.adjustments);
+    }
+    const zoom = state.zoom || 1;
+    afterMediaNode.style.transform = `translate(${state.panX || 0}%, ${state.panY || 0}%) rotate(${state.rotation || 0}deg) scale(${zoom})`;
+
+    beforeInner.appendChild(beforeMediaNode);
+    beforeFrame.appendChild(beforeInner);
+    beforeCell.appendChild(beforeFrame);
+    
+    afterInner.appendChild(afterMediaNode);
+    afterFrame.appendChild(afterInner);
+
+    // Inject Layers (Stickers / Text)
+    const interactionWrapper = document.createElement('div');
+    interactionWrapper.style.cssText = 'position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;';
+    
+    if (state.layers) {
+      state.layers.forEach((layer) => {
+        const el = document.createElement('div');
+        el.style.cssText = `position: absolute; left: ${layer.x}%; top: ${layer.y}%; transform: translate(-50%, -50%) rotate(${layer.rotation}deg) scale(${layer.scale}); z-index: ${layer.zIndex}; pointer-events: none;`;
+        if (layer.type === 'text') {
+          el.innerHTML = `<div style="color: ${layer.styles.color || 'white'}; font-family: ${layer.styles.font || 'inherit'}; font-size: ${layer.styles.size || 24}px; font-weight: ${layer.styles.bold ? 'bold' : 'normal'}; font-style: ${layer.styles.italic ? 'italic' : 'normal'}; text-shadow: ${layer.styles.shadow ? '0 2px 10px rgba(0,0,0,0.5)' : 'none'}; text-align: center; white-space: pre-wrap;">${layer.content}</div>`;
+        } else if (layer.type === 'sticker') {
+          el.innerHTML = `<div style="font-size: ${layer.styles.size || 80}px; pointer-events: none;">${layer.content}</div>`;
+        }
+        interactionWrapper.appendChild(el);
+      });
+    }
+    afterFrame.appendChild(interactionWrapper);
+    afterCell.appendChild(afterFrame);
+
+    beforeBlocks.push({ mediaItem, el: beforeCell });
+    afterBlocks.push({ mediaItem, el: afterCell });
   });
-  
-  afterContainer.appendChild(interactionWrapper);
 
-  // Apply Crop if exists
-  if (window.HubbleEditor.state.crop) {
-     const { x, y, width, height } = window.HubbleEditor.state.crop;
-     const clipPathStr = `inset(${y}% ${100 - (x + width)}% ${100 - (y + height)}% ${x}%)`;
-     afterMediaNode.style.clipPath = clipPathStr;
-     interactionWrapper.style.clipPath = clipPathStr;
+  beforeBlocks.forEach(b => beforeWrapper.appendChild(b.el));
+  afterBlocks.forEach(b => afterWrapper.appendChild(b.el));
+  
+  // Audio sync and controls for the primary video
+  if (firstVideoBefore) {
+      firstVideoBefore.addEventListener('play', () => { 
+        firstVideoAfter.play(); 
+        if (window.HubbleEditor && window.HubbleEditor.GlobalAudio) {
+            window.HubbleEditor.GlobalAudio.sync(firstVideoBefore.currentTime);
+            window.HubbleEditor.GlobalAudio.play(); 
+        }
+      });
+      firstVideoBefore.addEventListener('pause', () => { 
+        firstVideoAfter.pause(); 
+        if (window.HubbleEditor && window.HubbleEditor.GlobalAudio) {
+            window.HubbleEditor.GlobalAudio.pause(); 
+        }
+      });
+      firstVideoBefore.addEventListener('seeking', () => {
+        firstVideoAfter.currentTime = firstVideoBefore.currentTime;
+        if (window.HubbleEditor && window.HubbleEditor.GlobalAudio) {
+            window.HubbleEditor.GlobalAudio.sync(firstVideoBefore.currentTime);
+        }
+      });
+      firstVideoBefore.addEventListener('seeked', () => {
+        firstVideoAfter.currentTime = firstVideoBefore.currentTime;
+        if (window.HubbleEditor && window.HubbleEditor.GlobalAudio) {
+            window.HubbleEditor.GlobalAudio.sync(firstVideoBefore.currentTime);
+        }
+      });
+
+      sliderWrapper.onclick = (e) => {
+        if (e.target.id === 'review-slider-handle' || e.target.closest('#review-slider-handle') || e.target.closest('#he-speaker-btn')) return;
+        if (firstVideoBefore.paused) {
+          firstVideoBefore.play();
+          const btn = document.getElementById('he-review-play-btn');
+          if (btn) {
+              btn.innerHTML = '<i data-lucide="pause" style="color: white; width: 32px; height: 32px;"></i>';
+              if (window.lucide) window.lucide.createIcons();
+              btn.style.opacity = '1';
+              btn.style.transform = 'scale(1)';
+              setTimeout(() => { btn.style.opacity = '0'; btn.style.transform = 'scale(0.9)'; }, 2000);
+          }
+        } else {
+          firstVideoBefore.pause();
+          const btn = document.getElementById('he-review-play-btn');
+          if (btn) {
+              btn.innerHTML = '<i data-lucide="play" style="color: white; width: 32px; height: 32px;"></i>';
+              if (window.lucide) window.lucide.createIcons();
+              btn.style.opacity = '1';
+              btn.style.transform = 'scale(1)';
+          }
+        }
+      };
+
+      let reviewControls = document.getElementById('he-review-controls');
+      if (reviewControls) reviewControls.remove();
+      if (window.HubbleEditor) {
+         reviewControls = window.HubbleEditor.buildVideoControls(sliderWrapper, firstVideoBefore, true);
+      }
+  } else {
+      let reviewControls = document.getElementById('he-review-controls');
+      if (reviewControls) reviewControls.remove();
   }
+
+  // Insert at the beginning so they sit behind the absolute positioned labels
+  beforeContainer.insertBefore(beforeWrapper, beforeContainer.firstChild);
+  afterContainer.insertBefore(afterWrapper, afterContainer.firstChild);
 
   // Setup Draggable Handle
   const handle = document.getElementById('review-slider-handle');
@@ -8976,8 +9203,6 @@ window.initReviewSlider = function() {
       position = Math.max(0, Math.min(position, rect.width));
       const percentage = (position / rect.width) * 100;
       
-      // Hardware accelerated clip-path inset(top right bottom left)
-      // Clip the right side of the BEFORE image container
       beforeContainer.style.clipPath = `inset(0 ${100 - percentage}% 0 0)`;
       handle.style.left = `${percentage}%`;
     };
@@ -9093,6 +9318,29 @@ window.publishHubb = async function() {
     }
   } else {
     // Non-scheduled HUBB - existing local flow
+    let layout = (window.HubbleEditor && window.HubbleEditor.activeLayout) || 'original';
+    layout = window.getEffectiveLayout(layout, window.chUploads);
+
+    const allMedia = window.chUploads.map(m => {
+       const state = m.editorState || {
+          filter: 'original', rotation: 0, zoom: 1, panX: 0, panY: 0,
+          adjustments: { brightness: 100, contrast: 100, exposure: 100, highlights: 100, shadows: 100, temperature: 0, tint: 0, saturation: 100, vibrance: 100, sharpness: 0, blur: 0, opacity: 100 },
+          crop: null, layers: [], isMuted: false, musicTrack: null, selectedLocation: null
+       };
+       return {
+          url: m.thumbUrl || URL.createObjectURL(m.file),
+          type: m.type,
+          filter: window.HubbleEditor.buildCSSFilterString ? window.HubbleEditor.buildCSSFilterString(state.filter, state.adjustments) : '',
+          rotation: state.rotation || 0,
+          zoom: state.zoom || 1,
+          panX: state.panX || 0,
+          panY: state.panY || 0,
+          crop: state.crop,
+          layers: state.layers,
+          ar: (window.HubbleEditor && window.HubbleEditor.getEditedAspectRatio) ? window.HubbleEditor.getEditedAspectRatio(m) : 1
+       };
+    });
+
     const newStoryHTML = `
       <div class="story-card has-story" onclick="window.openPublishedStory(this)">
         <div class="story-avatar-container">
@@ -9101,13 +9349,8 @@ window.publishHubb = async function() {
         <span class="story-username">Your Story</span>
         <template class="story-data">
           ${JSON.stringify({
-            url: url,
-            type: media.type,
-            filter: filter,
-            rotation: window.HubbleEditor.state.rotation,
-            zoom: window.HubbleEditor.state.zoom || 1,
-            crop: window.HubbleEditor.state.crop,
-            layers: window.HubbleEditor.state.layers,
+            allMedia: allMedia,
+            layout: layout,
             caption: caption,
             collaborationEnabled: window.collaborationEnabled !== false,
             collaboratorIds: window.collaborationEnabled !== false ? (window.selectedCollaborators || []).map(c => c._id || c.id) : [],
@@ -9168,47 +9411,87 @@ window.openPublishedStory = function(card) {
   if (!contentBox) return;
   contentBox.innerHTML = '';
   
-  let mediaNode;
-  if (data.type.startsWith('video/')) {
-    mediaNode = document.createElement('video');
-    mediaNode.src = data.url;
-    mediaNode.autoplay = true; mediaNode.loop = true; mediaNode.muted = true; mediaNode.playsInline = true;
-  } else {
-    mediaNode = document.createElement('img');
-    mediaNode.src = data.url;
+  let mediaDataList = data.allMedia;
+  if (!mediaDataList) {
+      // Fallback for old single media posts
+      mediaDataList = [{
+         url: data.url, type: data.type, filter: data.filter,
+         rotation: data.rotation, zoom: data.zoom, panX: 0, panY: 0,
+         crop: data.crop, layers: data.layers, ar: 1
+      }];
   }
-  mediaNode.style.cssText = 'width: 100%; height: 100%; object-fit: contain; object-position: center;';
-  mediaNode.style.filter = data.filter;
-  mediaNode.style.transform = "rotate(" + data.rotation + "deg) scale(" + data.zoom + ")";
-  
-  if (data.crop) {
-    const { x, y, width, height } = data.crop;
-    mediaNode.style.clipPath = "inset(" + y + "% " + (100 - (x + width)) + "% " + (100 - (y + height)) + "% " + x + "%)";
-  }
-  
-  contentBox.appendChild(mediaNode);
-  
+
+  const hasMultiple = mediaDataList.length >= 2;
+  const layout = data.layout || 'single';
+  const layoutClass = (hasMultiple && layout !== 'original' && layout !== 'single') ? `layout-${layout}` : '';
+
   const wrapper = document.createElement('div');
-  wrapper.style.cssText = 'position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; overflow: hidden;';
-  if (data.crop) {
-    const { x, y, width, height } = data.crop;
-    wrapper.style.clipPath = "inset(" + y + "% " + (100 - (x + width)) + "% " + (100 - (y + height)) + "% " + x + "%)";
-  }
-  
-  if (data.layers) {
-    data.layers.forEach((layer) => {
-      const el = document.createElement('div');
-      el.style.cssText = "position: absolute; left: " + layer.x + "%; top: " + layer.y + "%; transform: translate(-50%, -50%) rotate(" + layer.rotation + "deg) scale(" + layer.scale + "); z-index: " + layer.zIndex + ";";
-      if (layer.type === 'text') {
-        el.innerHTML = '<div style="color: ' + (layer.styles.color || 'white') + '; font-family: ' + (layer.styles.font || 'inherit') + '; font-size: ' + (layer.styles.size || 24) + 'px; font-weight: ' + (layer.styles.bold ? 'bold' : 'normal') + '; font-style: ' + (layer.styles.italic ? 'italic' : 'normal') + '; text-shadow: ' + (layer.styles.shadow ? '0 2px 10px rgba(0,0,0,0.5)' : 'none') + '; text-align: center; white-space: pre-wrap;">' + layer.content + '</div>';
-      } else if (layer.type === 'sticker') {
-        el.innerHTML = '<div style="font-size: ' + (layer.styles.size || 80) + 'px;">' + layer.content + '</div>';
-      }
-      wrapper.appendChild(el);
-    });
-  }
+  wrapper.style.cssText = 'width: 100%; height: 100%;';
+  if (layoutClass) wrapper.className = layoutClass;
+  // Apply Review specific layout CSS
+  // Actually, we made the CSS target #story-viewer-content-box. We don't need to spoof the ID.
+  contentBox.style.padding = '0';
+  contentBox.style.overflow = 'hidden';
+
+  mediaDataList.forEach((mData) => {
+    const cell = document.createElement('div');
+    cell.className = 'ch-preview-item';
+    cell.style.cssText = `position: relative; width: 100%; height: 100%; overflow: hidden; display: flex; align-items: center; justify-content: center;`;
+    
+    const frame = document.createElement('div');
+    frame.className = 'edited-frame';
+    frame.style.cssText = `position: relative; overflow: hidden; aspect-ratio: ${mData.ar}; border-radius: 10px; background: #1a1a1a; display: flex; align-items: center; justify-content: center; margin: auto; width: min(100cqw, calc(100cqh * ${mData.ar})); height: min(100cqh, calc(100cqw / ${mData.ar}));`;
+    
+    let cw = 100, ch = 100, cx = 0, cy = 0;
+    if (mData.crop) {
+       cw = mData.crop.width; ch = mData.crop.height; cx = mData.crop.x; cy = mData.crop.y;
+    }
+    const cropScaleCSS = mData.crop ? `position: absolute; width: ${10000/cw}%; height: ${10000/ch}%; left: -${(cx/cw)*100}%; top: -${(cy/ch)*100}%;` : `position: absolute; width: 100%; height: 100%; left: 0; top: 0;`;
+
+    const inner = document.createElement('div');
+    inner.style.cssText = cropScaleCSS;
+
+    let mediaNode;
+    if (mData.type.startsWith('video/')) {
+      mediaNode = document.createElement('video');
+      mediaNode.src = mData.url;
+      mediaNode.loop = true;
+      mediaNode.muted = true;
+      mediaNode.playsInline = true;
+      mediaNode.autoplay = true;
+    } else {
+      mediaNode = document.createElement('img');
+      mediaNode.src = mData.url;
+    }
+    mediaNode.style.cssText = 'position: absolute; width: 100%; height: 100%; object-fit: contain; object-position: center;';
+    mediaNode.style.filter = mData.filter || '';
+    mediaNode.style.transform = `translate(${mData.panX || 0}%, ${mData.panY || 0}%) rotate(${mData.rotation || 0}deg) scale(${mData.zoom || 1})`;
+    
+    inner.appendChild(mediaNode);
+    frame.appendChild(inner);
+
+    if (mData.layers) {
+      const interactionWrapper = document.createElement('div');
+      interactionWrapper.style.cssText = 'position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;';
+      mData.layers.forEach((layer) => {
+        const el = document.createElement('div');
+        el.style.cssText = `position: absolute; left: ${layer.x}%; top: ${layer.y}%; transform: translate(-50%, -50%) rotate(${layer.rotation}deg) scale(${layer.scale}); z-index: ${layer.zIndex}; pointer-events: none;`;
+        if (layer.type === 'text') {
+          el.innerHTML = `<div style="color: ${layer.styles.color || 'white'}; font-family: ${layer.styles.font || 'inherit'}; font-size: ${layer.styles.size || 24}px; font-weight: ${layer.styles.bold ? 'bold' : 'normal'}; font-style: ${layer.styles.italic ? 'italic' : 'normal'}; text-shadow: ${layer.styles.shadow ? '0 2px 10px rgba(0,0,0,0.5)' : 'none'}; text-align: center; white-space: pre-wrap;">${layer.content}</div>`;
+        } else if (layer.type === 'sticker') {
+          el.innerHTML = `<div style="font-size: ${layer.styles.size || 80}px; pointer-events: none;">${layer.content}</div>`;
+        }
+        interactionWrapper.appendChild(el);
+      });
+      frame.appendChild(interactionWrapper);
+    }
+    
+    cell.appendChild(frame);
+    wrapper.appendChild(cell);
+  });
   
   contentBox.appendChild(wrapper);
+
   
   modal.style.display = 'flex';
   requestAnimationFrame(() => modal.style.opacity = '1');
@@ -9979,6 +10262,11 @@ window.HubbleEditor = {
     // HALT Editor Video & Audio
     this.cleanupMedia();
 
+    // Sync state one final time
+    if (window.chUploads && window.chUploads[this.activeMediaIndex]) {
+        window.chUploads[this.activeMediaIndex].editorState = JSON.parse(JSON.stringify(this.state));
+    }
+
     modal.style.opacity = '0';
     setTimeout(() => {
       modal.style.display = 'none';
@@ -10031,6 +10319,29 @@ window.HubbleEditor = {
       redoBtn.style.opacity = this.redoStack.length > 0 ? '1' : '0.5';
       redoBtn.style.pointerEvents = this.redoStack.length > 0 ? 'all' : 'none';
     }
+  },
+
+  getEditedAspectRatio(item) {
+    if (!item) return 1;
+    let w = item.originalWidth || 1000;
+    let h = item.originalHeight || 1000;
+    
+    // First, apply crop
+    if (item.editorState && item.editorState.crop) {
+       w = w * (item.editorState.crop.width / 100);
+       h = h * (item.editorState.crop.height / 100);
+    }
+    
+    // Then rotation
+    if (item.editorState && item.editorState.rotation) {
+       const r = Math.abs(item.editorState.rotation) % 180;
+       if (r === 90) {
+          const temp = w;
+          w = h;
+          h = temp;
+       }
+    }
+    return w / h;
   },
 
   buildCSSFilterString(overrideFilter = null, overrideAdjustments = null) {
@@ -10159,6 +10470,55 @@ window.HubbleEditor = {
     this.updateRender();
   },
 
+  addLayerControls(el, layer, interactionLayer) {
+    const corners = [
+      { class: 'he-resize-nw', cursor: 'nwse-resize', top: '-6px', left: '-6px' },
+      { class: 'he-resize-ne', cursor: 'nesw-resize', top: '-6px', right: '-6px' },
+      { class: 'he-resize-sw', cursor: 'nesw-resize', bottom: '-6px', left: '-6px' },
+      { class: 'he-resize-se', cursor: 'nwse-resize', bottom: '-6px', right: '-6px' }
+    ];
+
+    corners.forEach(c => {
+      const handle = document.createElement('div');
+      handle.className = `he-resize-handle ${c.class}`;
+      handle.style.cssText = `position: absolute; width: 14px; height: 14px; background: white; border: 2px solid #a855f7; border-radius: 50%; z-index: 100; cursor: ${c.cursor}; box-shadow: 0 2px 5px rgba(0,0,0,0.3); pointer-events: all; ${c.top ? `top: ${c.top};` : ''} ${c.bottom ? `bottom: ${c.bottom};` : ''} ${c.left ? `left: ${c.left};` : ''} ${c.right ? `right: ${c.right};` : ''}`;
+      
+      handle.onmousedown = (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        this.pushHistory();
+        
+        const rect = interactionLayer.getBoundingClientRect();
+        // The layer center in absolute viewport coords
+        const centerX = rect.left + (layer.x / 100) * rect.width;
+        const centerY = rect.top + (layer.y / 100) * rect.height;
+        
+        const startDist = Math.hypot(ev.clientX - centerX, ev.clientY - centerY);
+        const startScale = layer.scale || 1;
+        
+        const onMouseMove = (moveEv) => {
+          const currentDist = Math.hypot(moveEv.clientX - centerX, moveEv.clientY - centerY);
+          let newScale = startScale * (currentDist / startDist);
+          if (newScale < 0.1) newScale = 0.1;
+          if (newScale > 10) newScale = 10;
+          
+          layer.scale = newScale;
+          el.style.transform = `translate(-50%, -50%) rotate(${layer.rotation}deg) scale(${layer.scale})`;
+        };
+        
+        const onMouseUp = () => {
+          window.removeEventListener('mousemove', onMouseMove);
+          window.removeEventListener('mouseup', onMouseUp);
+          this.updateRender();
+        };
+        
+        window.addEventListener('mousemove', onMouseMove);
+        window.addEventListener('mouseup', onMouseUp);
+      };
+      el.appendChild(handle);
+    });
+  },
+
   updateRender() {
     if (!window.chUploads || window.chUploads.length === 0) return;
     
@@ -10276,6 +10636,7 @@ window.HubbleEditor = {
               HubbleEditor.updateRender();
           };
           el.appendChild(deleteBtn);
+          HubbleEditor.addLayerControls(el, layer, interactionLayer);
       } else {
           el.style.border = 'none';
           el.style.padding = '0';
@@ -10319,6 +10680,7 @@ window.HubbleEditor = {
                         HubbleEditor.updateRender();
                     };
                     child.appendChild(deleteBtn);
+                    HubbleEditor.addLayerControls(child, layer, interactionLayer);
                 }
             } else {
                 child.style.border = 'none';
@@ -10326,6 +10688,7 @@ window.HubbleEditor = {
                 child.style.borderRadius = '0';
                 const dBtn = child.querySelector('.he-delete-btn');
                 if (dBtn) dBtn.remove();
+                child.querySelectorAll('.he-resize-handle').forEach(h => h.remove());
             }
         });
         
@@ -10360,6 +10723,7 @@ window.HubbleEditor = {
         const up = () => {
           isDragging = false;
           HubbleEditor.pushHistory(); // push history on drop
+          HubbleEditor.updateRender(); // Sync state to chUploads
           document.removeEventListener('mousemove', move);
           document.removeEventListener('mouseup', up);
         };
@@ -10387,6 +10751,148 @@ window.HubbleEditor = {
         });
         interactionLayer.dataset.clickBound = "true";
     }
+
+    // Sync state to chUploads so it's always up to date
+    if (window.chUploads && window.chUploads[this.activeMediaIndex]) {
+        window.chUploads[this.activeMediaIndex].editorState = JSON.parse(JSON.stringify(this.state));
+    }
+    // Update live preview thumbnail
+    if (typeof this.updatePreviewThumbnail === 'function') {
+        this.updatePreviewThumbnail(this.activeMediaIndex);
+    }
+  },
+
+  activeLayout: 'original',
+
+  setLayout(layoutName) {
+    let effectiveLayoutName = window.getEffectiveLayout(layoutName, window.chUploads);
+
+    this.activeLayout = layoutName;
+    const previewRow = document.getElementById('ch-media-preview-row');
+    if (!previewRow) return;
+    
+    // Remove existing layout classes
+    previewRow.className = 'ch-media-preview-row';
+    
+    // Add new layout class if not original/single default
+    if (effectiveLayoutName !== 'original' && effectiveLayoutName !== 'single') {
+       previewRow.classList.add(`layout-${effectiveLayoutName}`);
+    }
+    
+    // Update active button state
+    document.querySelectorAll('.ch-layout-btn').forEach(btn => {
+       btn.classList.remove('ch-layout-btn-active');
+       if (btn.dataset.layout === layoutName) {
+           btn.classList.add('ch-layout-btn-active');
+       }
+    });
+    
+    // Flatten DOM (remove layout row wrappers)
+    const items = Array.from(previewRow.querySelectorAll('.ch-preview-item'));
+    if (items.length > 0) {
+       items.sort((a, b) => parseInt(a.dataset.index) - parseInt(b.dataset.index));
+       
+       previewRow.querySelectorAll('.ch-layout-row').forEach(el => el.remove());
+       const addMoreBtn = document.getElementById('ch-add-more-media-btn');
+
+       items.forEach(item => {
+           previewRow.insertBefore(item, addMoreBtn);
+       });
+
+       // Update active aspect ratios
+       for (let i = 0; i < window.chUploads.length; i++) {
+           this.updatePreviewThumbnail(i);
+       }
+    }
+  },
+
+  updatePreviewThumbnail(index, passedEl = null) {
+    if (!window.chUploads || !window.chUploads[index]) return;
+    const item = window.chUploads[index];
+    const previewEl = passedEl || document.querySelector(`.ch-preview-item[data-index="${index}"]`);
+    if (!previewEl) return;
+    
+    let state = item.editorState;
+    if (index === this.activeMediaIndex) state = this.state;
+    if (!state) return; // No edits, just keep original
+
+    // Keep only the remove button and duration overlay
+    const rmBtn = previewEl.querySelector('.ch-remove-media');
+    let overlay = null;
+    if (item.type.startsWith('video/')) {
+        const divs = previewEl.querySelectorAll('div');
+        divs.forEach(d => {
+           if(d.innerHTML.includes('lucide="video"')) overlay = d;
+        });
+    }
+
+    const ar = this.getEditedAspectRatio(item);
+    previewEl.style.aspectRatio = '';
+    previewEl.style.removeProperty('--ar');
+    previewEl.innerHTML = '';
+    
+    // Containment frame
+    const miniContainer = document.createElement('div');
+    miniContainer.className = 'edited-frame';
+    miniContainer.style.cssText = `position: relative; overflow: hidden; aspect-ratio: ${ar}; border-radius: 10px; background: #1a1a1a; display: flex; align-items: center; justify-content: center; margin: auto; width: min(100cqw, calc(100cqh * ${ar})); height: min(100cqh, calc(100cqw / ${ar}));`;
+    
+    // innerWrapper to handle crop scaling/translating
+    const innerWrapper = document.createElement('div');
+    if (state.crop) {
+       const cw = state.crop.width;
+       const ch = state.crop.height;
+       const cx = state.crop.x;
+       const cy = state.crop.y;
+       innerWrapper.style.cssText = `position: absolute; width: ${10000/cw}%; height: ${10000/ch}%; left: -${(cx/cw)*100}%; top: -${(cy/ch)*100}%;`;
+    } else {
+       innerWrapper.style.cssText = 'position: absolute; width: 100%; height: 100%; left: 0; top: 0;';
+    }
+
+    // Media layer
+    const miniMediaLayer = document.createElement('div');
+    miniMediaLayer.style.cssText = 'position: absolute; width: 100%; height: 100%;';
+    
+    // Interaction layer
+    const miniInteractionLayer = document.createElement('div');
+    miniInteractionLayer.style.cssText = 'position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;';
+    
+    // Media Node (Thumbnails are always images to avoid heavy video playback in previews unless hovered/needed)
+    const node = document.createElement('img');
+    node.src = item.thumbUrl;
+    node.style.cssText = 'width: 100%; height: 100%; object-fit: contain; transform-origin: center center;';
+    
+    // Apply Edits
+    node.style.filter = this.buildCSSFilterString(state.filter, state.adjustments);
+    node.style.transform = `translate(${state.panX || 0}%, ${state.panY || 0}%) rotate(${state.rotation || 0}deg) scale(${state.zoom || 1})`;
+    
+    miniMediaLayer.appendChild(node);
+
+    // Interactions
+    if (state.layers) {
+      state.layers.forEach((layer) => {
+        const el = document.createElement('div');
+        el.style.cssText = `position: absolute; left: ${layer.x}%; top: ${layer.y}%; transform: translate(-50%, -50%) rotate(${layer.rotation}deg) scale(${layer.scale}); z-index: ${layer.zIndex}; pointer-events: none;`;
+        if (layer.type === 'text') {
+          el.innerHTML = `<div style="color: ${layer.styles.color || 'white'}; font-family: ${layer.styles.font || 'inherit'}; font-size: ${layer.styles.size || 24}px; font-weight: ${layer.styles.bold ? 'bold' : 'normal'}; font-style: ${layer.styles.italic ? 'italic' : 'normal'}; text-shadow: ${layer.styles.shadow ? '0 2px 10px rgba(0,0,0,0.5)' : 'none'}; text-align: center; white-space: pre-wrap;">${layer.content}</div>`;
+        } else if (layer.type === 'sticker') {
+          el.innerHTML = `<div style="font-size: ${layer.styles.size || 80}px; pointer-events: none;">${layer.content}</div>`;
+        }
+        // Scale down layers for miniature preview based on actual width
+        // Use ResizeObserver for accurate sizing or assume default 100px if hidden
+        const actualWidth = previewEl.clientWidth > 0 ? previewEl.clientWidth : 100;
+        const scaleFactor = actualWidth / 400; // 400 is the main canvas width
+        el.style.transform += ` scale(${scaleFactor})`;
+        miniInteractionLayer.appendChild(el);
+      });
+    }
+
+    innerWrapper.appendChild(miniMediaLayer);
+    innerWrapper.appendChild(miniInteractionLayer);
+    miniContainer.appendChild(innerWrapper);
+    
+    previewEl.appendChild(miniContainer);
+    if (overlay) previewEl.appendChild(overlay);
+    if (rmBtn) previewEl.appendChild(rmBtn);
   },
 
   renderPanels(activeTool) {
