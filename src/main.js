@@ -189,6 +189,327 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+
+  // --- INDEXEDDB DRAFTS WRAPPER ---
+  const DraftsDB = {
+    dbName: 'HiHubbleDrafts',
+    dbVersion: 1,
+    storeName: 'drafts',
+    init() {
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open(this.dbName, this.dbVersion);
+        request.onupgradeneeded = (e) => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains(this.storeName)) {
+            db.createObjectStore(this.storeName, { keyPath: 'id' });
+          }
+        };
+        request.onsuccess = (e) => resolve(e.target.result);
+        request.onerror = (e) => reject(e.target.error);
+      });
+    },
+    async saveDraft(draft) {
+      const db = await this.init();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(this.storeName, 'readwrite');
+        const store = tx.objectStore(this.storeName);
+        draft.lastModified = Date.now();
+        if (!draft.id) draft.id = 'draft_' + Date.now();
+        if (!draft.createdAt) draft.createdAt = Date.now();
+        const request = store.put(draft);
+        request.onsuccess = () => resolve(draft);
+        request.onerror = () => reject(request.error);
+      });
+    },
+    async getDrafts() {
+      const db = await this.init();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(this.storeName, 'readonly');
+        const store = tx.objectStore(this.storeName);
+        const request = store.getAll();
+        request.onsuccess = () => resolve(request.result.sort((a,b) => b.lastModified - a.lastModified));
+        request.onerror = () => reject(request.error);
+      });
+    },
+    async deleteDraft(id) {
+      const db = await this.init();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(this.storeName, 'readwrite');
+        const store = tx.objectStore(this.storeName);
+        const request = store.delete(id);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+      });
+    }
+  };
+  window.DraftsDB = DraftsDB;
+
+  // --- SAVE DRAFT ACTION ---
+  window.saveCurrentDraft = async function() {
+    if (!window.chUploads || window.chUploads.length === 0) {
+      showToast('Please upload media first');
+      return;
+    }
+    const media = window.chUploads[0];
+    
+    // We must read the file into a base64 string or blob to store in IndexedDB.
+    // IndexedDB can store Blobs natively!
+    const draft = {
+      mediaFile: media.file,
+      mediaType: media.type,
+      mediaThumbUrl: media.thumbUrl,
+      editorState: JSON.parse(JSON.stringify(window.HubbleEditor.state)),
+      caption: document.querySelector('.ch-caption-input')?.value || '',
+      collaborationEnabled: window.collaborationEnabled !== false,
+      collaborators: window.selectedCollaborators ? JSON.parse(JSON.stringify(window.selectedCollaborators)) : [],
+      scheduleEnabled: document.getElementById('ch-schedule-toggle')?.checked || false,
+      scheduleDate: document.getElementById('ch-schedule-date')?.value || '',
+      scheduleTime: document.getElementById('ch-schedule-time')?.value || ''
+    };
+    
+    // Check if we are editing an existing draft
+    if (window.currentDraftId) {
+      draft.id = window.currentDraftId;
+      draft.createdAt = window.currentDraftCreatedAt;
+    }
+    
+    try {
+      await DraftsDB.saveDraft(draft);
+      if (!window._silentDraftSave) {
+        showToast('Saved as draft! 📝');
+      }
+      window._silentDraftSave = false;
+      window.renderDraftsList();
+    } catch(err) {
+      console.error(err);
+      if (!window._silentDraftSave) {
+        showToast('Failed to save draft');
+      }
+      window._silentDraftSave = false;
+    }
+  };
+
+  window.renderDraftsList = async function() {
+    const list = document.getElementById('ch-drafts-list');
+    const hddList = document.getElementById('hdd-list');
+    const countLabel = document.getElementById('drafts-count');
+    const emptyState = document.getElementById('drafts-empty-state');
+    const hddEmptyState = document.getElementById('hdd-empty-state');
+    const seeAllBtn = document.getElementById('see-all-drafts-btn');
+    
+    const drafts = await DraftsDB.getDrafts();
+    if (countLabel) countLabel.innerText = drafts.length;
+    
+    // Clear both lists (except empty states)
+    if (list) {
+      Array.from(list.children).forEach(child => {
+        if (child.id !== 'drafts-empty-state') child.remove();
+      });
+    }
+    if (hddList) {
+      Array.from(hddList.children).forEach(child => {
+        if (child.id !== 'hdd-empty-state') child.remove();
+      });
+    }
+
+    if (drafts.length === 0) {
+      if (emptyState) emptyState.style.display = 'flex';
+      if (hddEmptyState) hddEmptyState.style.display = 'flex';
+      if (seeAllBtn) seeAllBtn.style.display = 'none';
+    } else {
+      if (emptyState) emptyState.style.display = 'none';
+      if (hddEmptyState) hddEmptyState.style.display = 'none';
+      if (seeAllBtn) seeAllBtn.style.display = 'block';
+      
+      drafts.slice(0, 3).forEach(d => {
+        const timeAgo = Math.round((Date.now() - d.lastModified) / 60000); // mins
+        const timeStr = timeAgo < 60 ? `${timeAgo}m ago` : `${Math.round(timeAgo/60)}h ago`;
+        const title = d.caption || 'Untitled HUBB';
+        const imgUrl = d.mediaThumbUrl || URL.createObjectURL(d.mediaFile);
+        
+        // Share HUBBs Panel Item
+        if (list) {
+          const item = document.createElement('div');
+          item.className = 'ch-draft-item';
+          item.style.cssText = 'display:flex; justify-content:space-between; align-items:center; background: rgba(255,255,255,0.03); padding: 8px; border-radius: 12px; transition: all 0.2s ease;';
+          item.innerHTML = `
+            <div style="display:flex; gap:10px; align-items:center; cursor:pointer;" onclick="window.loadDraft('${d.id}')">
+              <img src="${imgUrl}" style="width:40px; height:40px; border-radius:8px; object-fit:contain; object-position:center;" alt="Draft">
+              <div class="ch-draft-info">
+                <div class="ch-draft-title" style="font-weight:600; font-size:0.85rem; max-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-main);">${title}</div>
+                <div class="ch-draft-time" style="color:var(--text-muted); font-size:0.75rem;">${timeStr}</div>
+              </div>
+            </div>
+            <div style="display: flex; gap: 4px;">
+              <button onclick="window.duplicateDraft('${d.id}')" style="background:transparent; border:none; color:var(--text-main); padding:4px; cursor:pointer; opacity: 0.6; transition: opacity 0.2s;"><i data-lucide="copy" style="width:14px; height:14px;"></i></button>
+              <button onclick="window.deleteDraft('${d.id}')" style="background:transparent; border:none; color: #ef4444; padding:4px; cursor:pointer; opacity: 0.6; transition: opacity 0.2s;"><i data-lucide="trash-2" style="width:14px; height:14px;"></i></button>
+            </div>
+          `;
+          list.appendChild(item);
+        }
+
+        // Home Dropdown Panel Item
+        if (hddList) {
+          const hItem = document.createElement('div');
+          hItem.className = 'ch-draft-item';
+          hItem.style.cssText = 'display:flex; justify-content:space-between; align-items:center; background: rgba(255,255,255,0.03); padding: 8px; border-radius: 12px; margin-bottom: 8px; cursor: pointer; transition: all 0.2s ease; border: 1px solid transparent;';
+          hItem.onclick = (e) => {
+            if (e.target.closest('button')) return; // Don't trigger load if clicking delete/duplicate
+            document.getElementById('home-drafts-panel')?.classList.remove('open');
+            window.loadDraft(d.id);
+          };
+          hItem.onmouseover = () => { hItem.style.transform = 'translateY(-2px)'; hItem.style.background = 'rgba(255,255,255,0.08)'; hItem.style.borderColor = 'rgba(168, 85, 247, 0.3)'; };
+          hItem.onmouseout = () => { hItem.style.transform = 'none'; hItem.style.background = 'rgba(255,255,255,0.03)'; hItem.style.borderColor = 'transparent'; };
+          const mediaCount = window.chUploads ? window.chUploads.length : 1;
+          hItem.innerHTML = `
+            <div style="display:flex; gap:12px; align-items:center;">
+              <div style="position: relative;">
+                <img src="${imgUrl}" style="width:48px; height:48px; border-radius:10px; object-fit:cover; object-position:center; box-shadow: 0 4px 12px rgba(0,0,0,0.3);" alt="Draft">
+                <div style="position: absolute; bottom: -4px; right: -4px; background: var(--primary); color: white; font-size: 0.6rem; font-weight: bold; padding: 2px 6px; border-radius: 10px; border: 2px solid rgba(20,20,25,1);">${mediaCount}</div>
+              </div>
+              <div class="ch-draft-info">
+                <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 2px;">
+                  <div class="ch-draft-title" style="font-weight:600; font-size:0.9rem; max-width: 130px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-main);">${title}</div>
+                  <span style="font-size: 0.6rem; background: rgba(255,255,255,0.1); color: var(--text-muted); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.05);">Draft</span>
+                </div>
+                <div class="ch-draft-time" style="color:var(--text-muted); font-size:0.75rem;">Saved ${timeStr}</div>
+              </div>
+            </div>
+            <div style="display: flex; gap: 4px;">
+              <button onclick="window.deleteDraft('${d.id}')" style="background:transparent; border:none; color: #ef4444; padding:8px; cursor:pointer; opacity: 0.8; transition: transform 0.2s;"><i data-lucide="trash-2" style="width:16px; height:16px;"></i></button>
+            </div>
+          `;
+          hddList.appendChild(hItem);
+        }
+      });
+      if (window.lucide) window.lucide.createIcons();
+    }
+  };
+
+  window.loadDraft = async function(id) {
+    const drafts = await DraftsDB.getDrafts();
+    const d = drafts.find(x => x.id === id);
+    if(!d) return;
+    
+    // Restore variables
+    window.chUploads = [{
+      file: d.mediaFile,
+      type: d.mediaType,
+      thumbUrl: d.mediaThumbUrl || URL.createObjectURL(d.mediaFile)
+    }];
+    
+    window.currentDraftId = d.id;
+    window.currentDraftCreatedAt = d.createdAt;
+    
+    if (d.editorState) window.HubbleEditor.state = JSON.parse(JSON.stringify(d.editorState));
+    
+    const captionInput = document.querySelector('.ch-caption-input');
+    if (captionInput) captionInput.value = d.caption || '';
+    
+    // Switch view to editor
+    if (window.switchView) window.switchView('create-hubbs');
+    window.initCreateHubbsUpload();
+    
+    // Restore collaborators
+    window.collaborationEnabled = d.collaborationEnabled !== false;
+    const toggleEl = document.getElementById('ch-collab-toggle');
+    if (toggleEl) {
+      toggleEl.checked = window.collaborationEnabled;
+      if (window.toggleCollaboration) window.toggleCollaboration(window.collaborationEnabled);
+    }
+    
+    window.selectedCollaborators = d.collaborators || [];
+    if (window.renderCollaboratorChips) window.renderCollaboratorChips();
+    
+    // Restore scheduling
+    const schedToggle = document.getElementById('ch-schedule-toggle');
+    if (schedToggle) {
+      schedToggle.checked = d.scheduleEnabled === true;
+      if (window.toggleScheduling) window.toggleScheduling(schedToggle.checked);
+    }
+    const schedDate = document.getElementById('ch-schedule-date');
+    if (schedDate) schedDate.value = d.scheduleDate || '';
+    const schedTime = document.getElementById('ch-schedule-time');
+    if (schedTime) schedTime.value = d.scheduleTime || '';
+  };
+
+  window.deleteDraft = async function(id) {
+    if(confirm('Delete this draft?')) {
+      await DraftsDB.deleteDraft(id);
+      window.renderDraftsList();
+    }
+  };
+  
+  window.duplicateDraft = async function(id) {
+    const drafts = await DraftsDB.getDrafts();
+    const d = drafts.find(x => x.id === id);
+    if(!d) return;
+    
+    const clone = { ...d, id: undefined, createdAt: undefined };
+    await DraftsDB.saveDraft(clone);
+    window.renderDraftsList();
+  };
+
+  // --- AUTO SAVE DEBOUNCE ---
+  let autoSaveTimeout = null;
+  window.triggerAutoSave = function() {
+    if (state.activeView === 'create-hubbs' && window.chUploads && window.chUploads.length > 0) {
+      clearTimeout(autoSaveTimeout);
+      autoSaveTimeout = setTimeout(() => {
+        window._silentDraftSave = true;
+        if (window.saveCurrentDraft) window.saveCurrentDraft();
+      }, 3000);
+    }
+  };
+
+  // Run on init
+  document.addEventListener('DOMContentLoaded', () => {
+    document.addEventListener('input', (e) => {
+      if (e.target.closest('#view-create-hubbs') || e.target.closest('#view-review-hubbs')) {
+        window.triggerAutoSave();
+      }
+    });
+    document.addEventListener('change', (e) => {
+      if (e.target.closest('#view-create-hubbs') || e.target.closest('#view-review-hubbs')) {
+        window.triggerAutoSave();
+      }
+    });
+    window.addEventListener('beforeunload', (e) => {
+      if (state.activeView === 'create-hubbs' && window.chUploads && window.chUploads.length > 0) {
+        window._silentDraftSave = true;
+        if (window.saveCurrentDraft) window.saveCurrentDraft();
+      }
+    });
+
+    setTimeout(() => {
+      window.renderDraftsList();
+    }, 500);
+
+    // Setup Home Drafts Bubble Toggle
+    const draftsBtn = document.getElementById('story-drafts-container');
+    const draftsPanel = document.getElementById('home-drafts-panel');
+    const closeBtn = document.getElementById('close-hdd-btn');
+    if (draftsBtn && draftsPanel) {
+      draftsBtn.addEventListener('click', (e) => {
+        // Prevent toggling if clicking inside the panel
+        if (e.target.closest('#home-drafts-panel')) return;
+        draftsPanel.classList.toggle('open');
+      });
+    }
+    if (closeBtn) {
+      closeBtn.addEventListener('click', (e) => {
+        e.stopPropagation(); // prevent bubbling to container
+        if(draftsPanel) draftsPanel.classList.remove('open');
+      });
+    }
+    // Close dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+      if (draftsBtn && !draftsBtn.contains(e.target)) {
+        draftsPanel.classList.remove('open');
+      }
+    });
+  });
+
   // --- TOAST HELPER ---
   const toast = document.getElementById('toast-notif');
   function showToast(message) {
@@ -206,8 +527,15 @@ document.addEventListener('DOMContentLoaded', () => {
   const mobileNavItems = document.querySelectorAll('.mobile-nav-btn');
   const appContainer = document.querySelector('.chats-layout-grid');
 
+  window.switchView = switchView; // Expose to global scope for inline onclick
+
   function switchView(viewName, userId) {
     if (!viewName) return;
+
+    if (state.activeView === 'create-hubbs' && viewName !== 'create-hubbs' && window.chUploads && window.chUploads.length > 0) {
+      window._silentDraftSave = true;
+      if (window.saveCurrentDraft) window.saveCurrentDraft();
+    }
 
     state.activeView = viewName;
 
@@ -236,6 +564,21 @@ document.addEventListener('DOMContentLoaded', () => {
       if (chatHeader) chatHeader.style.display = 'none';
       if (chatViewport) chatViewport.style.display = 'none';
       if (chatFooter) chatFooter.style.display = 'none';
+    }
+
+    if (viewName === 'create-hubbs') {
+      document.body.classList.add('create-hubbs-view-active');
+    } else {
+      document.body.classList.remove('create-hubbs-view-active');
+    }
+
+    if (viewName === 'review-hubbs') {
+      document.body.classList.add('review-hubbs-view-active');
+      if (typeof window.initBeforeAfterSlider === 'function') {
+        setTimeout(window.initBeforeAfterSlider, 50);
+      }
+    } else {
+      document.body.classList.remove('review-hubbs-view-active');
     }
 
     // Update active view panels
@@ -1137,7 +1480,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (addStoryBtn) {
     addStoryBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      if (storyFileInput) storyFileInput.click();
+      switchView('create-hubbs');
     });
   }
 
@@ -1207,7 +1550,7 @@ document.addEventListener('DOMContentLoaded', () => {
           const div = document.createElement('div');
           div.style = 'display: flex; gap: 12px; align-items: center; background: rgba(255,255,255,0.05); padding: 12px; border-radius: 12px;';
           div.innerHTML = `
-            <img src="${draft.mediaUrl}" style="width: 60px; height: 60px; object-fit: cover; border-radius: 8px;" />
+            <img src="${draft.mediaUrl}" style="width: 60px; height: 60px; object-fit: contain; object-position: center; border-radius: 8px;" />
             <div style="flex: 1; color: white;">
               <p style="margin: 0; font-size: 14px; color: var(--text-muted);">${formatTimeAgo(draft.createdAt)}</p>
             </div>
@@ -8208,3 +8551,3588 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
 });
+
+// ==========================================
+// BEFORE / AFTER SLIDER LOGIC
+// ==========================================
+function initBeforeAfterSlider() {
+  const container = document.getElementById('ba-slider-container');
+  const imageBefore = document.getElementById('ba-image-before');
+  const handle = document.getElementById('ba-slider-handle');
+
+  if (container && imageBefore && handle) {
+    let isDragging = false;
+
+    const updateSlider = (x) => {
+      const rect = container.getBoundingClientRect();
+      let position = x - rect.left;
+      
+      // Keep within bounds
+      position = Math.max(0, Math.min(position, rect.width));
+      
+      // Calculate percentage
+      const percentage = (position / rect.width) * 100;
+      
+      // Update DOM
+      imageBefore.style.clipPath = `inset(0 ${100 - percentage}% 0 0)`;
+      handle.style.left = `${percentage}%`;
+    };
+
+    // Mouse events
+    handle.addEventListener('mousedown', (e) => {
+      isDragging = true;
+      e.preventDefault(); // Prevent text selection
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+      updateSlider(e.clientX);
+    });
+
+    document.addEventListener('mouseup', () => {
+      isDragging = false;
+    });
+
+    // Touch events for mobile
+    handle.addEventListener('touchstart', (e) => {
+      isDragging = true;
+    }, { passive: true });
+
+    document.addEventListener('touchmove', (e) => {
+      if (!isDragging) return;
+      updateSlider(e.touches[0].clientX);
+    }, { passive: true });
+
+    document.addEventListener('touchend', () => {
+      isDragging = false;
+    });
+    
+    // Initial setup (50%)
+    imageBefore.style.clipPath = `inset(0 50% 0 0)`;
+    handle.style.left = `50%`;
+  }
+}
+
+window.initBeforeAfterSlider = initBeforeAfterSlider;
+document.addEventListener('DOMContentLoaded', initBeforeAfterSlider);
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
+  initBeforeAfterSlider();
+}
+
+// =========================================================================
+// CREATE HUBBS - NATIVE FILE UPLOAD & PREVIEW SYSTEM
+// =========================================================================
+function initCreateHubbsUpload() {
+  const uploadBox = document.getElementById('ch-upload-box');
+  const fileInput = document.getElementById('ch-hidden-file-input');
+  const cameraBtn = document.getElementById('ch-camera-btn');
+  const addMediaBtn = document.getElementById('ch-add-media-btn');
+  const previewContainer = document.getElementById('ch-media-preview-container');
+  const previewRow = document.getElementById('ch-media-preview-row');
+  const addMoreBtn = document.getElementById('ch-add-more-media-btn');
+
+  if (!uploadBox || !fileInput) return;
+
+  window.chUploads = window.chUploads || [];
+
+  // Triggers
+  if (cameraBtn) {
+    cameraBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      fileInput.setAttribute('capture', 'environment');
+      fileInput.click();
+    });
+  }
+
+  if (addMediaBtn) {
+    addMediaBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      fileInput.removeAttribute('capture');
+      fileInput.click();
+    });
+  }
+
+  uploadBox.addEventListener('click', () => {
+    fileInput.removeAttribute('capture');
+    fileInput.click();
+  });
+
+  if (addMoreBtn) {
+    addMoreBtn.addEventListener('click', () => {
+      fileInput.removeAttribute('capture');
+      fileInput.click();
+    });
+  }
+
+  // Drag and Drop
+  uploadBox.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    uploadBox.style.borderColor = 'var(--primary, #a855f7)';
+    uploadBox.style.background = 'rgba(168, 85, 247, 0.1)';
+  });
+
+  uploadBox.addEventListener('dragleave', (e) => {
+    e.preventDefault();
+    uploadBox.style.borderColor = '';
+    uploadBox.style.background = '';
+  });
+
+  uploadBox.addEventListener('drop', (e) => {
+    e.preventDefault();
+    uploadBox.style.borderColor = '';
+    uploadBox.style.background = '';
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleFiles(e.dataTransfer.files);
+    }
+  });
+
+  fileInput.addEventListener('change', (e) => {
+    if (e.target.files && e.target.files.length > 0) {
+      handleFiles(e.target.files);
+    }
+    fileInput.value = ''; // Reset input to allow selecting same files again if removed
+  });
+
+  async function handleFiles(files) {
+    const maxSize = 100 * 1024 * 1024; // 100MB
+    const toast = document.getElementById('toast-notif');
+    
+    function showMsg(msg) {
+      if (window.showToast) {
+        window.showToast(msg);
+      } else if (toast) {
+        toast.textContent = msg;
+        toast.classList.add('active');
+        setTimeout(() => toast.classList.remove('active'), 2500);
+      } else {
+        alert(msg);
+      }
+    }
+
+    // Optional: show loading indicator
+    uploadBox.style.opacity = '0.5';
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+
+      // Validate Size
+      if (file.size > maxSize) {
+        showMsg("This file exceeds the maximum upload size of 100 MB.");
+        continue;
+      }
+
+      // Validate Type
+      if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
+        showMsg("This file type is not supported.");
+        continue;
+      }
+
+      // Generate Thumbnail
+      let thumbUrl = '';
+      let duration = 0;
+      let originalWidth = 1000;
+      let originalHeight = 1000;
+
+      try {
+        if (file.type.startsWith('video/')) {
+          const vData = await generateVideoThumbnail(file);
+          thumbUrl = vData.thumb;
+          duration = vData.duration;
+          originalWidth = vData.width;
+          originalHeight = vData.height;
+        } else {
+          thumbUrl = URL.createObjectURL(file);
+          const img = new Image();
+          img.src = thumbUrl;
+          await new Promise(r => { img.onload = r; img.onerror = r; });
+          if (img.naturalWidth) {
+              originalWidth = img.naturalWidth;
+              originalHeight = img.naturalHeight;
+          }
+        }
+
+        window.chUploads.push({
+          file: file,
+          type: file.type,
+          thumbUrl: thumbUrl,
+          duration: duration,
+          originalWidth: originalWidth,
+          originalHeight: originalHeight,
+          name: file.name,
+          size: file.size,
+          editorState: {
+             filter: 'original', rotation: 0, zoom: 1, panX: 0, panY: 0,
+             adjustments: { brightness: 100, contrast: 100, exposure: 100, highlights: 100, shadows: 100, temperature: 0, tint: 0, saturation: 100, vibrance: 100, sharpness: 0, blur: 0, opacity: 100 },
+             crop: null, layers: [], isMuted: false, musicTrack: null, selectedLocation: null
+          }
+        });
+      } catch (err) {
+        console.error("Error generating thumbnail:", err);
+        showMsg("Unable to load media. Please try again.");
+      }
+    }
+
+    uploadBox.style.opacity = '1';
+    renderMediaPreviews();
+  }
+
+  function generateVideoThumbnail(file) {
+    return new Promise((resolve, reject) => {
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      video.muted = true;
+      video.playsInline = true;
+      const url = URL.createObjectURL(file);
+      video.src = url;
+
+      video.onloadedmetadata = () => {
+        // Seek to 0.1s to grab a frame, ensuring it's loaded
+        video.currentTime = Math.min(0.1, video.duration > 0 ? video.duration / 2 : 0);
+      };
+
+      video.onseeked = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = video.videoWidth || 320;
+          canvas.height = video.videoHeight || 240;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+          URL.revokeObjectURL(url);
+          resolve({ thumb: dataUrl, duration: video.duration, width: video.videoWidth || 320, height: video.videoHeight || 240 });
+        } catch (e) {
+          reject(e);
+        }
+      };
+
+      video.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error("Video load error"));
+      };
+    });
+  }
+
+  function formatDuration(seconds) {
+    if (!seconds || isNaN(seconds)) return '0:00';
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  }
+
+  window.getEffectiveLayout = function(layoutName, uploads) {
+      if (layoutName !== 'auto') return layoutName;
+      if (!uploads || uploads.length === 0) return layoutName;
+      const count = uploads.length;
+      let portraits = 0, landscapes = 0, squares = 0;
+      uploads.forEach(item => {
+          const ar = (window.HubbleEditor && window.HubbleEditor.getEditedAspectRatio) ? window.HubbleEditor.getEditedAspectRatio(item) : 1;
+          if (ar < 0.9) portraits++;
+          else if (ar > 1.1) landscapes++;
+          else squares++;
+      });
+      if (count === 1) return 'single';
+      if (count === 2) {
+          if (portraits >= 1 && landscapes === 0 && squares === 0) return 'vertical-split';
+          if (portraits === 2) return 'vertical-split';
+          return 'side-by-side';
+      }
+      return '2x2-grid';
+  };
+
+  function renderMediaPreviews() {
+    // Remove existing previews and layout rows except the Add More button
+    const existingItems = previewRow.querySelectorAll('.ch-layout-row, .ch-preview-item');
+    existingItems.forEach(el => {
+       // Ensure we don't accidentally remove the addMoreBtn if it somehow matches
+       if (el.id !== 'ch-add-more-media-btn') {
+          el.remove();
+       }
+    });
+
+    if (window.chUploads.length === 0) {
+      uploadBox.style.display = 'block';
+      previewContainer.style.display = 'none';
+      return;
+    }
+
+    uploadBox.style.display = 'none';
+    previewContainer.style.display = 'block';
+
+    const previewBlocks = [];
+
+    window.chUploads.forEach((item, index) => {
+      const previewEl = document.createElement('div');
+      previewEl.className = 'ch-preview-item';
+      previewEl.draggable = true;
+      previewEl.setAttribute('data-index', index);
+      // Inline styles to match original structure
+      previewEl.style.cssText = 'position: relative; flex-shrink: 0; width: 100px; height: 100px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.08); transition: transform 0.2s, box-shadow 0.2s; cursor: grab; background: #1a1a1a;';
+      
+      const img = document.createElement('img');
+      img.src = item.thumbUrl;
+      img.style.cssText = 'width: 100%; height: 100%; object-fit: contain; object-position: center; border-radius: 10px; pointer-events: none;';
+      previewEl.appendChild(img);
+
+      if (item.type.startsWith('video/')) {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position: absolute; bottom: 6px; right: 6px; background: rgba(0,0,0,0.75); color: white; padding: 2px 6px; border-radius: 6px; font-size: 0.7rem; font-weight: 600; display: flex; align-items: center; gap: 4px; backdrop-filter: blur(4px); pointer-events: none;';
+        overlay.innerHTML = `<i data-lucide="video" style="width: 10px; height: 10px;"></i> ${formatDuration(item.duration)}`;
+        previewEl.appendChild(overlay);
+      }
+
+      const rmBtn = document.createElement('button');
+      rmBtn.className = 'ch-remove-media';
+      rmBtn.style.cssText = 'position: absolute; top: -6px; right: -6px; width: 22px; height: 22px; border-radius: 50%; background: #ff3b30; color: white; border: none; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.4); z-index: 10; padding: 0; transition: transform 0.2s;';
+      rmBtn.innerHTML = '<i data-lucide="x" style="width: 12px; height: 12px;"></i>';
+      rmBtn.onmouseover = () => { rmBtn.style.transform = 'scale(1.1)'; };
+      rmBtn.onmouseout = () => { rmBtn.style.transform = 'scale(1)'; };
+      rmBtn.onclick = (e) => {
+        e.stopPropagation();
+        previewEl.classList.add('exiting'); // Apply animation
+        setTimeout(() => {
+          window.chUploads.splice(index, 1);
+          if (item.type.startsWith('image/')) {
+            URL.revokeObjectURL(item.thumbUrl);
+          }
+          if (window.HubbleEditor && window.HubbleEditor.cleanupMedia) {
+            window.HubbleEditor.cleanupMedia();
+          }
+          
+          if (window.HubbleEditor) {
+             if (window.chUploads.length === 0) {
+                window.HubbleEditor.activeMediaIndex = 0;
+                window.HubbleEditor.state = {
+                     filter: 'original', rotation: 0, zoom: 1, panX: 0, panY: 0,
+                     adjustments: { brightness: 100, contrast: 100, exposure: 100, highlights: 100, shadows: 100, temperature: 0, tint: 0, saturation: 100, vibrance: 100, sharpness: 0, blur: 0, opacity: 100 },
+                     crop: null, layers: [], isMuted: false, musicTrack: null, selectedLocation: null
+                };
+                window.HubbleEditor.history = [JSON.parse(JSON.stringify(window.HubbleEditor.state))];
+                window.HubbleEditor.redoStack = [];
+                window.HubbleEditor.activeSelectedLayerId = null;
+                window.HubbleEditor.updateRender();
+             } else {
+                if (window.HubbleEditor.activeMediaIndex === index) {
+                   window.HubbleEditor.activeMediaIndex = 0;
+                   if (window.chUploads[0].editorState) {
+                       window.HubbleEditor.state = JSON.parse(JSON.stringify(window.chUploads[0].editorState));
+                   }
+                   window.HubbleEditor.updateRender();
+                } else if (window.HubbleEditor.activeMediaIndex > index) {
+                   window.HubbleEditor.activeMediaIndex--;
+                }
+             }
+          }
+          
+          renderMediaPreviews();
+        }, 350); // wait for animation to complete
+      };
+      previewEl.appendChild(rmBtn);
+
+      // Drag and Drop Reordering Support
+      previewEl.addEventListener('dragstart', (e) => {
+        e.dataTransfer.setData('text/plain', index);
+        previewEl.style.opacity = '0.5';
+      });
+      previewEl.addEventListener('dragend', () => {
+        previewEl.style.opacity = '1';
+        previewRow.querySelectorAll('.ch-preview-item').forEach(el => el.style.border = '1px solid rgba(255,255,255,0.08)');
+      });
+      previewEl.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        previewEl.style.border = '2px solid var(--primary, #a855f7)';
+      });
+      previewEl.addEventListener('dragleave', () => {
+        previewEl.style.border = '1px solid rgba(255,255,255,0.08)';
+      });
+      previewEl.addEventListener('drop', (e) => {
+        e.preventDefault();
+        const draggedIndex = parseInt(e.dataTransfer.getData('text/plain'), 10);
+        if (!isNaN(draggedIndex) && draggedIndex !== index) {
+          // Swap logic
+          const draggedItem = window.chUploads.splice(draggedIndex, 1)[0];
+          window.chUploads.splice(index, 0, draggedItem);
+          renderMediaPreviews();
+        }
+      });
+
+      // Click to select and edit this specific media item
+      previewEl.addEventListener('click', () => {
+        if (window.HubbleEditor) {
+           // Save current state to the previously active media
+           if (window.chUploads[window.HubbleEditor.activeMediaIndex]) {
+               window.chUploads[window.HubbleEditor.activeMediaIndex].editorState = JSON.parse(JSON.stringify(window.HubbleEditor.state));
+           }
+           // Switch active media index
+           window.HubbleEditor.activeMediaIndex = index;
+           // Load the state for the new media, or reset if none exists
+           if (item.editorState) {
+               window.HubbleEditor.state = JSON.parse(JSON.stringify(item.editorState));
+           } else {
+               window.HubbleEditor.state = {
+                 filter: 'original', rotation: 0, zoom: 1, panX: 0, panY: 0,
+                 adjustments: { brightness: 100, contrast: 100, exposure: 100, highlights: 100, shadows: 100, temperature: 0, tint: 0, saturation: 100, vibrance: 100, sharpness: 0, blur: 0, opacity: 100 },
+                 crop: null, layers: [], isMuted: false, musicTrack: null, selectedLocation: null
+               };
+           }
+           window.HubbleEditor.updateRender();
+        }
+        
+        // Highlight active preview visually
+        document.querySelectorAll('.ch-preview-item').forEach(el => el.style.border = '1px solid rgba(255,255,255,0.08)');
+        previewEl.style.border = '2px solid var(--primary, #a855f7)';
+        
+        if (window.showToast) window.showToast(`Editing ${item.name} 🔍`);
+      });
+
+      // Update this thumbnail to reflect any existing edits visually BEFORE grouping
+      if (window.HubbleEditor && typeof window.HubbleEditor.updatePreviewThumbnail === 'function') {
+         window.HubbleEditor.updatePreviewThumbnail(index, previewEl);
+      }
+      
+      previewBlocks.push({ mediaItem: item, el: previewEl });
+    });
+
+    // Grouping Logic
+    let layout = (window.HubbleEditor && window.HubbleEditor.activeLayout) || 'original';
+    let effectiveLayout = window.getEffectiveLayout(layout, window.chUploads);
+
+    previewBlocks.forEach(b => previewRow.insertBefore(b.el, addMoreBtn));
+    // Ensure the currently active media item is highlighted
+    const activeIndex = window.HubbleEditor ? window.HubbleEditor.activeMediaIndex : 0;
+    const activeEl = previewRow.querySelector(`.ch-preview-item[data-index="${activeIndex}"]`);
+    if (activeEl) {
+       activeEl.style.border = '2px solid var(--primary, #a855f7)';
+    }
+
+    if (window.lucide) {
+      window.lucide.createIcons();
+    }
+    
+    // Toggle Media Layouts visibility
+    const layoutsDisabledMsg = document.getElementById('ch-layouts-disabled-msg');
+    const layoutsOptions = document.getElementById('ch-layouts-options');
+    if (layoutsDisabledMsg && layoutsOptions) {
+      if (window.chUploads.length >= 2) {
+        layoutsDisabledMsg.style.display = 'none';
+        layoutsOptions.style.display = 'flex';
+        
+        const btnSideBySide = document.querySelector('.ch-layout-btn[data-layout="side-by-side"]');
+        const btnVerticalSplit = document.querySelector('.ch-layout-btn[data-layout="vertical-split"]');
+        const btn2x2Grid = document.querySelector('.ch-layout-btn[data-layout="2x2-grid"]');
+        
+        if (window.chUploads.length === 2) {
+           if (btnSideBySide) btnSideBySide.style.display = 'block';
+           if (btnVerticalSplit) btnVerticalSplit.style.display = 'block';
+           if (btn2x2Grid) btn2x2Grid.style.display = 'none';
+           
+           if (window.HubbleEditor && window.HubbleEditor.activeLayout === '2x2-grid') {
+               window.HubbleEditor.setLayout('auto');
+           }
+        } else {
+           if (btnSideBySide) btnSideBySide.style.display = 'none';
+           if (btnVerticalSplit) btnVerticalSplit.style.display = 'none';
+           if (btn2x2Grid) btn2x2Grid.style.display = 'block';
+           
+           if (window.HubbleEditor && (window.HubbleEditor.activeLayout === 'side-by-side' || window.HubbleEditor.activeLayout === 'vertical-split')) {
+               window.HubbleEditor.setLayout('auto');
+           }
+        }
+      } else {
+        layoutsDisabledMsg.style.display = 'block';
+        layoutsOptions.style.display = 'none';
+        // Reset to original layout internally
+        if (window.HubbleEditor) window.HubbleEditor.setLayout('original');
+      }
+    }
+  }
+
+  // Initial check
+  renderMediaPreviews();
+}
+
+document.addEventListener('DOMContentLoaded', initCreateHubbsUpload);
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
+  initCreateHubbsUpload();
+}
+// =========================================================================
+// REVIEW HUBBS - NAVIGATION & VALIDATION
+// =========================================================================
+window.toggleScheduling = function(checked) {
+  const row = document.getElementById('ch-schedule-datetime-row');
+  const dateInput = document.getElementById('ch-schedule-date');
+  const timeInput = document.getElementById('ch-schedule-time');
+  
+  if (checked) {
+    row.style.display = 'flex';
+    // Small delay to allow display:flex to apply before setting opacity for transition
+    setTimeout(() => {
+      row.style.opacity = '1';
+    }, 10);
+    
+    // Set default date/time to now + 1 hour if empty
+    if (!dateInput.value || !timeInput.value) {
+      const now = new Date();
+      now.setHours(now.getHours() + 1);
+      
+      const yyyy = now.getFullYear();
+      const mm = String(now.getMonth() + 1).padStart(2, '0');
+      const dd = String(now.getDate()).padStart(2, '0');
+      dateInput.value = `${yyyy}-${mm}-${dd}`;
+      
+      const hh = String(now.getHours()).padStart(2, '0');
+      const min = String(now.getMinutes()).padStart(2, '0');
+      timeInput.value = `${hh}:${min}`;
+    }
+  } else {
+    row.style.opacity = '0';
+    setTimeout(() => {
+      row.style.display = 'none';
+    }, 300);
+  }
+};
+
+window.handleReviewNavigation = function() {
+  if (!window.chUploads || window.chUploads.length === 0) {
+    showValidationModal();
+    return;
+  }
+  
+  // Validate scheduling if enabled
+  const toggle = document.getElementById('ch-schedule-toggle');
+  let scheduledAtIso = null;
+  
+  if (toggle && toggle.checked) {
+    const dateVal = document.getElementById('ch-schedule-date').value;
+    const timeVal = document.getElementById('ch-schedule-time').value;
+    
+    if (!dateVal || !timeVal) {
+      if (window.showToast) window.showToast('Please select a valid date and time for scheduling.', 'error');
+      return;
+    }
+    
+    const scheduledTime = new Date(`${dateVal}T${timeVal}`);
+    if (isNaN(scheduledTime.getTime())) {
+      if (window.showToast) window.showToast('Invalid date or time selected.', 'error');
+      return;
+    }
+    
+    if (scheduledTime <= new Date()) {
+      if (window.showToast) window.showToast('Scheduled time must be in the future.', 'error');
+      return;
+    }
+    
+    scheduledAtIso = scheduledTime.toISOString();
+    window.chScheduledAt = scheduledAtIso; // Store for publish
+    
+    // Update Review Page Footer
+    const infoBox = document.getElementById('review-scheduled-info');
+    const infoText = document.getElementById('review-scheduled-text');
+    const pubText = document.getElementById('review-publish-text');
+    const pubIcon = document.getElementById('review-publish-icon');
+    
+    if (infoBox && infoText && pubText && pubIcon) {
+      infoBox.style.display = 'flex';
+      const formattedDate = scheduledTime.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      const formattedTime = scheduledTime.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+      infoText.innerText = `${formattedDate} at ${formattedTime}`;
+      
+      pubText.innerText = 'Schedule Hubb';
+      pubIcon.setAttribute('data-lucide', 'calendar-clock');
+      if (window.lucide) window.lucide.createIcons();
+    }
+  } else {
+    window.chScheduledAt = null;
+    
+    // Reset Review Page Footer
+    const infoBox = document.getElementById('review-scheduled-info');
+    const pubText = document.getElementById('review-publish-text');
+    const pubIcon = document.getElementById('review-publish-icon');
+    
+    if (infoBox && pubText && pubIcon) {
+      infoBox.style.display = 'none';
+      pubText.innerText = 'Publish Hubb';
+      pubIcon.setAttribute('data-lucide', 'upload-cloud');
+      if (window.lucide) window.lucide.createIcons();
+    }
+  }
+  
+  // Navigate to review view
+  switchView('review-hubbs');
+  
+  // Initialize slider with the actual uploaded media
+  setTimeout(window.initReviewSlider, 50);
+};
+
+function showValidationModal() {
+  let overlay = document.getElementById('review-validation-overlay');
+  
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'review-validation-overlay';
+    overlay.className = 'review-validation-modal-overlay';
+    
+    overlay.innerHTML = `
+      <div class="review-validation-modal">
+        <h3 style="margin: 0 0 8px 0; font-size: 1.5rem; font-weight: 700;">No HUBB Selected</h3>
+        <p style="margin: 0 0 24px 0; font-size: 0.95rem;">Please select at least one photo or video before continuing.</p>
+        <div style="display: flex; gap: 12px; justify-content: center;">
+          <button id="rv-cancel-btn" style="padding: 10px 24px; border-radius: 8px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.1); color: #fff; font-weight: 600; cursor: pointer; transition: all 0.2s;">Cancel</button>
+          <button id="rv-upload-btn" style="padding: 10px 24px; border-radius: 8px; background: linear-gradient(135deg, var(--primary) 0%, #a855f7 100%); border: none; color: white; font-weight: 600; cursor: pointer; box-shadow: 0 4px 12px rgba(168,85,247,0.3); transition: all 0.2s;">Upload Media</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    
+    document.getElementById('rv-cancel-btn').addEventListener('click', () => {
+      overlay.classList.remove('active');
+    });
+    
+    document.getElementById('rv-upload-btn').addEventListener('click', () => {
+      overlay.classList.remove('active');
+      // Trigger the file picker
+      const fileInput = document.getElementById('ch-hidden-file-input');
+      if (fileInput) fileInput.click();
+    });
+  }
+  
+  // Trigger animation
+  requestAnimationFrame(() => {
+    overlay.classList.add('active');
+  });
+}
+
+// =========================================================================
+// REVIEW HUBBS - COMPARISON SLIDER & SYNC
+// =========================================================================
+window.initReviewSlider = function() {
+  const emptyState = document.getElementById('review-empty-state');
+  const sliderWrapper = document.getElementById('review-slider-wrapper');
+  
+  if (!window.chUploads || window.chUploads.length === 0) {
+    if (emptyState) emptyState.style.display = 'flex';
+    if (sliderWrapper) sliderWrapper.style.display = 'none';
+    return;
+  }
+  
+  if (emptyState) emptyState.style.display = 'none';
+  if (sliderWrapper) sliderWrapper.style.display = 'block';
+  
+  const beforeContainer = document.getElementById('review-before-container');
+  const afterContainer = document.getElementById('review-after-container');
+  
+  if (!beforeContainer || !afterContainer) return;
+  
+  // Clear containers except for absolute labels and lines
+  [beforeContainer, afterContainer].forEach(container => {
+    Array.from(container.children).forEach(child => {
+      if (!child.style.position.includes('absolute')) {
+        if (child.tagName === 'VIDEO') {
+          child.pause();
+          child.removeAttribute('src');
+          child.load();
+        }
+        child.remove();
+      }
+    });
+  });
+
+  const hasMultiple = window.chUploads.length >= 2;
+  let layout = (window.HubbleEditor && window.HubbleEditor.activeLayout) || 'original';
+  
+  layout = window.getEffectiveLayout(layout, window.chUploads);
+
+  const layoutClass = (hasMultiple && layout !== 'original' && layout !== 'single') ? `layout-${layout}` : '';
+
+  const beforeWrapper = document.createElement('div');
+  beforeWrapper.style.cssText = 'width: 100%; height: 100%;';
+  if (layoutClass) beforeWrapper.className = layoutClass;
+
+  const afterWrapper = document.createElement('div');
+  afterWrapper.style.cssText = 'width: 100%; height: 100%;';
+  if (layoutClass) afterWrapper.className = layoutClass;
+  
+  let firstVideoBefore = null;
+  let firstVideoAfter = null;
+
+  const beforeBlocks = [];
+  const afterBlocks = [];
+
+  window.chUploads.forEach((mediaItem) => {
+    const url = URL.createObjectURL(mediaItem.file);
+    const state = mediaItem.editorState || {
+       filter: 'original', rotation: 0, zoom: 1, panX: 0, panY: 0,
+       adjustments: { brightness: 100, contrast: 100, exposure: 100, highlights: 100, shadows: 100, temperature: 0, tint: 0, saturation: 100, vibrance: 100, sharpness: 0, blur: 0, opacity: 100 },
+       crop: null, layers: [], isMuted: false, musicTrack: null, selectedLocation: null
+    };
+
+    const ar = (window.HubbleEditor && window.HubbleEditor.getEditedAspectRatio) ? window.HubbleEditor.getEditedAspectRatio(mediaItem) : 1;
+    const beforeCell = document.createElement('div');
+    beforeCell.className = 'ch-preview-item';
+    beforeCell.style.cssText = `position: relative; width: 100%; height: 100%; overflow: hidden; display: flex; align-items: center; justify-content: center;`;
+    
+    const afterCell = document.createElement('div');
+    afterCell.className = 'ch-preview-item';
+    afterCell.style.cssText = `position: relative; width: 100%; height: 100%; overflow: hidden; display: flex; align-items: center; justify-content: center;`;
+
+    const beforeFrame = document.createElement('div');
+    beforeFrame.className = 'edited-frame';
+    beforeFrame.style.cssText = `position: relative; overflow: hidden; aspect-ratio: ${ar}; border-radius: 10px; background: #1a1a1a; display: flex; align-items: center; justify-content: center; margin: auto; width: min(100cqw, calc(100cqh * ${ar})); height: min(100cqh, calc(100cqw / ${ar}));`;
+
+    const afterFrame = document.createElement('div');
+    afterFrame.className = 'edited-frame';
+    afterFrame.style.cssText = `position: relative; overflow: hidden; aspect-ratio: ${ar}; border-radius: 10px; background: #1a1a1a; display: flex; align-items: center; justify-content: center; margin: auto; width: min(100cqw, calc(100cqh * ${ar})); height: min(100cqh, calc(100cqw / ${ar}));`;
+
+
+    let cw = 100, ch = 100, cx = 0, cy = 0;
+    if (state.crop) {
+       cw = state.crop.width; ch = state.crop.height; cx = state.crop.x; cy = state.crop.y;
+    }
+    const cropScaleCSS = state.crop ? `position: absolute; width: ${10000/cw}%; height: ${10000/ch}%; left: -${(cx/cw)*100}%; top: -${(cy/ch)*100}%;` : `position: absolute; width: 100%; height: 100%; left: 0; top: 0;`;
+
+    const beforeInner = document.createElement('div');
+    beforeInner.style.cssText = 'position: absolute; width: 100%; height: 100%; left: 0; top: 0;';
+
+    const afterInner = document.createElement('div');
+    afterInner.style.cssText = cropScaleCSS;
+
+    let beforeMediaNode, afterMediaNode;
+
+    if (mediaItem.type.startsWith('video/')) {
+      beforeMediaNode = document.createElement('video');
+      afterMediaNode = document.createElement('video');
+      
+      [beforeMediaNode, afterMediaNode].forEach(v => {
+        v.src = url;
+        v.style.cssText = 'position: absolute; width: 100%; height: 100%; object-fit: contain; object-position: center;';
+        v.loop = true;
+        v.muted = state.isMuted || false;
+        v.playsInline = true;
+        v.autoplay = true;
+      });
+      
+      if (!firstVideoBefore) {
+         firstVideoBefore = beforeMediaNode;
+         firstVideoAfter = afterMediaNode;
+      } else {
+         // Sync secondary videos to the first one just by playing them together
+         firstVideoBefore.addEventListener('play', () => beforeMediaNode.play());
+         firstVideoBefore.addEventListener('pause', () => beforeMediaNode.pause());
+         firstVideoBefore.addEventListener('seeking', () => beforeMediaNode.currentTime = firstVideoBefore.currentTime);
+         firstVideoAfter.addEventListener('play', () => afterMediaNode.play());
+         firstVideoAfter.addEventListener('pause', () => afterMediaNode.pause());
+         firstVideoAfter.addEventListener('seeking', () => afterMediaNode.currentTime = firstVideoAfter.currentTime);
+      }
+    } else {
+      beforeMediaNode = document.createElement('img');
+      afterMediaNode = document.createElement('img');
+      [beforeMediaNode, afterMediaNode].forEach(img => {
+        img.src = url;
+        img.style.cssText = 'position: absolute; width: 100%; height: 100%; object-fit: contain; object-position: center;';
+      });
+    }
+
+    // Apply Edits to After node
+    if (window.HubbleEditor) {
+        afterMediaNode.style.filter = window.HubbleEditor.buildCSSFilterString(state.filter, state.adjustments);
+    }
+    const zoom = state.zoom || 1;
+    afterMediaNode.style.transform = `translate(${state.panX || 0}%, ${state.panY || 0}%) rotate(${state.rotation || 0}deg) scale(${zoom})`;
+
+    beforeInner.appendChild(beforeMediaNode);
+    beforeFrame.appendChild(beforeInner);
+    beforeCell.appendChild(beforeFrame);
+    
+    afterInner.appendChild(afterMediaNode);
+    afterFrame.appendChild(afterInner);
+
+    // Inject Layers (Stickers / Text)
+    const interactionWrapper = document.createElement('div');
+    interactionWrapper.style.cssText = 'position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;';
+    
+    if (state.layers) {
+      state.layers.forEach((layer) => {
+        const el = document.createElement('div');
+        el.style.cssText = `position: absolute; left: ${layer.x}%; top: ${layer.y}%; transform: translate(-50%, -50%) rotate(${layer.rotation}deg) scale(${layer.scale}); z-index: ${layer.zIndex}; pointer-events: none;`;
+        if (layer.type === 'text') {
+          el.innerHTML = `<div style="color: ${layer.styles.color || 'white'}; font-family: ${layer.styles.font || 'inherit'}; font-size: ${layer.styles.size || 24}px; font-weight: ${layer.styles.bold ? 'bold' : 'normal'}; font-style: ${layer.styles.italic ? 'italic' : 'normal'}; text-shadow: ${layer.styles.shadow ? '0 2px 10px rgba(0,0,0,0.5)' : 'none'}; text-align: center; white-space: pre-wrap;">${layer.content}</div>`;
+        } else if (layer.type === 'sticker') {
+          el.innerHTML = `<div style="font-size: ${layer.styles.size || 80}px; pointer-events: none;">${layer.content}</div>`;
+        }
+        interactionWrapper.appendChild(el);
+      });
+    }
+    afterFrame.appendChild(interactionWrapper);
+    afterCell.appendChild(afterFrame);
+
+    beforeBlocks.push({ mediaItem, el: beforeCell });
+    afterBlocks.push({ mediaItem, el: afterCell });
+  });
+
+  beforeBlocks.forEach(b => beforeWrapper.appendChild(b.el));
+  afterBlocks.forEach(b => afterWrapper.appendChild(b.el));
+  
+  // Audio sync and controls for the primary video
+  if (firstVideoBefore) {
+      firstVideoBefore.addEventListener('play', () => { 
+        firstVideoAfter.play(); 
+        if (window.HubbleEditor && window.HubbleEditor.GlobalAudio) {
+            window.HubbleEditor.GlobalAudio.sync(firstVideoBefore.currentTime);
+            window.HubbleEditor.GlobalAudio.play(); 
+        }
+      });
+      firstVideoBefore.addEventListener('pause', () => { 
+        firstVideoAfter.pause(); 
+        if (window.HubbleEditor && window.HubbleEditor.GlobalAudio) {
+            window.HubbleEditor.GlobalAudio.pause(); 
+        }
+      });
+      firstVideoBefore.addEventListener('seeking', () => {
+        firstVideoAfter.currentTime = firstVideoBefore.currentTime;
+        if (window.HubbleEditor && window.HubbleEditor.GlobalAudio) {
+            window.HubbleEditor.GlobalAudio.sync(firstVideoBefore.currentTime);
+        }
+      });
+      firstVideoBefore.addEventListener('seeked', () => {
+        firstVideoAfter.currentTime = firstVideoBefore.currentTime;
+        if (window.HubbleEditor && window.HubbleEditor.GlobalAudio) {
+            window.HubbleEditor.GlobalAudio.sync(firstVideoBefore.currentTime);
+        }
+      });
+
+      sliderWrapper.onclick = (e) => {
+        if (e.target.id === 'review-slider-handle' || e.target.closest('#review-slider-handle') || e.target.closest('#he-speaker-btn')) return;
+        if (firstVideoBefore.paused) {
+          firstVideoBefore.play();
+          const btn = document.getElementById('he-review-play-btn');
+          if (btn) {
+              btn.innerHTML = '<i data-lucide="pause" style="color: white; width: 32px; height: 32px;"></i>';
+              if (window.lucide) window.lucide.createIcons();
+              btn.style.opacity = '1';
+              btn.style.transform = 'scale(1)';
+              setTimeout(() => { btn.style.opacity = '0'; btn.style.transform = 'scale(0.9)'; }, 2000);
+          }
+        } else {
+          firstVideoBefore.pause();
+          const btn = document.getElementById('he-review-play-btn');
+          if (btn) {
+              btn.innerHTML = '<i data-lucide="play" style="color: white; width: 32px; height: 32px;"></i>';
+              if (window.lucide) window.lucide.createIcons();
+              btn.style.opacity = '1';
+              btn.style.transform = 'scale(1)';
+          }
+        }
+      };
+
+      let reviewControls = document.getElementById('he-review-controls');
+      if (reviewControls) reviewControls.remove();
+      if (window.HubbleEditor) {
+         reviewControls = window.HubbleEditor.buildVideoControls(sliderWrapper, firstVideoBefore, true);
+      }
+  } else {
+      let reviewControls = document.getElementById('he-review-controls');
+      if (reviewControls) reviewControls.remove();
+  }
+
+  // Insert at the beginning so they sit behind the absolute positioned labels
+  beforeContainer.insertBefore(beforeWrapper, beforeContainer.firstChild);
+  afterContainer.insertBefore(afterWrapper, afterContainer.firstChild);
+
+  // Setup Draggable Handle
+  const handle = document.getElementById('review-slider-handle');
+  if (handle) {
+    let isDragging = false;
+    
+    const updateSliderPos = (x) => {
+      const rect = sliderWrapper.getBoundingClientRect();
+      let position = x - rect.left;
+      position = Math.max(0, Math.min(position, rect.width));
+      const percentage = (position / rect.width) * 100;
+      
+      beforeContainer.style.clipPath = `inset(0 ${100 - percentage}% 0 0)`;
+      handle.style.left = `${percentage}%`;
+    };
+
+    handle.onmousedown = (e) => {
+      isDragging = true;
+      e.preventDefault(); 
+    };
+    
+    handle.ontouchstart = (e) => {
+      isDragging = true;
+    };
+    
+    document.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+      updateSliderPos(e.clientX);
+    });
+    
+    document.addEventListener('touchmove', (e) => {
+      if (!isDragging) return;
+      updateSliderPos(e.touches[0].clientX);
+    }, { passive: true });
+    
+    document.addEventListener('mouseup', () => isDragging = false);
+    document.addEventListener('touchend', () => isDragging = false);
+    
+    // Initial State 50%
+    beforeContainer.style.clipPath = `inset(0 50% 0 0)`;
+    handle.style.left = `50%`;
+  }
+};
+
+// =========================================================================
+// REVIEW HUBBS - ACTIONS
+// =========================================================================
+window.saveReviewDraft = function(btn) {
+  if (window.showToast) window.showToast('All edits saved to draft! 📝');
+  const span = document.getElementById('review-draft-time');
+  if (span) {
+    span.textContent = 'Last saved: Just now';
+  }
+  btn.style.opacity = '0.5';
+  btn.style.pointerEvents = 'none';
+  setTimeout(() => {
+    btn.style.opacity = '1';
+    btn.style.pointerEvents = 'all';
+  }, 1000);
+};
+
+window.publishHubb = async function() {
+  if (!window.chUploads || window.chUploads.length === 0) {
+    if (window.showValidationModal) window.showValidationModal();
+    return;
+  }
+  
+  const media = window.chUploads[0];
+  const url = media.thumbUrl || URL.createObjectURL(media.file);
+  const caption = document.querySelector('.ch-caption-input')?.value || '';
+  const filter = window.HubbleEditor.buildCSSFilterString();
+  
+  const pubBtn = document.getElementById('review-publish-btn');
+  if (pubBtn) {
+    pubBtn.disabled = true;
+    pubBtn.style.opacity = '0.7';
+    pubBtn.innerHTML = '<i data-lucide="loader" class="animate-spin"></i> Processing...';
+    if (window.lucide) window.lucide.createIcons();
+  }
+  
+  if (window.chScheduledAt) {
+    // Scheduled HUBB - Send to backend
+    try {
+      const token = localStorage.getItem('invibe_jwt_token');
+      if (!token) {
+        if (window.showToast) window.showToast('Please log in to schedule a HUBB! 🔐', 'error');
+        throw new Error('No token');
+      }
+      
+      // Convert file to base64
+      const getBase64 = (file) => new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = error => reject(error);
+      });
+      
+      const base64Media = await getBase64(media.file);
+      
+      const API_URL = window.API_URL || '';
+      const res = await fetch(`${API_URL}/api/stories/schedule`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ 
+          mediaUrl: base64Media, 
+          mediaType: media.type || 'image',
+          scheduledAt: window.chScheduledAt 
+        })
+      });
+      
+      if (!res.ok) throw new Error('Failed to schedule HUBB');
+      
+      if (window.showToast) window.showToast('HUBB scheduled successfully! 🗓️✨');
+    } catch (err) {
+      console.error('Scheduling error:', err);
+      if (window.showToast) window.showToast('Failed to schedule HUBB.', 'error');
+      
+      if (pubBtn) {
+        pubBtn.disabled = false;
+        pubBtn.style.opacity = '1';
+        pubBtn.innerHTML = '<span id="review-publish-text">Schedule Hubb</span> <i id="review-publish-icon" data-lucide="calendar-clock" style="width: 18px; height: 18px;"></i>';
+        if (window.lucide) window.lucide.createIcons();
+      }
+      return;
+    }
+  } else {
+    // Non-scheduled HUBB - existing local flow
+    let layout = (window.HubbleEditor && window.HubbleEditor.activeLayout) || 'original';
+    layout = window.getEffectiveLayout(layout, window.chUploads);
+
+    const allMedia = window.chUploads.map(m => {
+       const state = m.editorState || {
+          filter: 'original', rotation: 0, zoom: 1, panX: 0, panY: 0,
+          adjustments: { brightness: 100, contrast: 100, exposure: 100, highlights: 100, shadows: 100, temperature: 0, tint: 0, saturation: 100, vibrance: 100, sharpness: 0, blur: 0, opacity: 100 },
+          crop: null, layers: [], isMuted: false, musicTrack: null, selectedLocation: null
+       };
+       return {
+          url: m.thumbUrl || URL.createObjectURL(m.file),
+          type: m.type,
+          filter: window.HubbleEditor.buildCSSFilterString ? window.HubbleEditor.buildCSSFilterString(state.filter, state.adjustments) : '',
+          rotation: state.rotation || 0,
+          zoom: state.zoom || 1,
+          panX: state.panX || 0,
+          panY: state.panY || 0,
+          crop: state.crop,
+          layers: state.layers,
+          ar: (window.HubbleEditor && window.HubbleEditor.getEditedAspectRatio) ? window.HubbleEditor.getEditedAspectRatio(m) : 1
+       };
+    });
+
+    const newStoryHTML = `
+      <div class="story-card has-story" onclick="window.openPublishedStory(this)">
+        <div class="story-avatar-container">
+          <img src="${url}" alt="My Story" style="filter: ${filter}; object-fit: contain; object-position: center;">
+        </div>
+        <span class="story-username">Your Story</span>
+        <template class="story-data">
+          ${JSON.stringify({
+            allMedia: allMedia,
+            layout: layout,
+            caption: caption,
+            collaborationEnabled: window.collaborationEnabled !== false,
+            collaboratorIds: window.collaborationEnabled !== false ? (window.selectedCollaborators || []).map(c => c._id || c.id) : [],
+            time: Date.now()
+          })}
+        </template>
+      </div>
+    `;
+    
+    const currentBtn = document.getElementById('story-btn-current');
+    if (currentBtn) {
+      currentBtn.insertAdjacentHTML('afterend', newStoryHTML);
+    }
+    
+    if (window.showToast) window.showToast('Story published! 🚀');
+  }
+  
+  window.chUploads = [];
+  
+  if (window.currentDraftId) {
+    DraftsDB.deleteDraft(window.currentDraftId).then(() => {
+      window.currentDraftId = null;
+      window.currentDraftCreatedAt = null;
+      window.renderDraftsList();
+    }).catch(console.error);
+  }
+  
+  if (pubBtn) {
+    pubBtn.disabled = false;
+    pubBtn.style.opacity = '1';
+    pubBtn.innerHTML = '<span id="review-publish-text">Publish Hubb</span> <i id="review-publish-icon" data-lucide="upload-cloud" style="width: 18px; height: 18px;"></i>';
+  }
+  
+  setTimeout(() => {
+    switchView('home');
+    if (typeof initCreateHubbsUpload === 'function') initCreateHubbsUpload();
+  }, 100);
+};
+
+window.openPublishedStory = function(card) {
+  const dataNode = card.querySelector('.story-data');
+  if (!dataNode) return;
+  const data = JSON.parse(dataNode.innerHTML);
+  
+  const modal = document.getElementById('story-viewer-modal');
+  if (!modal) return;
+  
+  const avatar = document.getElementById('story-viewer-avatar');
+  if (avatar) avatar.src = 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&h=150&q=80';
+  
+  const name = document.getElementById('story-viewer-name');
+  if (name) name.innerText = 'Your Story';
+  
+  const time = document.getElementById('story-viewer-time');
+  if (time) time.innerText = 'Just now';
+  
+  const contentBox = document.getElementById('story-viewer-content-box');
+  if (!contentBox) return;
+  contentBox.innerHTML = '';
+  
+  let mediaDataList = data.allMedia;
+  if (!mediaDataList) {
+      // Fallback for old single media posts
+      mediaDataList = [{
+         url: data.url, type: data.type, filter: data.filter,
+         rotation: data.rotation, zoom: data.zoom, panX: 0, panY: 0,
+         crop: data.crop, layers: data.layers, ar: 1
+      }];
+  }
+
+  const hasMultiple = mediaDataList.length >= 2;
+  const layout = data.layout || 'single';
+  const layoutClass = (hasMultiple && layout !== 'original' && layout !== 'single') ? `layout-${layout}` : '';
+
+  const wrapper = document.createElement('div');
+  wrapper.style.cssText = 'width: 100%; height: 100%;';
+  if (layoutClass) wrapper.className = layoutClass;
+  // Apply Review specific layout CSS
+  // Actually, we made the CSS target #story-viewer-content-box. We don't need to spoof the ID.
+  contentBox.style.padding = '0';
+  contentBox.style.overflow = 'hidden';
+
+  mediaDataList.forEach((mData) => {
+    const cell = document.createElement('div');
+    cell.className = 'ch-preview-item';
+    cell.style.cssText = `position: relative; width: 100%; height: 100%; overflow: hidden; display: flex; align-items: center; justify-content: center;`;
+    
+    const frame = document.createElement('div');
+    frame.className = 'edited-frame';
+    frame.style.cssText = `position: relative; overflow: hidden; aspect-ratio: ${mData.ar}; border-radius: 10px; background: #1a1a1a; display: flex; align-items: center; justify-content: center; margin: auto; width: min(100cqw, calc(100cqh * ${mData.ar})); height: min(100cqh, calc(100cqw / ${mData.ar}));`;
+    
+    let cw = 100, ch = 100, cx = 0, cy = 0;
+    if (mData.crop) {
+       cw = mData.crop.width; ch = mData.crop.height; cx = mData.crop.x; cy = mData.crop.y;
+    }
+    const cropScaleCSS = mData.crop ? `position: absolute; width: ${10000/cw}%; height: ${10000/ch}%; left: -${(cx/cw)*100}%; top: -${(cy/ch)*100}%;` : `position: absolute; width: 100%; height: 100%; left: 0; top: 0;`;
+
+    const inner = document.createElement('div');
+    inner.style.cssText = cropScaleCSS;
+
+    let mediaNode;
+    if (mData.type.startsWith('video/')) {
+      mediaNode = document.createElement('video');
+      mediaNode.src = mData.url;
+      mediaNode.loop = true;
+      mediaNode.muted = true;
+      mediaNode.playsInline = true;
+      mediaNode.autoplay = true;
+    } else {
+      mediaNode = document.createElement('img');
+      mediaNode.src = mData.url;
+    }
+    mediaNode.style.cssText = 'position: absolute; width: 100%; height: 100%; object-fit: contain; object-position: center;';
+    mediaNode.style.filter = mData.filter || '';
+    mediaNode.style.transform = `translate(${mData.panX || 0}%, ${mData.panY || 0}%) rotate(${mData.rotation || 0}deg) scale(${mData.zoom || 1})`;
+    
+    inner.appendChild(mediaNode);
+    frame.appendChild(inner);
+
+    if (mData.layers) {
+      const interactionWrapper = document.createElement('div');
+      interactionWrapper.style.cssText = 'position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;';
+      mData.layers.forEach((layer) => {
+        const el = document.createElement('div');
+        el.style.cssText = `position: absolute; left: ${layer.x}%; top: ${layer.y}%; transform: translate(-50%, -50%) rotate(${layer.rotation}deg) scale(${layer.scale}); z-index: ${layer.zIndex}; pointer-events: none;`;
+        if (layer.type === 'text') {
+          el.innerHTML = `<div style="color: ${layer.styles.color || 'white'}; font-family: ${layer.styles.font || 'inherit'}; font-size: ${layer.styles.size || 24}px; font-weight: ${layer.styles.bold ? 'bold' : 'normal'}; font-style: ${layer.styles.italic ? 'italic' : 'normal'}; text-shadow: ${layer.styles.shadow ? '0 2px 10px rgba(0,0,0,0.5)' : 'none'}; text-align: center; white-space: pre-wrap;">${layer.content}</div>`;
+        } else if (layer.type === 'sticker') {
+          el.innerHTML = `<div style="font-size: ${layer.styles.size || 80}px; pointer-events: none;">${layer.content}</div>`;
+        }
+        interactionWrapper.appendChild(el);
+      });
+      frame.appendChild(interactionWrapper);
+    }
+    
+    cell.appendChild(frame);
+    wrapper.appendChild(cell);
+  });
+  
+  contentBox.appendChild(wrapper);
+
+  
+  modal.style.display = 'flex';
+  requestAnimationFrame(() => modal.style.opacity = '1');
+};
+
+// =========================================================================
+// HIHUBBLE ADVANCED STORY EDITOR ENGINE
+// =========================================================================
+
+window.HubbleEditor = {
+  activeMediaIndex: 0,
+  state: {
+    filter: 'original',
+    rotation: 0,
+    zoom: 1,
+    panX: 0,
+    panY: 0,
+    adjustments: {
+      brightness: 100, contrast: 100, exposure: 100, highlights: 100, shadows: 100,
+      temperature: 0, tint: 0, saturation: 100, vibrance: 100, sharpness: 0, blur: 0, opacity: 100
+    },
+    crop: null, // { x, y, width, height, aspect }
+    layers: [], // { id, type, content, x, y, rotation, scale, zIndex, styles }
+    isMuted: false,
+    musicTrack: null, // { url, title, artist }
+    selectedLocation: null // { displayName, type, lat, lon }
+  },
+  history: [],
+  redoStack: [],
+  
+  // Initialization
+  init() {
+    this.injectEditorUI();
+    this.bindToolButtons();
+  },
+
+  injectEditorUI() {
+    // We inject a floating editor canvas that appears when tools are active
+    if (!document.getElementById('he-canvas-modal')) {
+      const modal = document.createElement('div');
+      modal.id = 'he-canvas-modal';
+      modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.85); backdrop-filter: blur(12px); z-index: 9990; display: none; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.3s;';
+      
+      modal.innerHTML = `
+        <div style="position: absolute; top: 20px; right: 20px; display: flex; gap: 12px; z-index: 9995;">
+          <button onclick="HubbleEditor.undo()" id="he-undo-btn" class="ch-premium-tool-btn" style="width: 40px; height: 40px; border-radius: 12px; background: rgba(255,255,255,0.1); color: white; border: none; cursor: pointer; opacity: 0.5; pointer-events: none;"><i data-lucide="undo" style="width: 18px; height: 18px;"></i></button>
+          <button onclick="HubbleEditor.redo()" id="he-redo-btn" class="ch-premium-tool-btn" style="width: 40px; height: 40px; border-radius: 12px; background: rgba(255,255,255,0.1); color: white; border: none; cursor: pointer; opacity: 0.5; pointer-events: none;"><i data-lucide="redo" style="width: 18px; height: 18px;"></i></button>
+          
+          <div style="position: relative; display: flex; border-radius: 12px; background: rgba(255,255,255,0.1); box-shadow: 0 4px 12px rgba(0,0,0,0.2);">
+            <button onclick="HubbleEditor.pushHistory(); HubbleEditor.state.rotation = (HubbleEditor.state.rotation + 90) % 360; HubbleEditor.updateRender();" class="ch-premium-tool-btn" style="padding: 0 16px; height: 40px; border-radius: 12px 0 0 12px; background: transparent; color: white; border: none; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px;"><i data-lucide="rotate-cw" style="width: 16px; height: 16px;"></i> Rotate 90&deg;</button>
+            <div style="width: 1px; background: rgba(255,255,255,0.1); margin: 6px 0;"></div>
+            <button onclick="HubbleEditor.toggleManualRotate()" class="ch-premium-tool-btn" style="padding: 0 10px; height: 40px; border-radius: 0 12px 12px 0; background: transparent; color: white; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center;"><i data-lucide="chevron-down" style="width: 16px; height: 16px;"></i></button>
+            
+            <div id="he-manual-rotate-panel" class="he-manual-rotate-panel" style="display: none; position: absolute; top: 48px; right: 0; width: 280px; background: rgba(20,20,25,0.85); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.5); z-index: 9996; flex-direction: column;">
+               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                 <span style="font-size: 0.95rem; font-weight: 600; color: white;">Manual Rotate</span>
+                 <span id="he-manual-rotate-val" style="font-size: 0.85rem; color: var(--primary); font-weight: bold; background: rgba(168,85,247,0.15); padding: 4px 10px; border-radius: 8px; font-variant-numeric: tabular-nums;">0&deg;</span>
+               </div>
+               <input type="range" id="he-manual-rotate-slider" class="he-custom-slider" min="-180" max="180" value="0" oninput="HubbleEditor.onManualRotate(this.value)">
+               <div style="display: flex; gap: 12px; margin-top: 24px;">
+                 <button class="he-glass-btn he-cancel-btn" onclick="HubbleEditor.resetManualRotate()">Reset</button>
+                 <button class="he-premium-apply-btn" onclick="HubbleEditor.applyManualRotate()">Apply</button>
+               </div>
+            </div>
+          </div>
+          <button onclick="HubbleEditor.closeCanvas()" class="ch-premium-tool-btn" style="padding: 0 20px; height: 40px; border-radius: 12px; background: linear-gradient(135deg, var(--primary) 0%, #a855f7 100%); color: white; border: none; font-weight: 600; cursor: pointer;">Done Editing</button>
+        </div>
+        
+        <div id="he-workspace" style="position: relative; width: 80%; height: 80%; max-width: 1000px; display: flex; align-items: center; justify-content: center;">
+          <div id="he-render-container" style="position: relative; box-shadow: 0 20px 50px rgba(0,0,0,0.5); overflow: hidden; display: flex; align-items: center; justify-content: center;">
+            <div id="he-media-layer" style="position: absolute; width: 100%; height: 100%; transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);"></div>
+            <div id="he-interaction-layer" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;"></div>
+            <div id="he-crop-overlay" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; display: none;">
+               <!-- Crop Grid generated dynamically -->
+            </div>
+          </div>
+        </div>
+        
+        <!-- Floating Tool Panels -->
+        <div id="he-panels-container" style="position: absolute; left: 24px; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 16px; z-index: 9995;">
+           <!-- Panels injected here dynamically based on active tool -->
+        </div>
+      `;
+      document.body.appendChild(modal);
+      if (window.lucide) window.lucide.createIcons();
+      
+      const overlay = document.getElementById('he-crop-overlay');
+      const container = document.getElementById('he-render-container');
+      
+      if (overlay) overlay.style.cursor = 'move';
+      
+      if (container && !container.dataset.zoomPanBound) {
+        container.dataset.zoomPanBound = "true";
+        
+        // Mouse Wheel Zoom
+        container.addEventListener('wheel', (e) => {
+          if (e.target.closest('#he-video-controls') || e.target.closest('#he-review-controls') || e.target.closest('.he-delete-btn') || e.target.closest('.ch-premium-tool-btn')) return;
+          e.preventDefault();
+          const rect = container.getBoundingClientRect();
+          
+          const mouseX = ((e.clientX - rect.left) / rect.width * 100) - 50;
+          const mouseY = ((e.clientY - rect.top) / rect.height * 100) - 50;
+          
+          const oldZoom = HubbleEditor.state.zoom || 1;
+          const zoomDelta = e.deltaY > 0 ? -0.05 : 0.05;
+          let newZoom = Math.max(0.5, Math.min(3, oldZoom + zoomDelta));
+          
+          if (newZoom !== oldZoom) {
+             HubbleEditor.state.panX = (HubbleEditor.state.panX || 0) - (mouseX - (HubbleEditor.state.panX || 0)) * (newZoom / oldZoom - 1);
+             HubbleEditor.state.panY = (HubbleEditor.state.panY || 0) - (mouseY - (HubbleEditor.state.panY || 0)) * (newZoom / oldZoom - 1);
+             HubbleEditor.setCropZoom(newZoom);
+          }
+        }, { passive: false });
+        
+        // Mouse Drag Pan
+        let isMousePanning = false;
+        let mousePanStartX, mousePanStartY, mouseInitialPanX, mouseInitialPanY;
+        
+        container.addEventListener('mousedown', (e) => {
+          if (e.target.closest('#he-video-controls') || e.target.closest('#he-review-controls') || e.target.closest('.he-delete-btn') || e.target.closest('.ch-premium-tool-btn')) return;
+          if ((HubbleEditor.state.zoom || 1) <= 1) return;
+          isMousePanning = true;
+          mousePanStartX = e.clientX;
+          mousePanStartY = e.clientY;
+          mouseInitialPanX = HubbleEditor.state.panX || 0;
+          mouseInitialPanY = HubbleEditor.state.panY || 0;
+        });
+        
+        window.addEventListener('mousemove', (e) => {
+          if (isMousePanning) {
+            e.preventDefault();
+            const rect = container.getBoundingClientRect();
+            const dx = ((e.clientX - mousePanStartX) / rect.width) * 100;
+            const dy = ((e.clientY - mousePanStartY) / rect.height) * 100;
+            
+            HubbleEditor.state.panX = mouseInitialPanX + dx;
+            HubbleEditor.state.panY = mouseInitialPanY + dy;
+            HubbleEditor.enforcePanConstraints();
+            HubbleEditor.updateRender();
+          }
+        });
+        
+        window.addEventListener('mouseup', () => { isMousePanning = false; });
+        
+        // Touch Zoom and Pan
+        let initialPinchDist = null;
+        let initialZoom = 1;
+        let initialPanX = 0, initialPanY = 0;
+        let initialPinchCenter = null;
+        let isTouchPanning = false;
+        let touchPanStartX, touchPanStartY;
+        
+        container.addEventListener('touchstart', (e) => {
+          if (e.target.closest('#he-video-controls') || e.target.closest('#he-review-controls') || e.target.closest('.he-delete-btn') || e.target.closest('.ch-premium-tool-btn')) return;
+          if (e.touches.length === 2) {
+            e.preventDefault();
+            isTouchPanning = false;
+            const dx = e.touches[0].clientX - e.touches[1].clientX;
+            const dy = e.touches[0].clientY - e.touches[1].clientY;
+            initialPinchDist = Math.sqrt(dx*dx + dy*dy);
+            initialZoom = HubbleEditor.state.zoom || 1;
+            initialPanX = HubbleEditor.state.panX || 0;
+            initialPanY = HubbleEditor.state.panY || 0;
+            initialPinchCenter = {
+                x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+                y: (e.touches[0].clientY + e.touches[1].clientY) / 2
+            };
+          } else if (e.touches.length === 1) {
+            if ((HubbleEditor.state.zoom || 1) <= 1) return;
+            isTouchPanning = true;
+            touchPanStartX = e.touches[0].clientX;
+            touchPanStartY = e.touches[0].clientY;
+            initialPanX = HubbleEditor.state.panX || 0;
+            initialPanY = HubbleEditor.state.panY || 0;
+          }
+        }, { passive: false });
+        
+        container.addEventListener('touchmove', (e) => {
+          if (e.touches.length === 2 && initialPinchDist) {
+            e.preventDefault();
+            const dx = e.touches[0].clientX - e.touches[1].clientX;
+            const dy = e.touches[0].clientY - e.touches[1].clientY;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            const scale = dist / initialPinchDist;
+            let newZoom = Math.max(0.5, Math.min(3, initialZoom * scale));
+            
+            const rect = container.getBoundingClientRect();
+            
+            const currentCenterX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+            const currentCenterY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+            
+            const panDeltaX = ((currentCenterX - initialPinchCenter.x) / rect.width) * 100;
+            const panDeltaY = ((currentCenterY - initialPinchCenter.y) / rect.height) * 100;
+            
+            const mouseX = ((initialPinchCenter.x - rect.left) / rect.width * 100) - 50;
+            const mouseY = ((initialPinchCenter.y - rect.top) / rect.height * 100) - 50;
+            
+            HubbleEditor.state.panX = initialPanX - (mouseX - initialPanX) * (newZoom / initialZoom - 1) + panDeltaX;
+            HubbleEditor.state.panY = initialPanY - (mouseY - initialPanY) * (newZoom / initialZoom - 1) + panDeltaY;
+            HubbleEditor.setCropZoom(newZoom);
+          } else if (e.touches.length === 1 && isTouchPanning) {
+            e.preventDefault();
+            const rect = container.getBoundingClientRect();
+            const dx = ((e.touches[0].clientX - touchPanStartX) / rect.width) * 100;
+            const dy = ((e.touches[0].clientY - touchPanStartY) / rect.height) * 100;
+            
+            HubbleEditor.state.panX = initialPanX + dx;
+            HubbleEditor.state.panY = initialPanY + dy;
+            HubbleEditor.enforcePanConstraints();
+            HubbleEditor.updateRender();
+          }
+        }, { passive: false });
+        
+        container.addEventListener('touchend', (e) => {
+          if (e.touches.length < 2) initialPinchDist = null;
+          if (e.touches.length === 0) isTouchPanning = false;
+        });
+      }
+    }
+  },
+
+  bindToolButtons() {
+    const buttons = document.querySelectorAll('.ch-image-tools .ch-premium-tool-btn');
+    buttons.forEach((btn, index) => {
+      btn.onclick = (e) => {
+        e.preventDefault();
+        
+        if (!window.chUploads || window.chUploads.length === 0) {
+          if (window.showToast) window.showToast('Please upload media first.');
+          return;
+        }
+
+        const tools = ['filters', 'crop', 'rotate', 'adjust', 'stickers', 'text'];
+        
+        // Remove active class from all
+        buttons.forEach(b => {
+          b.classList.remove('active');
+          b.style.background = 'rgba(255,255,255,0.05)';
+          b.style.borderColor = 'rgba(255,255,255,0.1)';
+          b.style.boxShadow = 'none';
+          b.style.color = 'var(--text-main)';
+          const span = b.nextElementSibling;
+          if(span) {
+             span.style.color = 'var(--text-muted)';
+             span.style.fontWeight = 'normal';
+             span.style.textShadow = 'none';
+          }
+        });
+        
+        // Add active to current
+        btn.classList.add('active');
+        btn.style.background = 'rgba(168, 85, 247, 0.2)';
+        btn.style.borderColor = 'rgba(168, 85, 247, 0.5)';
+        btn.style.boxShadow = '0 4px 15px rgba(168, 85, 247, 0.4), inset 0 0 10px rgba(168, 85, 247, 0.2)';
+        btn.style.color = 'var(--primary)';
+        const activeSpan = btn.nextElementSibling;
+        if(activeSpan) {
+           activeSpan.style.color = 'var(--primary)';
+           activeSpan.style.fontWeight = '600';
+           activeSpan.style.textShadow = '0 0 10px rgba(168, 85, 247, 0.3)';
+        }
+
+        if (tools[index] === 'text' && HubbleEditor.activeSelectedLayerId) {
+            this.openTextTool(HubbleEditor.activeSelectedLayerId);
+        } else {
+            this.openTool(tools[index]);
+        }
+      };
+    });
+  },
+
+  // Live Text Editor State
+  textState: { text: '', color: '#ffffff', font: 'inherit', bold: false, italic: false, layerId: null },
+
+  openTextTool(layerId = null) {
+      if (layerId) {
+          const layer = this.state.layers.find(l => l.id === layerId);
+          if (layer) {
+             this.textState = {
+                text: layer.content,
+                color: layer.styles.color || '#ffffff',
+                font: layer.styles.font || 'inherit',
+                bold: !!layer.styles.bold,
+                italic: !!layer.styles.italic,
+                layerId: layer.id
+             };
+          }
+      } else {
+          this.textState = { text: '', color: '#ffffff', font: 'inherit', bold: false, italic: false, layerId: null };
+      }
+      
+      const buttons = document.querySelectorAll('.ch-image-tools .ch-premium-tool-btn');
+      buttons.forEach((b, i) => {
+         if(i === 5) { 
+            b.classList.add('active');
+            b.style.background = 'rgba(168, 85, 247, 0.2)';
+            b.style.borderColor = 'rgba(168, 85, 247, 0.5)';
+            b.style.boxShadow = '0 4px 15px rgba(168, 85, 247, 0.4), inset 0 0 10px rgba(168, 85, 247, 0.2)';
+            b.style.color = 'var(--primary)';
+            const activeSpan = b.nextElementSibling;
+            if(activeSpan) {
+               activeSpan.style.color = 'var(--primary)';
+               activeSpan.style.fontWeight = '600';
+               activeSpan.style.textShadow = '0 0 10px rgba(168, 85, 247, 0.3)';
+            }
+         } else {
+            b.classList.remove('active');
+            b.style.background = 'rgba(255,255,255,0.05)';
+            b.style.borderColor = 'rgba(255,255,255,0.1)';
+            b.style.boxShadow = 'none';
+            b.style.color = 'var(--text-main)';
+            const span = b.nextElementSibling;
+            if(span) {
+               span.style.color = 'var(--text-muted)';
+               span.style.fontWeight = 'normal';
+               span.style.textShadow = 'none';
+            }
+         }
+      });
+      
+      this.openTool('text');
+  },
+
+  updateLiveTextColor(color) {
+      this.textState.color = color;
+      this.updateLiveText();
+      
+      const colorInput = document.getElementById('he-text-color-picker');
+      if (colorInput) colorInput.value = color;
+      
+      const hiddenInput = document.getElementById('he-text-color');
+      if (hiddenInput) hiddenInput.value = color;
+      
+      const swatches = document.querySelectorAll('.he-color-swatch');
+      swatches.forEach(s => {
+         if (s.dataset.color.toLowerCase() === color.toLowerCase()) {
+             s.style.border = '2px solid var(--primary, #a855f7)';
+         } else {
+             s.style.border = '2px solid rgba(255,255,255,0.1)';
+         }
+      });
+  },
+
+  toggleTextFormat(type) {
+      if (type === 'bold') {
+          this.textState.bold = !this.textState.bold;
+          const btn = document.getElementById('he-text-bold');
+          if (btn) {
+             btn.style.border = this.textState.bold ? '1px solid var(--primary, #a855f7)' : '1px solid rgba(255,255,255,0.1)';
+             btn.style.background = this.textState.bold ? 'rgba(168,85,247,0.2)' : 'rgba(255,255,255,0.05)';
+          }
+      }
+      if (type === 'italic') {
+          this.textState.italic = !this.textState.italic;
+          const btn = document.getElementById('he-text-italic');
+          if (btn) {
+             btn.style.border = this.textState.italic ? '1px solid var(--primary, #a855f7)' : '1px solid rgba(255,255,255,0.1)';
+             btn.style.background = this.textState.italic ? 'rgba(168,85,247,0.2)' : 'rgba(255,255,255,0.05)';
+          }
+      }
+      this.updateLiveText();
+  },
+
+  updateLiveText() {
+      const input = document.getElementById('he-text-input');
+      const font = document.getElementById('he-text-font');
+      
+      if (!input || !font) return;
+
+      this.textState.text = input.value;
+      this.textState.font = font.value;
+      
+      let layerToUpdate = null;
+      let shouldRender = false;
+      
+      if (this.textState.text.trim() !== '') {
+          if (this.textState.layerId) {
+             const layer = this.state.layers.find(l => l.id === this.textState.layerId);
+             if (layer) {
+                layer.content = this.textState.text;
+                layer.styles = { ...layer.styles, color: this.textState.color, font: this.textState.font, bold: this.textState.bold, italic: this.textState.italic };
+                layerToUpdate = layer;
+             }
+          } else {
+             const id = Date.now();
+             this.textState.layerId = id;
+             this.state.layers.push({
+               id, type: 'text', content: this.textState.text, x: 50, y: 50, rotation: 0, scale: 1, zIndex: this.state.layers.length + 10,
+               styles: { color: this.textState.color, font: this.textState.font, bold: this.textState.bold, italic: this.textState.italic, size: 32 }
+             });
+             this.activeSelectedLayerId = id;
+             shouldRender = true;
+          }
+      } else {
+          if (this.textState.layerId) {
+             this.state.layers = this.state.layers.filter(l => l.id !== this.textState.layerId);
+             this.textState.layerId = null;
+             this.activeSelectedLayerId = null;
+             shouldRender = true;
+          }
+      }
+      
+      if (shouldRender) {
+          this.updateRender();
+      } else if (layerToUpdate) {
+          // Fast DOM update for color, font, typing
+          const interactionLayer = document.getElementById('he-interaction-layer');
+          if (interactionLayer) {
+              const el = Array.from(interactionLayer.children).find(child => child.dataset.layerId == layerToUpdate.id);
+              if (el && el.firstElementChild) {
+                  const textDiv = el.firstElementChild;
+                  textDiv.style.color = layerToUpdate.styles.color || 'white';
+                  textDiv.style.fontFamily = layerToUpdate.styles.font || 'inherit';
+                  textDiv.style.fontWeight = layerToUpdate.styles.bold ? 'bold' : 'normal';
+                  textDiv.style.fontStyle = layerToUpdate.styles.italic ? 'italic' : 'normal';
+                  textDiv.textContent = layerToUpdate.content;
+              }
+          }
+      }
+
+      const btn = document.getElementById('he-text-add-btn');
+      if (btn) {
+         const hasText = this.textState.text.trim().length > 0;
+         btn.style.background = hasText ? 'linear-gradient(135deg, var(--primary, #a855f7) 0%, #7e22ce 100%)' : 'rgba(255,255,255,0.1)';
+         btn.style.boxShadow = hasText ? '0 8px 20px rgba(168,85,247,0.3)' : 'none';
+         btn.style.color = hasText ? 'white' : 'rgba(255,255,255,0.4)';
+         btn.style.cursor = hasText ? 'pointer' : 'not-allowed';
+         btn.style.pointerEvents = hasText ? 'all' : 'none';
+         const isExisting = this.textState.layerId && this.history && this.history.length > 0 && this.history.some(h => h.layers.some(l => l.id === this.textState.layerId));
+         btn.innerText = isExisting ? 'Update Text' : 'Add Text';
+      }
+  },
+
+  commitLiveText() {
+      if (!this.textState.text.trim()) return;
+      this.pushHistory();
+      this.textState = { text: '', color: '#ffffff', font: 'inherit', bold: false, italic: false, layerId: null };
+      this.renderPanels('text');
+  },
+
+  toggleManualRotate() {
+      const panel = document.getElementById('he-manual-rotate-panel');
+      if (!panel) return;
+      if (panel.style.display === 'none') {
+          let r = this.state.rotation % 360;
+          if (r > 180) r -= 360;
+          else if (r < -180) r += 360;
+          
+          const slider = document.getElementById('he-manual-rotate-slider');
+          if (slider) slider.value = r;
+          
+          const valEl = document.getElementById('he-manual-rotate-val');
+          if (valEl) valEl.innerText = Math.round(r) + '°';
+          
+          panel.style.display = 'flex';
+          panel.style.opacity = '0';
+          panel.style.transform = 'scale(0.95) translateY(-10px)';
+          requestAnimationFrame(() => {
+              panel.style.transition = 'all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1)';
+              panel.style.opacity = '1';
+              panel.style.transform = 'scale(1) translateY(0)';
+          });
+      } else {
+          panel.style.opacity = '0';
+          panel.style.transform = 'scale(0.95) translateY(-10px)';
+          setTimeout(() => { panel.style.display = 'none'; }, 200);
+      }
+  },
+  
+  onManualRotate(val) {
+      this.state.rotation = parseFloat(val);
+      const valEl = document.getElementById('he-manual-rotate-val');
+      if (valEl) valEl.innerText = Math.round(val) + '°';
+      this.updateRender();
+  },
+  
+  resetManualRotate() {
+      this.state.rotation = 0;
+      const slider = document.getElementById('he-manual-rotate-slider');
+      if (slider) slider.value = 0;
+      const valEl = document.getElementById('he-manual-rotate-val');
+      if (valEl) valEl.innerText = '0°';
+      this.updateRender();
+  },
+  
+  applyManualRotate() {
+      this.pushHistory();
+      const panel = document.getElementById('he-manual-rotate-panel');
+      if (panel) {
+          panel.style.opacity = '0';
+          panel.style.transform = 'scale(0.95) translateY(-10px)';
+          setTimeout(() => { panel.style.display = 'none'; }, 200);
+      }
+  },
+
+  openTool(toolName) {
+    if (toolName === 'text' && (!this.textState || this.textState.layerId === null)) {
+       this.textState = { text: '', color: '#ffffff', font: 'inherit', bold: false, italic: false, layerId: null };
+    }
+    this.openCanvas();
+    this.renderPanels(toolName);
+    
+    if (toolName === 'crop') {
+      this.enterCropMode();
+    }
+  },
+
+
+  enterCropMode() {
+    this.tempCrop = this.state.crop ? JSON.parse(JSON.stringify(this.state.crop)) : { x: 10, y: 10, width: 80, height: 80, aspect: 'Free' };
+    const overlay = document.getElementById('he-crop-overlay');
+    if (overlay) {
+      overlay.style.display = 'block';
+      overlay.style.pointerEvents = 'all';
+    }
+    // Also disable layer dragging during crop
+    const layers = document.getElementById('he-interaction-layer');
+    if (layers) layers.style.pointerEvents = 'none';
+    
+    this.renderCropHandles();
+  },
+
+  exitCropMode(save) {
+    if (save && this.tempCrop) {
+      this.pushHistory();
+      this.state.crop = JSON.parse(JSON.stringify(this.tempCrop));
+      this.updateRender();
+    }
+    this.tempCrop = null;
+    const overlay = document.getElementById('he-crop-overlay');
+    if (overlay) {
+      overlay.style.display = 'none';
+      overlay.style.pointerEvents = 'none';
+    }
+    const layers = document.getElementById('he-interaction-layer');
+    if (layers) layers.style.pointerEvents = 'none';
+    
+    // Close the panel
+    this.closeCanvas();
+  },
+
+  setCropAspect(ratio) {
+    if (!this.tempCrop) return;
+    this.tempCrop.aspect = ratio;
+    
+    // Reset to center 80% if changing aspect
+    if (ratio === 'Free') {
+       this.tempCrop.width = 80; this.tempCrop.height = 80;
+    } else {
+      const [w, h] = ratio.split(':').map(Number);
+      const container = document.getElementById('he-render-container');
+      const rect = container.getBoundingClientRect();
+      const containerAspect = rect.width / rect.height;
+      const targetAspect = w / h;
+      
+      if (targetAspect > containerAspect) {
+        this.tempCrop.width = 80;
+        this.tempCrop.height = 80 * (containerAspect / targetAspect);
+      } else {
+        this.tempCrop.height = 80;
+        this.tempCrop.width = 80 * (targetAspect / containerAspect);
+      }
+    }
+    
+    this.tempCrop.x = (100 - this.tempCrop.width) / 2;
+    this.tempCrop.y = (100 - this.tempCrop.height) / 2;
+    this.renderCropHandles();
+    this.renderPanels('crop'); // update buttons
+  },
+
+  enforcePanConstraints() {
+    let crop = this.tempCrop || this.state.crop || { x: 0, y: 0, width: 100, height: 100 };
+    let z = this.state.zoom || 1;
+    let { x, y, width, height } = crop;
+    
+    let minPanX = x + width - 50 - 50 * z;
+    let maxPanX = x - 50 + 50 * z;
+    if (minPanX > maxPanX) {
+       this.state.panX = (minPanX + maxPanX) / 2;
+    } else {
+       this.state.panX = Math.max(minPanX, Math.min(maxPanX, this.state.panX || 0));
+    }
+    
+    let minPanY = y + height - 50 - 50 * z;
+    let maxPanY = y - 50 + 50 * z;
+    if (minPanY > maxPanY) {
+       this.state.panY = (minPanY + maxPanY) / 2;
+    } else {
+       this.state.panY = Math.max(minPanY, Math.min(maxPanY, this.state.panY || 0));
+    }
+  },
+
+  setCropZoom(val) {
+    let z = Math.max(0.5, Math.min(3, val));
+    this.state.zoom = z;
+    
+    this.enforcePanConstraints();
+    
+    const slider = document.getElementById('he-zoom-slider');
+    if (slider) slider.value = z;
+    const valEl = document.getElementById('he-zoom-val');
+    if (valEl) valEl.innerText = Math.round(z * 100) + '%';
+    
+    this.updateRender();
+  },
+
+  renderCropHandles() {
+    const overlay = document.getElementById('he-crop-overlay');
+    if (!overlay) return;
+    
+    overlay.innerHTML = '';
+    
+    const box = document.createElement('div');
+    box.id = 'he-crop-box';
+    box.style.cssText = `
+      position: absolute;
+      left: ${this.tempCrop.x}%;
+      top: ${this.tempCrop.y}%;
+      width: ${this.tempCrop.width}%;
+      height: ${this.tempCrop.height}%;
+      border: 2px solid white;
+      box-shadow: 0 0 0 9999px rgba(0,0,0,0.7);
+      pointer-events: none;
+    `;
+    
+    const handlePositions = [
+      { top: '-6px', left: '-6px', cursor: 'nwse-resize', id: 'tl' },
+      { top: '-6px', left: 'calc(50% - 6px)', cursor: 'ns-resize', id: 'tc' },
+      { top: '-6px', right: '-6px', cursor: 'nesw-resize', id: 'tr' },
+      { top: 'calc(50% - 6px)', left: '-6px', cursor: 'ew-resize', id: 'ml' },
+      { top: 'calc(50% - 6px)', right: '-6px', cursor: 'ew-resize', id: 'mr' },
+      { bottom: '-6px', left: '-6px', cursor: 'nesw-resize', id: 'bl' },
+      { bottom: '-6px', left: 'calc(50% - 6px)', cursor: 'ns-resize', id: 'bc' },
+      { bottom: '-6px', right: '-6px', cursor: 'nwse-resize', id: 'br' }
+    ];
+    
+    handlePositions.forEach(pos => {
+      const h = document.createElement('div');
+      h.style.cssText = `
+        position: absolute;
+        width: 12px; height: 12px;
+        background: white; border-radius: 50%;
+        cursor: ${pos.cursor};
+        pointer-events: all;
+        ${pos.top ? `top: ${pos.top};` : ''}
+        ${pos.bottom ? `bottom: ${pos.bottom};` : ''}
+        ${pos.left ? `left: ${pos.left};` : ''}
+        ${pos.right ? `right: ${pos.right};` : ''}
+      `;
+      this.bindCropDrag(h, pos.id);
+      box.appendChild(h);
+    });
+    
+    overlay.appendChild(box);
+  },
+
+  bindCropDrag(element, type) {
+    element.onmousedown = (e) => {
+      e.stopPropagation();
+      let isDragging = true;
+      let startX = e.clientX;
+      let startY = e.clientY;
+      const startCrop = JSON.parse(JSON.stringify(this.tempCrop));
+      const startPanX = this.state.panX || 0;
+      const startPanY = this.state.panY || 0;
+      
+      const move = (ev) => {
+        if (!isDragging) return;
+        const container = document.getElementById('he-render-container');
+        const rect = container.getBoundingClientRect();
+        
+        const dx = ((ev.clientX - startX) / rect.width) * 100;
+        const dy = ((ev.clientY - startY) / rect.height) * 100;
+        
+        let { x, y, width, height, aspect } = startCrop;
+        
+        if (type.includes('l')) { x += dx; width -= dx; }
+        if (type.includes('r')) { width += dx; }
+        if (type.includes('t')) { y += dy; height -= dy; }
+        if (type.includes('b')) { height += dy; }
+        
+        if (aspect !== 'Free') {
+          const [wRatio, hRatio] = aspect.split(':').map(Number);
+          const targetRatio = wRatio / hRatio;
+          const containerRatio = rect.width / rect.height;
+          
+          if (type.includes('l') || type.includes('r')) {
+             height = width * (containerRatio / targetRatio);
+             if(type.includes('t')) y = startCrop.y - (height - startCrop.height);
+          } else {
+             width = height * (targetRatio / containerRatio);
+             if(type.includes('l')) x = startCrop.x - (width - startCrop.width);
+          }
+        }
+        
+        // Clamp bounds
+        if (x < 0) x = 0;
+        if (y < 0) y = 0;
+        if (x + width > 100) { width = 100 - x; }
+        if (y + height > 100) { height = 100 - y; }
+        
+        width = Math.max(10, width);
+        height = Math.max(10, height);
+        
+        this.tempCrop = { ...this.tempCrop, x, y, width, height };
+        
+        const box = document.getElementById('he-crop-box');
+        if (box) {
+          box.style.left = `${this.tempCrop.x}%`;
+          box.style.top = `${this.tempCrop.y}%`;
+          box.style.width = `${this.tempCrop.width}%`;
+          box.style.height = `${this.tempCrop.height}%`;
+        }
+      };
+      
+      const up = () => {
+        isDragging = false;
+        document.removeEventListener('mousemove', move);
+        document.removeEventListener('mouseup', up);
+      };
+      
+      document.addEventListener('mousemove', move);
+      document.addEventListener('mouseup', up);
+    };
+  },
+
+  openCanvas() {
+    const modal = document.getElementById('he-canvas-modal');
+    if (!modal) return;
+    modal.style.display = 'flex';
+    requestAnimationFrame(() => modal.style.opacity = '1');
+    
+    if (this.history.length === 0) {
+      this.pushHistory(); // Initial state
+    }
+    
+    this.updateRender();
+  },
+
+  cleanupMedia() {
+    const videos = [
+      ...document.querySelectorAll('#he-media-layer video'),
+      ...document.querySelectorAll('#review-slider-wrapper video')
+    ];
+    videos.forEach(v => {
+      v.pause();
+      v.removeAttribute('src');
+      v.load();
+    });
+    const mediaLayer = document.getElementById('he-media-layer');
+    if (mediaLayer) mediaLayer.innerHTML = '';
+    
+    if (this.GlobalAudio) {
+      this.GlobalAudio.pause();
+      this.GlobalAudio.audio.currentTime = 0;
+    }
+  },
+
+  closeCanvas() {
+    const overlay = document.getElementById('he-crop-overlay');
+    if (overlay && overlay.style.display !== 'none') {
+       overlay.style.display = 'none';
+       overlay.style.pointerEvents = 'none';
+    }
+    const modal = document.getElementById('he-canvas-modal');
+    if (!modal) return;
+
+    // HALT Editor Video & Audio
+    this.cleanupMedia();
+
+    // Sync state one final time
+    if (window.chUploads && window.chUploads[this.activeMediaIndex]) {
+        window.chUploads[this.activeMediaIndex].editorState = JSON.parse(JSON.stringify(this.state));
+    }
+
+    modal.style.opacity = '0';
+    setTimeout(() => {
+      modal.style.display = 'none';
+      document.getElementById('he-panels-container').innerHTML = '';
+      
+      // Also update the tiny thumbnails to reflect changes visually
+      if (typeof window.initCreateHubbsUpload === 'function') {
+         const thumbs = document.querySelectorAll('.ch-preview-item img, .ch-preview-item video');
+         if (thumbs[this.activeMediaIndex]) {
+           thumbs[this.activeMediaIndex].style.filter = this.buildCSSFilterString();
+           thumbs[this.activeMediaIndex].style.transform = `rotate(${this.state.rotation}deg)`;
+         }
+      }
+    }, 300);
+  },
+
+  pushHistory() {
+    this.history.push(JSON.parse(JSON.stringify(this.state)));
+    this.redoStack = []; // Clear redo stack on new action
+    this.updateUndoRedoUI();
+  },
+
+  undo() {
+    if (this.history.length > 1) {
+      this.redoStack.push(JSON.parse(JSON.stringify(this.state)));
+      this.history.pop(); // Remove current state
+      this.state = JSON.parse(JSON.stringify(this.history[this.history.length - 1]));
+      this.updateRender();
+      this.updateUndoRedoUI();
+    }
+  },
+
+  redo() {
+    if (this.redoStack.length > 0) {
+      this.history.push(JSON.parse(JSON.stringify(this.state)));
+      this.state = JSON.parse(JSON.stringify(this.redoStack.pop()));
+      this.updateRender();
+      this.updateUndoRedoUI();
+    }
+  },
+
+  updateUndoRedoUI() {
+    const undoBtn = document.getElementById('he-undo-btn');
+    const redoBtn = document.getElementById('he-redo-btn');
+    if (undoBtn) {
+      undoBtn.style.opacity = this.history.length > 1 ? '1' : '0.5';
+      undoBtn.style.pointerEvents = this.history.length > 1 ? 'all' : 'none';
+    }
+    if (redoBtn) {
+      redoBtn.style.opacity = this.redoStack.length > 0 ? '1' : '0.5';
+      redoBtn.style.pointerEvents = this.redoStack.length > 0 ? 'all' : 'none';
+    }
+  },
+
+  getEditedAspectRatio(item) {
+    if (!item) return 1;
+    let w = item.originalWidth || 1000;
+    let h = item.originalHeight || 1000;
+    
+    // First, apply crop
+    if (item.editorState && item.editorState.crop) {
+       w = w * (item.editorState.crop.width / 100);
+       h = h * (item.editorState.crop.height / 100);
+    }
+    
+    // Then rotation
+    if (item.editorState && item.editorState.rotation) {
+       const r = Math.abs(item.editorState.rotation) % 180;
+       if (r === 90) {
+          const temp = w;
+          w = h;
+          h = temp;
+       }
+    }
+    return w / h;
+  },
+
+  buildCSSFilterString(overrideFilter = null, overrideAdjustments = null) {
+    const activeFilter = overrideFilter !== null ? overrideFilter : this.state.filter;
+    const adj = overrideAdjustments !== null ? overrideAdjustments : this.state.adjustments;
+    
+    const filterPresets = {
+      'original': {},
+      'bright': { brightness: 10, contrast: 10, saturation: 10 },
+      'warm': { temperature: 30, saturation: 10 },
+      'cool': { temperature: -30, tint: 10 },
+      'vintage': { saturation: -20, temperature: 40, shadows: 20, contrast: -10, exposure: 10 },
+      'black & white': { saturation: -100, contrast: 20 },
+      'hdr': { contrast: 20, sharpness: 40, shadows: 30, highlights: -20, saturation: 15 },
+      'cinematic': { saturation: -15, contrast: 10, temperature: 10, tint: -10, shadows: -10 },
+      'soft': { contrast: -15, sharpness: -20, brightness: 5 },
+      'dream': { brightness: 10, saturation: 15, blur: 2, contrast: -10 },
+      'purple glow': { tint: 40, temperature: 20, saturation: 20 },
+      'cool blue': { temperature: -30, shadows: 15, contrast: 10 },
+      'sepia': { temperature: 50, tint: 15, saturation: -40 },
+      'vivid': { saturation: 40, contrast: 10 },
+      'mono': { saturation: -100, contrast: 15 }
+    };
+
+    const preset = filterPresets[activeFilter] || {};
+    
+    const getVal = (key, defaultVal) => {
+       const manualVal = adj[key] !== undefined ? Number(adj[key]) : defaultVal;
+       const manualDelta = manualVal - defaultVal;
+       const presetDelta = preset[key] || 0;
+       return defaultVal + presetDelta + manualDelta;
+    };
+
+    const p = {
+       brightness: getVal('brightness', 100),
+       contrast: getVal('contrast', 100),
+       exposure: getVal('exposure', 100),
+       highlights: getVal('highlights', 100),
+       shadows: getVal('shadows', 100),
+       temperature: getVal('temperature', 0),
+       tint: getVal('tint', 0),
+       saturation: getVal('saturation', 100),
+       vibrance: getVal('vibrance', 100),
+       sharpness: getVal('sharpness', 0),
+       blur: getVal('blur', 0),
+       opacity: getVal('opacity', 100)
+    };
+
+    const totalSaturate = Math.max(0, p.saturation + (p.vibrance - 100) * 0.5);
+
+    let tableValuesStr = "";
+    for (let i = 0; i <= 15; i++) {
+       let x = i / 15.0;
+       let y = x * (p.exposure / 100);
+
+       let shadowDelta = (p.shadows - 100) / 100; 
+       if (x < 0.5) y += shadowDelta * (0.5 - x);
+
+       let highlightDelta = (p.highlights - 100) / 100; 
+       if (x > 0.5) y += highlightDelta * (x - 0.5);
+
+       y += (p.brightness - 100) / 100;
+       y = (y - 0.5) * (p.contrast / 100) + 0.5;
+
+       y = Math.max(0, Math.min(1, y));
+       tableValuesStr += y.toFixed(3) + " ";
+    }
+    let tableValues = tableValuesStr.trim();
+
+    let temp = p.temperature / 100;
+    let tint = p.tint / 100;
+    
+    let rMult = 1 + temp * 0.2 + tint * 0.1;
+    let gMult = 1 - tint * 0.2;
+    let bMult = 1 - temp * 0.2 + tint * 0.1;
+
+    let colorMatrix = `
+       ${rMult} 0 0 0 0
+       0 ${gMult} 0 0 0
+       0 0 ${bMult} 0 0
+       0 0 0 1 0
+    `;
+
+    let s = p.sharpness / 100; 
+    s = Math.max(-0.5, Math.min(2, s));
+    let center = 1 + 4 * s;
+    let edge = -s;
+    let kernelMatrix = `
+       0 ${edge} 0
+       ${edge} ${center} ${edge}
+       0 ${edge} 0
+    `;
+
+    let svg = `
+       <svg xmlns="http://www.w3.org/2000/svg">
+          <filter id="f">
+             <feComponentTransfer>
+                <feFuncR type="table" tableValues="${tableValues}" />
+                <feFuncG type="table" tableValues="${tableValues}" />
+                <feFuncB type="table" tableValues="${tableValues}" />
+             </feComponentTransfer>
+             <feColorMatrix type="matrix" values="${colorMatrix}" />
+             ${s !== 0 ? `<feConvolveMatrix order="3" kernelMatrix="${kernelMatrix}" preserveAlpha="true" />` : ''}
+          </filter>
+       </svg>
+    `;
+
+    const encodedSvg = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg.replace(/\s+/g, ' ').trim());
+
+    return `url("${encodedSvg}#f") saturate(${totalSaturate}%) blur(${p.blur}px) opacity(${p.opacity}%)`;
+  },
+  addLayer(type, content, styles = {}) {
+    this.pushHistory();
+    const id = Date.now();
+    this.state.layers.push({
+      id,
+      type,
+      content,
+      x: 50, // Center %
+      y: 50, // Center %
+      rotation: 0,
+      scale: 1,
+      zIndex: this.state.layers.length + 10,
+      styles
+    });
+    this.updateRender();
+  },
+
+  addLayerControls(el, layer, interactionLayer) {
+    const corners = [
+      { class: 'he-resize-nw', cursor: 'nwse-resize', top: '-6px', left: '-6px' },
+      { class: 'he-resize-ne', cursor: 'nesw-resize', top: '-6px', right: '-6px' },
+      { class: 'he-resize-sw', cursor: 'nesw-resize', bottom: '-6px', left: '-6px' },
+      { class: 'he-resize-se', cursor: 'nwse-resize', bottom: '-6px', right: '-6px' }
+    ];
+
+    corners.forEach(c => {
+      const handle = document.createElement('div');
+      handle.className = `he-resize-handle ${c.class}`;
+      handle.style.cssText = `position: absolute; width: 14px; height: 14px; background: white; border: 2px solid #a855f7; border-radius: 50%; z-index: 100; cursor: ${c.cursor}; box-shadow: 0 2px 5px rgba(0,0,0,0.3); pointer-events: all; ${c.top ? `top: ${c.top};` : ''} ${c.bottom ? `bottom: ${c.bottom};` : ''} ${c.left ? `left: ${c.left};` : ''} ${c.right ? `right: ${c.right};` : ''}`;
+      
+      handle.onmousedown = (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        this.pushHistory();
+        
+        const rect = interactionLayer.getBoundingClientRect();
+        // The layer center in absolute viewport coords
+        const centerX = rect.left + (layer.x / 100) * rect.width;
+        const centerY = rect.top + (layer.y / 100) * rect.height;
+        
+        const startDist = Math.hypot(ev.clientX - centerX, ev.clientY - centerY);
+        const startScale = layer.scale || 1;
+        
+        const onMouseMove = (moveEv) => {
+          const currentDist = Math.hypot(moveEv.clientX - centerX, moveEv.clientY - centerY);
+          let newScale = startScale * (currentDist / startDist);
+          if (newScale < 0.1) newScale = 0.1;
+          if (newScale > 10) newScale = 10;
+          
+          layer.scale = newScale;
+          el.style.transform = `translate(-50%, -50%) rotate(${layer.rotation}deg) scale(${layer.scale})`;
+        };
+        
+        const onMouseUp = () => {
+          window.removeEventListener('mousemove', onMouseMove);
+          window.removeEventListener('mouseup', onMouseUp);
+          this.updateRender();
+        };
+        
+        window.addEventListener('mousemove', onMouseMove);
+        window.addEventListener('mouseup', onMouseUp);
+      };
+      el.appendChild(handle);
+    });
+  },
+
+  updateRender() {
+    if (!window.chUploads || window.chUploads.length === 0) return;
+    
+    const media = window.chUploads[this.activeMediaIndex];
+    if (!media) return;
+
+    const container = document.getElementById('he-render-container');
+    const mediaLayer = document.getElementById('he-media-layer');
+    const interactionLayer = document.getElementById('he-interaction-layer');
+    
+    if (!container || !mediaLayer || !interactionLayer) return;
+
+    // Set Aspect Ratio based on media
+    container.style.width = '400px';
+    container.style.aspectRatio = '9/16';
+    container.style.background = '#111';
+    container.style.borderRadius = '16px';
+    
+    // Render Media Node
+    if (!mediaLayer.firstChild || mediaLayer.firstChild.dataset.url !== media.thumbUrl) {
+      if (mediaLayer.firstChild && mediaLayer.firstChild.tagName === 'VIDEO') {
+        mediaLayer.firstChild.pause();
+        mediaLayer.firstChild.removeAttribute('src');
+        mediaLayer.firstChild.load();
+      }
+      mediaLayer.innerHTML = '';
+      let node;
+      if (media.type.startsWith('video/')) {
+        node = document.createElement('video');
+        node.src = URL.createObjectURL(media.file);
+        node.loop = true; node.muted = window.HubbleEditor.state.isMuted; node.autoplay = true; node.playsInline = true;
+        
+        // Sync Audio
+        node.addEventListener('play', () => {
+           window.HubbleEditor.GlobalAudio.sync(node.currentTime);
+           window.HubbleEditor.GlobalAudio.play();
+        });
+        node.addEventListener('pause', () => window.HubbleEditor.GlobalAudio.pause());
+        node.addEventListener('seeking', () => window.HubbleEditor.GlobalAudio.sync(node.currentTime));
+        node.addEventListener('seeked', () => window.HubbleEditor.GlobalAudio.sync(node.currentTime));
+        
+      } else {
+        node = document.createElement('img');
+        node.src = media.thumbUrl;
+      }
+      node.dataset.url = media.thumbUrl;
+      node.style.cssText = 'width: 100%; height: 100%; object-fit: contain; transform-origin: center center; transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);';
+      node.draggable = false;
+      mediaLayer.appendChild(node);
+    }
+    
+    // Ensure we have a reference to the active media node
+    const activeMediaNode = mediaLayer.firstChild;
+    
+    // Video Controls overlay
+    let videoControls = document.getElementById('he-video-controls');
+    if (media.type.startsWith('video/')) {
+      if (!videoControls) {
+        videoControls = this.buildVideoControls(container, activeMediaNode, false);
+      } else {
+        videoControls.remove();
+        videoControls = this.buildVideoControls(container, activeMediaNode, false);
+      }
+    } else {
+      if (videoControls) {
+        videoControls.remove();
+      }
+    }
+
+    // Apply Transforms, Filters & Zoom
+    activeMediaNode.style.filter = this.buildCSSFilterString();
+    activeMediaNode.style.transform = `translate(${this.state.panX || 0}%, ${this.state.panY || 0}%) rotate(${this.state.rotation}deg) scale(${this.state.zoom || 1})`;
+    
+    // Apply Crop Clip-Path to Media and Interaction Layers (but NOT the crop overlay)
+    if (this.state.crop) {
+       const { x, y, width, height } = this.state.crop;
+       const clipPathStr = `inset(${y}% ${100 - (x + width)}% ${100 - (y + height)}% ${x}%)`;
+       mediaLayer.style.clipPath = clipPathStr;
+       interactionLayer.style.clipPath = clipPathStr;
+    } else {
+       mediaLayer.style.clipPath = 'none';
+       interactionLayer.style.clipPath = 'none';
+    }
+    
+    // Render Interaction Layers (Stickers / Text)
+    interactionLayer.innerHTML = '';
+    this.state.layers.forEach((layer, idx) => {
+      const el = document.createElement('div');
+      el.dataset.layerId = layer.id;
+      el.style.cssText = `position: absolute; left: ${layer.x}%; top: ${layer.y}%; transform: translate(-50%, -50%) rotate(${layer.rotation}deg) scale(${layer.scale}); z-index: ${layer.zIndex}; pointer-events: all; cursor: grab;`;
+      
+      if (layer.type === 'text') {
+        el.innerHTML = `<div style="color: ${layer.styles.color || 'white'}; font-family: ${layer.styles.font || 'inherit'}; font-size: ${layer.styles.size || 24}px; font-weight: ${layer.styles.bold ? 'bold' : 'normal'}; font-style: ${layer.styles.italic ? 'italic' : 'normal'}; text-shadow: ${layer.styles.shadow ? '0 2px 10px rgba(0,0,0,0.5)' : 'none'}; text-align: center; white-space: pre-wrap;">${layer.content}</div>`;
+      } else if (layer.type === 'sticker') {
+        el.innerHTML = `<div style="font-size: ${layer.styles.size || 80}px; pointer-events: none;">${layer.content}</div>`;
+      }
+      
+      const isActive = HubbleEditor.activeSelectedLayerId === layer.id;
+      if (isActive) {
+          el.style.border = '2px dashed rgba(255,255,255,0.8)';
+          el.style.padding = '8px';
+          el.style.borderRadius = '12px';
+          const deleteBtn = document.createElement('div');
+          deleteBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+          deleteBtn.style.cssText = 'position: absolute; top: -14px; right: -14px; background: rgba(255,59,48,0.9); border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; cursor: pointer; pointer-events: all; box-shadow: 0 4px 10px rgba(0,0,0,0.3); z-index: 100;';
+          deleteBtn.onmousedown = (ev) => {
+              ev.stopPropagation();
+              HubbleEditor.pushHistory();
+              HubbleEditor.state.layers = HubbleEditor.state.layers.filter(l => l.id !== layer.id);
+              if (HubbleEditor.textState && HubbleEditor.textState.layerId === layer.id) {
+                  HubbleEditor.textState = { text: '', color: '#ffffff', font: 'inherit', bold: false, italic: false, layerId: null };
+                  HubbleEditor.renderPanels('text');
+              }
+              HubbleEditor.activeSelectedLayerId = null;
+              HubbleEditor.updateRender();
+          };
+          el.appendChild(deleteBtn);
+          HubbleEditor.addLayerControls(el, layer, interactionLayer);
+      } else {
+          el.style.border = 'none';
+          el.style.padding = '0';
+          el.style.borderRadius = '0';
+      }
+
+      el.ondblclick = (e) => {
+         e.stopPropagation();
+         if (layer.type === 'text') {
+             HubbleEditor.openTextTool(layer.id);
+         }
+      };
+      
+      // Drag Logic
+      el.onmousedown = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        let isDragging = true;
+        HubbleEditor.activeSelectedLayerId = layer.id;
+        
+        // Fast active state DOM update
+        Array.from(interactionLayer.children).forEach(child => {
+            if (child.dataset.layerId == layer.id) {
+                child.style.border = '2px dashed rgba(255,255,255,0.8)';
+                child.style.padding = '8px';
+                child.style.borderRadius = '12px';
+                if (!child.querySelector('.he-delete-btn')) {
+                    const deleteBtn = document.createElement('div');
+                    deleteBtn.className = 'he-delete-btn';
+                    deleteBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+                    deleteBtn.style.cssText = 'position: absolute; top: -14px; right: -14px; background: rgba(255,59,48,0.9); border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; cursor: pointer; pointer-events: all; box-shadow: 0 4px 10px rgba(0,0,0,0.3); z-index: 100;';
+                    deleteBtn.onmousedown = (ev) => {
+                        ev.stopPropagation();
+                        HubbleEditor.pushHistory();
+                        HubbleEditor.state.layers = HubbleEditor.state.layers.filter(l => l.id !== layer.id);
+                        if (HubbleEditor.textState && HubbleEditor.textState.layerId === layer.id) {
+                            HubbleEditor.textState = { text: '', color: '#ffffff', font: 'inherit', bold: false, italic: false, layerId: null };
+                            HubbleEditor.renderPanels('text');
+                        }
+                        HubbleEditor.activeSelectedLayerId = null;
+                        HubbleEditor.updateRender();
+                    };
+                    child.appendChild(deleteBtn);
+                    HubbleEditor.addLayerControls(child, layer, interactionLayer);
+                }
+            } else {
+                child.style.border = 'none';
+                child.style.padding = '0';
+                child.style.borderRadius = '0';
+                const dBtn = child.querySelector('.he-delete-btn');
+                if (dBtn) dBtn.remove();
+                child.querySelectorAll('.he-resize-handle').forEach(h => h.remove());
+            }
+        });
+        
+        if (layer.type === 'text') {
+            const isTextToolOpen = document.getElementById('he-text-input') !== null;
+            if (isTextToolOpen && HubbleEditor.textState && HubbleEditor.textState.layerId !== layer.id) {
+                HubbleEditor.openTextTool(layer.id);
+            }
+        }
+        
+        let startX = e.clientX;
+        let startY = e.clientY;
+        const startLeft = layer.x;
+        const startTop = layer.y;
+        
+        // Bring to front
+        layer.zIndex = Math.max(...this.state.layers.map(l => l.zIndex)) + 1;
+        el.style.zIndex = layer.zIndex;
+        
+        const move = (ev) => {
+          if(!isDragging) return;
+          const rect = interactionLayer.getBoundingClientRect();
+          const dx = ((ev.clientX - startX) / rect.width) * 100;
+          const dy = ((ev.clientY - startY) / rect.height) * 100;
+          layer.x = startLeft + dx;
+          layer.y = startTop + dy;
+          requestAnimationFrame(() => {
+              el.style.left = layer.x + '%';
+              el.style.top = layer.y + '%';
+          });
+        };
+        const up = () => {
+          isDragging = false;
+          HubbleEditor.pushHistory(); // push history on drop
+          HubbleEditor.updateRender(); // Sync state to chUploads
+          document.removeEventListener('mousemove', move);
+          document.removeEventListener('mouseup', up);
+        };
+        document.addEventListener('mousemove', move);
+        document.addEventListener('mouseup', up);
+      };
+      
+      interactionLayer.appendChild(el);
+    });
+    
+    if (!interactionLayer.dataset.clickBound) {
+        interactionLayer.addEventListener('mousedown', (e) => {
+           if (e.target === interactionLayer) {
+               if (HubbleEditor.activeSelectedLayerId) {
+                   HubbleEditor.activeSelectedLayerId = null;
+                   Array.from(interactionLayer.children).forEach(child => {
+                       child.style.border = 'none';
+                       child.style.padding = '0';
+                       child.style.borderRadius = '0';
+                       const dBtn = child.querySelector('.he-delete-btn');
+                       if (dBtn) dBtn.remove();
+                   });
+               }
+           }
+        });
+        interactionLayer.dataset.clickBound = "true";
+    }
+
+    // Sync state to chUploads so it's always up to date
+    if (window.chUploads && window.chUploads[this.activeMediaIndex]) {
+        window.chUploads[this.activeMediaIndex].editorState = JSON.parse(JSON.stringify(this.state));
+    }
+    // Update live preview thumbnail
+    if (typeof this.updatePreviewThumbnail === 'function') {
+        this.updatePreviewThumbnail(this.activeMediaIndex);
+    }
+  },
+
+  activeLayout: 'original',
+
+  setLayout(layoutName) {
+    let effectiveLayoutName = window.getEffectiveLayout(layoutName, window.chUploads);
+
+    this.activeLayout = layoutName;
+    const previewRow = document.getElementById('ch-media-preview-row');
+    if (!previewRow) return;
+    
+    // Remove existing layout classes
+    previewRow.className = 'ch-media-preview-row';
+    
+    // Add new layout class if not original/single default
+    if (effectiveLayoutName !== 'original' && effectiveLayoutName !== 'single') {
+       previewRow.classList.add(`layout-${effectiveLayoutName}`);
+    }
+    
+    // Update active button state
+    document.querySelectorAll('.ch-layout-btn').forEach(btn => {
+       btn.classList.remove('ch-layout-btn-active');
+       if (btn.dataset.layout === layoutName) {
+           btn.classList.add('ch-layout-btn-active');
+       }
+    });
+    
+    // Flatten DOM (remove layout row wrappers)
+    const items = Array.from(previewRow.querySelectorAll('.ch-preview-item'));
+    if (items.length > 0) {
+       items.sort((a, b) => parseInt(a.dataset.index) - parseInt(b.dataset.index));
+       
+       previewRow.querySelectorAll('.ch-layout-row').forEach(el => el.remove());
+       const addMoreBtn = document.getElementById('ch-add-more-media-btn');
+
+       items.forEach(item => {
+           previewRow.insertBefore(item, addMoreBtn);
+       });
+
+       // Update active aspect ratios
+       for (let i = 0; i < window.chUploads.length; i++) {
+           this.updatePreviewThumbnail(i);
+       }
+    }
+  },
+
+  updatePreviewThumbnail(index, passedEl = null) {
+    if (!window.chUploads || !window.chUploads[index]) return;
+    const item = window.chUploads[index];
+    const previewEl = passedEl || document.querySelector(`.ch-preview-item[data-index="${index}"]`);
+    if (!previewEl) return;
+    
+    let state = item.editorState;
+    if (index === this.activeMediaIndex) state = this.state;
+    if (!state) return; // No edits, just keep original
+
+    // Keep only the remove button and duration overlay
+    const rmBtn = previewEl.querySelector('.ch-remove-media');
+    let overlay = null;
+    if (item.type.startsWith('video/')) {
+        const divs = previewEl.querySelectorAll('div');
+        divs.forEach(d => {
+           if(d.innerHTML.includes('lucide="video"')) overlay = d;
+        });
+    }
+
+    const ar = this.getEditedAspectRatio(item);
+    previewEl.style.aspectRatio = '';
+    previewEl.style.removeProperty('--ar');
+    previewEl.innerHTML = '';
+    
+    // Containment frame
+    const miniContainer = document.createElement('div');
+    miniContainer.className = 'edited-frame';
+    miniContainer.style.cssText = `position: relative; overflow: hidden; aspect-ratio: ${ar}; border-radius: 10px; background: #1a1a1a; display: flex; align-items: center; justify-content: center; margin: auto; width: min(100cqw, calc(100cqh * ${ar})); height: min(100cqh, calc(100cqw / ${ar}));`;
+    
+    // innerWrapper to handle crop scaling/translating
+    const innerWrapper = document.createElement('div');
+    if (state.crop) {
+       const cw = state.crop.width;
+       const ch = state.crop.height;
+       const cx = state.crop.x;
+       const cy = state.crop.y;
+       innerWrapper.style.cssText = `position: absolute; width: ${10000/cw}%; height: ${10000/ch}%; left: -${(cx/cw)*100}%; top: -${(cy/ch)*100}%;`;
+    } else {
+       innerWrapper.style.cssText = 'position: absolute; width: 100%; height: 100%; left: 0; top: 0;';
+    }
+
+    // Media layer
+    const miniMediaLayer = document.createElement('div');
+    miniMediaLayer.style.cssText = 'position: absolute; width: 100%; height: 100%;';
+    
+    // Interaction layer
+    const miniInteractionLayer = document.createElement('div');
+    miniInteractionLayer.style.cssText = 'position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;';
+    
+    // Media Node (Thumbnails are always images to avoid heavy video playback in previews unless hovered/needed)
+    const node = document.createElement('img');
+    node.src = item.thumbUrl;
+    node.style.cssText = 'width: 100%; height: 100%; object-fit: contain; transform-origin: center center;';
+    
+    // Apply Edits
+    node.style.filter = this.buildCSSFilterString(state.filter, state.adjustments);
+    node.style.transform = `translate(${state.panX || 0}%, ${state.panY || 0}%) rotate(${state.rotation || 0}deg) scale(${state.zoom || 1})`;
+    
+    miniMediaLayer.appendChild(node);
+
+    // Interactions
+    if (state.layers) {
+      state.layers.forEach((layer) => {
+        const el = document.createElement('div');
+        el.style.cssText = `position: absolute; left: ${layer.x}%; top: ${layer.y}%; transform: translate(-50%, -50%) rotate(${layer.rotation}deg) scale(${layer.scale}); z-index: ${layer.zIndex}; pointer-events: none;`;
+        if (layer.type === 'text') {
+          el.innerHTML = `<div style="color: ${layer.styles.color || 'white'}; font-family: ${layer.styles.font || 'inherit'}; font-size: ${layer.styles.size || 24}px; font-weight: ${layer.styles.bold ? 'bold' : 'normal'}; font-style: ${layer.styles.italic ? 'italic' : 'normal'}; text-shadow: ${layer.styles.shadow ? '0 2px 10px rgba(0,0,0,0.5)' : 'none'}; text-align: center; white-space: pre-wrap;">${layer.content}</div>`;
+        } else if (layer.type === 'sticker') {
+          el.innerHTML = `<div style="font-size: ${layer.styles.size || 80}px; pointer-events: none;">${layer.content}</div>`;
+        }
+        // Scale down layers for miniature preview based on actual width
+        // Use ResizeObserver for accurate sizing or assume default 100px if hidden
+        const actualWidth = previewEl.clientWidth > 0 ? previewEl.clientWidth : 100;
+        const scaleFactor = actualWidth / 400; // 400 is the main canvas width
+        el.style.transform += ` scale(${scaleFactor})`;
+        miniInteractionLayer.appendChild(el);
+      });
+    }
+
+    innerWrapper.appendChild(miniMediaLayer);
+    innerWrapper.appendChild(miniInteractionLayer);
+    miniContainer.appendChild(innerWrapper);
+    
+    previewEl.appendChild(miniContainer);
+    if (overlay) previewEl.appendChild(overlay);
+    if (rmBtn) previewEl.appendChild(rmBtn);
+  },
+
+  renderPanels(activeTool) {
+    const container = document.getElementById('he-panels-container');
+    if (!container) return;
+    
+    // Generate glassmorphism panel
+    let html = `<div style="background: rgba(15,15,20,0.85); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.1); border-radius: 20px; padding: 20px; width: 320px; box-shadow: 0 20px 50px rgba(0,0,0,0.5); color: white;">`;
+    
+    if (activeTool === 'filters') {
+      html += `<h4 style="margin: 0 0 16px 0; font-size: 1.1rem; display: flex; align-items: center; gap: 8px;"><i data-lucide="aperture" style="width: 18px; height: 18px; color: var(--primary);"></i> Filters</h4>`;
+      html += `<div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; max-height: 400px; overflow-y: auto; padding-right: 8px;" class="custom-scrollbar">`;
+      
+      const filters = ['Original', 'Bright', 'Warm', 'Cool', 'Vintage', 'Black & White', 'HDR', 'Cinematic', 'Soft', 'Dream', 'Purple Glow', 'Cool Blue', 'Sepia', 'Vivid', 'Mono'];
+      
+      const defaultAdjustments = {
+        brightness: 100, contrast: 100, exposure: 100, highlights: 100, shadows: 100,
+        temperature: 0, tint: 0, saturation: 100, vibrance: 100, sharpness: 0, blur: 0, opacity: 100
+      };
+
+      const media = window.chUploads[this.activeMediaIndex];
+      const mediaUrl = media.thumbUrl || URL.createObjectURL(media.file);
+
+      filters.forEach(f => {
+        const id = f.toLowerCase();
+        const active = this.state.filter === id ? 'border: 2px solid var(--primary); transform: scale(1.05);' : 'border: 2px solid transparent;';
+        const cssFilter = this.buildCSSFilterString(id, defaultAdjustments);
+        
+        html += `
+          <div onclick="HubbleEditor.pushHistory(); HubbleEditor.state.filter = '${id}'; HubbleEditor.updateRender(); HubbleEditor.renderPanels('filters');" style="display: flex; flex-direction: column; align-items: center; gap: 6px; cursor: pointer; transition: all 0.2s; ${active}">
+            <div style="width: 100%; aspect-ratio: 1; border-radius: 12px; background: url('${mediaUrl}') center/cover; filter: ${cssFilter}; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.1);"></div>
+            <span style="font-size: 0.7rem; font-weight: 500;">${f}</span>
+          </div>
+        `;
+      });
+      html += `</div>`;
+    }
+    else if (activeTool === 'adjust') {
+      html += `<h4 style="margin: 0 0 16px 0; font-size: 1.1rem; display: flex; align-items: center; gap: 8px;"><i data-lucide="sliders" style="width: 18px; height: 18px; color: var(--primary);"></i> Adjust</h4>`;
+      html += `<div style="display: flex; flex-direction: column; gap: 16px; max-height: 400px; overflow-y: auto; padding-right: 12px;" class="custom-scrollbar">`;
+      
+      const sliders = [
+        { id: 'brightness', label: 'Brightness', min: 0, max: 200 },
+        { id: 'contrast', label: 'Contrast', min: 0, max: 200 },
+        { id: 'exposure', label: 'Exposure', min: 0, max: 200 },
+        { id: 'highlights', label: 'Highlights', min: 0, max: 200 },
+        { id: 'shadows', label: 'Shadows', min: 0, max: 200 },
+        { id: 'temperature', label: 'Temperature', min: -100, max: 100 },
+        { id: 'tint', label: 'Tint', min: -100, max: 100 },
+        { id: 'saturation', label: 'Saturation', min: 0, max: 200 },
+        { id: 'vibrance', label: 'Vibrance', min: 0, max: 200 },
+        { id: 'sharpness', label: 'Sharpness', min: 0, max: 100 },
+        { id: 'blur', label: 'Blur', min: 0, max: 20 },
+        { id: 'opacity', label: 'Opacity', min: 0, max: 100 }
+      ];
+      
+      sliders.forEach(s => {
+        const val = this.state.adjustments[s.id];
+        html += `
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <div style="display: flex; justify-content: space-between; font-size: 0.8rem;">
+              <span>${s.label}</span>
+              <span style="color: var(--primary); font-weight: 600;">${val}</span>
+            </div>
+            <input type="range" min="${s.min}" max="${s.max}" value="${val}" 
+              oninput="HubbleEditor.state.adjustments['${s.id}'] = Number(this.value); HubbleEditor.updateRender(); this.previousElementSibling.lastElementChild.innerText = this.value;"
+              onchange="HubbleEditor.pushHistory();"
+              style="width: 100%; accent-color: var(--primary);">
+          </div>
+        `;
+      });
+      
+      html += `<button onclick="HubbleEditor.pushHistory(); HubbleEditor.state.filter = 'original'; HubbleEditor.state.adjustments = { brightness: 100, contrast: 100, exposure: 100, highlights: 100, shadows: 100, temperature: 0, tint: 0, saturation: 100, vibrance: 100, sharpness: 0, blur: 0, opacity: 100 }; HubbleEditor.updateRender(); HubbleEditor.renderPanels('adjust');" style="margin-top: 12px; padding: 10px; border-radius: 8px; background: rgba(255,255,255,0.05); color: white; border: 1px solid rgba(255,255,255,0.1); cursor: pointer;">Reset All</button>`;
+      html += `</div>`;
+    }
+    else if (activeTool === 'rotate') {
+      html += `<h4 style="margin: 0 0 16px 0; font-size: 1.1rem; display: flex; align-items: center; gap: 8px;"><i data-lucide="rotate-cw" style="width: 18px; height: 18px; color: var(--primary);"></i> Rotate</h4>`;
+      html += `<div style="text-align: center; color: rgba(255,255,255,0.7); font-size: 0.9rem;">Rotated ${this.state.rotation}°</div>`;
+    }
+    else if (activeTool === 'crop') {
+      html += `<h4 style="margin: 0 0 16px 0; font-size: 1.1rem; display: flex; align-items: center; gap: 8px;"><i data-lucide="crop" style="width: 18px; height: 18px; color: var(--primary);"></i> Crop & Aspect</h4>`;
+      html += `<div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 24px;">`;
+      const ratios = ['Free', '1:1', '4:5', '3:4', '16:9', '9:16', '1080:1920'];
+      const labels = ['Free', '1:1', '4:5', '3:4', '16:9', '9:16', 'Story'];
+      ratios.forEach((r, i) => {
+        const active = this.tempCrop && this.tempCrop.aspect === r ? 'border: 2px solid var(--primary); background: rgba(168,85,247,0.1);' : 'border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05);';
+        html += `<button onclick="HubbleEditor.setCropAspect('${r}');" style="padding: 12px; border-radius: 12px; color: white; font-weight: 600; font-size: 0.9rem; cursor: pointer; ${active}">${labels[i]}</button>`;
+      });
+      html += `</div>`;
+      
+      const currentZoom = this.state.zoom || 1;
+      const zoomPct = Math.round(currentZoom * 100);
+      html += `
+        <div class="he-zoom-panel" style="margin-bottom: 24px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 16px; border-radius: 16px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <span style="font-size: 0.9rem; color: rgba(255,255,255,0.8); font-weight: 600;"><i data-lucide="zoom-in" style="width: 14px; height: 14px; vertical-align: middle; margin-right: 6px;"></i>Zoom</span>
+            <span id="he-zoom-val" style="font-size: 0.85rem; color: var(--primary); font-weight: bold; background: rgba(168,85,247,0.15); padding: 4px 10px; border-radius: 8px; font-variant-numeric: tabular-nums;">${zoomPct}%</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <button onclick="HubbleEditor.setCropZoom((HubbleEditor.state.zoom || 1) - 0.1)" style="width: 32px; height: 32px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.1); color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: transform 0.1s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'"><i data-lucide="minus" style="width: 14px; height: 14px;"></i></button>
+            <input type="range" id="he-zoom-slider" class="he-custom-slider" min="0.5" max="3" step="0.01" value="${currentZoom}" oninput="HubbleEditor.setCropZoom(parseFloat(this.value))">
+            <button onclick="HubbleEditor.setCropZoom((HubbleEditor.state.zoom || 1) + 0.1)" style="width: 32px; height: 32px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.1); color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: transform 0.1s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'"><i data-lucide="plus" style="width: 14px; height: 14px;"></i></button>
+          </div>
+        </div>
+      `;
+      
+      html += `<div style="display: flex; flex-direction: column; gap: 12px;">`;
+      html += `<div style="display: flex; gap: 12px;">
+                 <button class="he-glass-btn" onclick="HubbleEditor.state.zoom = 1; HubbleEditor.state.panX = 0; HubbleEditor.state.panY = 0; HubbleEditor.tempCrop = { x: 0, y: 0, width: 100, height: 100, aspect: 'Free' }; HubbleEditor.renderCropHandles(); HubbleEditor.renderPanels('crop'); HubbleEditor.updateRender();">Reset</button>
+                 <button class="he-premium-apply-btn" onclick="HubbleEditor.exitCropMode(true)">Apply Crop</button>
+               </div>`;
+      html += `<button class="he-glass-btn he-cancel-btn" onclick="HubbleEditor.exitCropMode(false)">Cancel</button>`;
+      html += `</div>`;
+    }
+    else if (activeTool === 'stickers') {
+      html += `<h4 style="margin: 0 0 16px 0; font-size: 1.1rem; display: flex; align-items: center; gap: 8px;"><i data-lucide="sticker" style="width: 18px; height: 18px; color: var(--primary);"></i> Stickers</h4>`;
+      html += `<div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; max-height: 400px; overflow-y: auto;" class="custom-scrollbar">`;
+      
+      const emojiStickers = ['🔥', '✨', '❤️', '🎉', '🚀', '💯', '😂', '😍', '🎂', '✈️', '🌴', '💎', '👑', '🌈', '⚡️', '🌟'];
+      
+      emojiStickers.forEach(e => {
+        html += `<div onclick="HubbleEditor.addLayer('text', '${e}', { size: 80 });" style="font-size: 32px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.2)'" onmouseout="this.style.transform='scale(1)'">${e}</div>`;
+      });
+      
+      html += `</div>`;
+    }
+    else if (activeTool === 'text') {
+      html += `<h4 style="margin: 0 0 16px 0; font-size: 1.1rem; display: flex; align-items: center; gap: 8px;"><i data-lucide="type" style="width: 18px; height: 18px; color: var(--primary);"></i> Text</h4>`;
+      
+      const colors = ['#ffffff', '#000000', '#888888', '#ff3b30', '#ff9500', '#ffcc00', '#4cd964', '#5ac8fa', '#007aff', '#5856d6', '#ff2d55'];
+      let currentColor = HubbleEditor.textState ? HubbleEditor.textState.color : '#ffffff';
+      let currentFont = HubbleEditor.textState ? HubbleEditor.textState.font : 'inherit';
+      let isBold = HubbleEditor.textState ? HubbleEditor.textState.bold : false;
+      let isItalic = HubbleEditor.textState ? HubbleEditor.textState.italic : false;
+      let textValue = HubbleEditor.textState ? HubbleEditor.textState.text : '';
+      let isExisting = HubbleEditor.textState && HubbleEditor.textState.layerId && HubbleEditor.history && HubbleEditor.history.length > 0 && HubbleEditor.history.some(h => h.layers.some(l => l.id === HubbleEditor.textState.layerId));
+
+      html += `
+        <div style="display: flex; flex-direction: column; gap: 16px;">
+          <input type="text" id="he-text-input" placeholder="Enter text..." value="${textValue.replace(/"/g, '&quot;')}" oninput="HubbleEditor.updateLiveText()" style="width: 100%; padding: 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.3); color: white; outline: none; font-size: 1rem;">
+          
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+             <span style="font-size: 0.8rem; color: rgba(255,255,255,0.7);">Color</span>
+             <div style="display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px;" class="custom-scrollbar">
+               <input type="color" id="he-text-color-picker" value="${currentColor}" oninput="HubbleEditor.updateLiveTextColor(this.value)" style="width: 32px; height: 32px; flex-shrink: 0; border: 2px solid rgba(255,255,255,0.3); border-radius: 50%; cursor: pointer; background: transparent; padding: 0;">
+               ${colors.map(c => `<div class="he-color-swatch" data-color="${c}" onclick="HubbleEditor.updateLiveTextColor('${c}')" style="width: 32px; height: 32px; flex-shrink: 0; border-radius: 50%; background: ${c}; border: 2px solid ${currentColor === c ? 'var(--primary, #a855f7)' : 'rgba(255,255,255,0.1)'}; cursor: pointer; transition: all 0.2s;"></div>`).join('')}
+             </div>
+             <input type="hidden" id="he-text-color" value="${currentColor}">
+          </div>
+          
+          <div style="display: flex; gap: 8px;">
+            <button onclick="HubbleEditor.toggleTextFormat('bold')" id="he-text-bold" style="flex: 1; padding: 10px; border-radius: 8px; border: 1px solid ${isBold ? 'var(--primary, #a855f7)' : 'rgba(255,255,255,0.1)'}; background: ${isBold ? 'rgba(168,85,247,0.2)' : 'rgba(255,255,255,0.05)'}; color: white; font-weight: bold; cursor: pointer; transition: all 0.2s;">B</button>
+            <button onclick="HubbleEditor.toggleTextFormat('italic')" id="he-text-italic" style="flex: 1; padding: 10px; border-radius: 8px; border: 1px solid ${isItalic ? 'var(--primary, #a855f7)' : 'rgba(255,255,255,0.1)'}; background: ${isItalic ? 'rgba(168,85,247,0.2)' : 'rgba(255,255,255,0.05)'}; color: white; font-style: italic; cursor: pointer; transition: all 0.2s;">I</button>
+            
+            <div style="flex: 2; position: relative;">
+               <select id="he-text-font" onchange="HubbleEditor.updateLiveText()" style="width: 100%; height: 100%; padding: 0 12px; appearance: none; -webkit-appearance: none; background: var(--input-bg, rgba(255,255,255,0.05)); border: var(--input-border, 1px solid rgba(255,255,255,0.1)); border-radius: 8px; color: var(--text-main, #fff); cursor: pointer; outline: none; font-size: 0.9rem;">
+                  <option value="inherit" style="background: var(--card-bg, #151515); color: var(--text-main, #fff);" ${currentFont === 'inherit' ? 'selected' : ''}>Default</option>
+                  <option value="'Inter', sans-serif" style="background: var(--card-bg, #151515); color: var(--text-main, #fff);" ${currentFont === "'Inter', sans-serif" ? 'selected' : ''}>Inter</option>
+                  <option value="'Poppins', sans-serif" style="background: var(--card-bg, #151515); color: var(--text-main, #fff);" ${currentFont === "'Poppins', sans-serif" ? 'selected' : ''}>Poppins</option>
+                  <option value="'Montserrat', sans-serif" style="background: var(--card-bg, #151515); color: var(--text-main, #fff);" ${currentFont === "'Montserrat', sans-serif" ? 'selected' : ''}>Montserrat</option>
+                  <option value="'Roboto', sans-serif" style="background: var(--card-bg, #151515); color: var(--text-main, #fff);" ${currentFont === "'Roboto', sans-serif" ? 'selected' : ''}>Roboto</option>
+                  <option value="'Open Sans', sans-serif" style="background: var(--card-bg, #151515); color: var(--text-main, #fff);" ${currentFont === "'Open Sans', sans-serif" ? 'selected' : ''}>Open Sans</option>
+                  <option value="'Lato', sans-serif" style="background: var(--card-bg, #151515); color: var(--text-main, #fff);" ${currentFont === "'Lato', sans-serif" ? 'selected' : ''}>Lato</option>
+                  <option value="'Nunito', sans-serif" style="background: var(--card-bg, #151515); color: var(--text-main, #fff);" ${currentFont === "'Nunito', sans-serif" ? 'selected' : ''}>Nunito</option>
+                  <option value="'Playfair Display', serif" style="background: var(--card-bg, #151515); color: var(--text-main, #fff);" ${currentFont === "'Playfair Display', serif" ? 'selected' : ''}>Playfair Display</option>
+                  <option value="'Merriweather', serif" style="background: var(--card-bg, #151515); color: var(--text-main, #fff);" ${currentFont === "'Merriweather', serif" ? 'selected' : ''}>Merriweather</option>
+                  <option value="'Bebas Neue', sans-serif" style="background: var(--card-bg, #151515); color: var(--text-main, #fff);" ${currentFont === "'Bebas Neue', sans-serif" ? 'selected' : ''}>Bebas Neue</option>
+                  <option value="'Oswald', sans-serif" style="background: var(--card-bg, #151515); color: var(--text-main, #fff);" ${currentFont === "'Oswald', sans-serif" ? 'selected' : ''}>Oswald</option>
+                  <option value="'Raleway', sans-serif" style="background: var(--card-bg, #151515); color: var(--text-main, #fff);" ${currentFont === "'Raleway', sans-serif" ? 'selected' : ''}>Raleway</option>
+                  <option value="'Ubuntu', sans-serif" style="background: var(--card-bg, #151515); color: var(--text-main, #fff);" ${currentFont === "'Ubuntu', sans-serif" ? 'selected' : ''}>Ubuntu</option>
+                  <option value="'Quicksand', sans-serif" style="background: var(--card-bg, #151515); color: var(--text-main, #fff);" ${currentFont === "'Quicksand', sans-serif" ? 'selected' : ''}>Quicksand</option>
+               </select>
+               <div style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); pointer-events: none; color: var(--text-main, #fff); font-size: 10px;">▼</div>
+            </div>
+          </div>
+
+          <button id="he-text-add-btn" onclick="HubbleEditor.commitLiveText()" style="margin-top: 8px; padding: 14px; border-radius: 12px; background: ${textValue.trim() ? 'linear-gradient(135deg, var(--primary, #a855f7) 0%, #7e22ce 100%)' : 'rgba(255,255,255,0.1)'}; box-shadow: ${textValue.trim() ? '0 8px 20px rgba(168,85,247,0.3)' : 'none'}; border: 1px solid rgba(255,255,255,0.1); color: ${textValue.trim() ? 'white' : 'rgba(255,255,255,0.4)'}; font-weight: 600; cursor: ${textValue.trim() ? 'pointer' : 'not-allowed'}; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); pointer-events: ${textValue.trim() ? 'all' : 'none'};">${isExisting ? 'Update Text' : 'Add Text'}</button>
+        </div>
+      `;
+    }
+    html += `</div>`;
+    container.innerHTML = html;
+    if (window.lucide) window.lucide.createIcons();
+  },
+
+  GlobalAudio: {
+    audio: new Audio(),
+    init() {
+      this.audio.loop = true;
+    },
+    play() {
+      if (window.HubbleEditor.state.musicTrack) {
+        this.audio.play().catch(e => console.error("Audio play error", e));
+      }
+    },
+    pause() {
+      this.audio.pause();
+    },
+    setTrack(trackUrl) {
+      this.audio.src = trackUrl;
+      this.audio.load();
+    },
+    sync(time) {
+      if (Math.abs(this.audio.currentTime - time) > 0.2) {
+        this.audio.currentTime = time;
+      }
+    },
+    stop() {
+      this.audio.pause();
+      this.audio.currentTime = 0;
+    }
+  },
+
+  openLocationSelector() {
+    const renderContainer = document.getElementById('he-render-container');
+    if (!renderContainer) return;
+    
+    let locationOverlay = document.getElementById('he-location-overlay');
+    
+    if (locationOverlay) {
+        // Toggle off if already open
+        locationOverlay.remove();
+        if (this._locationSearchTimeout) clearTimeout(this._locationSearchTimeout);
+        this.state.selectedLocation = null;
+        return;
+    }
+    
+    locationOverlay = document.createElement('div');
+    locationOverlay.id = 'he-location-overlay';
+    // Style as a glassmorphism widget placed at top-left inside media preview
+    locationOverlay.style.cssText = `
+        position: absolute;
+        top: 20px;
+        left: 20px;
+        width: 280px;
+        max-width: calc(100% - 40px);
+        z-index: 50; /* Ensure it's above canvas but inside render container */
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    `;
+    
+    // Prevent dragging/zooming when interacting with search overlay
+    locationOverlay.addEventListener('mousedown', e => e.stopPropagation());
+    locationOverlay.addEventListener('wheel', e => e.stopPropagation());
+    locationOverlay.addEventListener('touchstart', e => e.stopPropagation());
+
+    const searchInputWrapper = document.createElement('div');
+    searchInputWrapper.style.cssText = `
+        position: relative;
+        width: 100%;
+        background: rgba(0,0,0,0.5);
+        backdrop-filter: blur(12px);
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 12px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        transition: border-color 0.2s;
+    `;
+    
+    const searchIcon = document.createElement('i');
+    searchIcon.setAttribute('data-lucide', 'map-pin');
+    searchIcon.style.cssText = 'position: absolute; left: 14px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: rgba(255,255,255,0.6);';
+    searchInputWrapper.appendChild(searchIcon);
+    
+    const searchInput = document.createElement('input');
+    searchInput.id = 'he-location-search-input';
+    searchInput.type = 'text';
+    searchInput.placeholder = '📍 Search location...';
+    // If we have a selected location, show its name
+    if (this.state.selectedLocation && this.state.selectedLocation.displayName) {
+        searchInput.value = this.state.selectedLocation.displayName;
+    }
+    searchInput.style.cssText = `
+        width: 100%;
+        background: transparent;
+        border: none;
+        padding: 12px 14px 12px 38px;
+        color: white;
+        font-family: inherit;
+        font-size: 0.9rem;
+        outline: none;
+        box-sizing: border-box;
+        pointer-events: auto;
+        user-select: auto;
+    `;
+    
+    // Ensure clicking the input actually focuses it, bypassing any global preventDefault
+    searchInput.addEventListener('mousedown', e => {
+        e.stopPropagation();
+    });
+    searchInput.addEventListener('click', e => {
+        e.stopPropagation();
+        searchInput.focus();
+    });
+    
+    // Prevent typing from triggering editor shortcuts (e.g. Backspace deleting layers)
+    searchInput.addEventListener('keydown', e => {
+        e.stopPropagation();
+        if (e.key === 'Escape') {
+            document.getElementById('he-location-results-container').style.display = 'none';
+            searchInput.blur();
+        }
+    });
+    
+    searchInput.addEventListener('input', e => {
+        if (window.HubbleEditor) window.HubbleEditor.handleLocationSearch(e.target.value);
+    });
+    
+    searchInput.addEventListener('focus', () => {
+        searchInputWrapper.style.borderColor = 'var(--primary)';
+        document.getElementById('he-location-results-container').style.display = 'flex';
+        // Only trigger search if there is a query, else show empty
+        if (searchInput.value.trim().length >= 2) {
+            this.handleLocationSearch(searchInput.value);
+        } else {
+            this.renderLocationResults(null, 'empty_default');
+        }
+    });
+    
+    searchInput.addEventListener('blur', () => {
+        searchInputWrapper.style.borderColor = 'rgba(255,255,255,0.1)';
+    });
+
+    searchInputWrapper.appendChild(searchInput);
+    
+    const resultsContainer = document.createElement('div');
+    resultsContainer.id = 'he-location-results-container';
+    resultsContainer.style.cssText = `
+        display: none;
+        flex-direction: column;
+        gap: 8px;
+        width: 100%;
+        background: rgba(0,0,0,0.6);
+        backdrop-filter: blur(12px);
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 12px;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+        /* Approx height for 3 items (approx 58px each + gaps/padding) */
+        max-height: 200px;
+        overflow-y: auto;
+        padding: 8px;
+        box-sizing: border-box;
+    `;
+    
+    // Add custom thin scrollbar css rules for this container implicitly
+    // (We will add the scrollbar styling in style.css or rely on the global one if it exists)
+    resultsContainer.classList.add('he-thin-scrollbar');
+    
+    locationOverlay.appendChild(searchInputWrapper);
+    locationOverlay.appendChild(resultsContainer);
+    
+    renderContainer.appendChild(locationOverlay);
+    
+    if (window.lucide) window.lucide.createIcons();
+    
+    // Close dropdown on outside click
+    const outsideClickListener = (e) => {
+        if (!locationOverlay.contains(e.target)) {
+            resultsContainer.style.display = 'none';
+        }
+    };
+    document.addEventListener('mousedown', outsideClickListener);
+    
+    // Cleanup listener when overlay is removed
+    const observer = new MutationObserver((mutations) => {
+        mutations.forEach((mutation) => {
+            mutation.removedNodes.forEach((node) => {
+                if (node === locationOverlay) {
+                    document.removeEventListener('mousedown', outsideClickListener);
+                    observer.disconnect();
+                }
+            });
+        });
+    });
+    observer.observe(renderContainer, { childList: true });
+    
+    // Initial render empty
+    this.renderLocationResults(null, 'empty_default');
+    
+    searchInput.focus();
+  },
+
+  _locationSearchTimeout: null,
+  _locationSearchAbortController: null,
+  _lastLocationResults: null,
+  _lastLocationState: 'default',
+
+  handleLocationSearch(query) {
+    if (this._locationSearchTimeout) clearTimeout(this._locationSearchTimeout);
+    if (this._locationSearchAbortController) this._locationSearchAbortController.abort();
+    
+    if (!query || query.trim().length < 2) {
+      this.renderLocationResults(null, 'empty_default');
+      return;
+    }
+
+    this.renderLocationResults(null, 'loading');
+
+    this._locationSearchTimeout = setTimeout(async () => {
+      this._locationSearchAbortController = new AbortController();
+      try {
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&addressdetails=1&limit=5`, {
+          signal: this._locationSearchAbortController.signal,
+          headers: { 'Accept-Language': 'en-US,en;q=0.9' }
+        });
+        if (!res.ok) throw new Error('Network error');
+        const data = await res.json();
+        
+        if (data && data.length > 0) {
+          const results = data.map(item => {
+            const addr = item.address;
+            const mainName = item.name || addr.city || addr.town || addr.village || 'Unknown';
+            const parts = [];
+            if (addr.city && addr.city !== mainName) parts.push(addr.city);
+            if (addr.state) parts.push(addr.state);
+            if (addr.country) parts.push(addr.country);
+            return {
+              id: item.place_id,
+              displayName: mainName,
+              subText: parts.join(', '),
+              lat: item.lat,
+              lon: item.lon,
+              type: item.type
+            };
+          });
+          this.renderLocationResults(results, 'results');
+        } else {
+          this.renderLocationResults(null, 'empty');
+        }
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          console.error("Location search error:", err);
+          this.renderLocationResults(null, 'error');
+        }
+      }
+    }, 300);
+  },
+
+  renderLocationResults(results, state) {
+    this._lastLocationResults = results;
+    this._lastLocationState = state;
+    
+    const container = document.getElementById('he-location-results-container');
+    if (!container) return;
+    
+    const buildItemHTML = (id, mainText, subText, isSelected) => {
+        const bg = isSelected ? 'rgba(168,85,247,0.15)' : 'rgba(255,255,255,0.02)';
+        const border = isSelected ? 'rgba(168,85,247,0.5)' : 'transparent';
+        const checkIcon = isSelected ? `<i data-lucide="check" style="color: var(--primary); width: 16px; height: 16px; margin-left: auto;"></i>` : '';
+        return `
+          <div onclick="if(window.HubbleEditor) window.HubbleEditor.selectLocation('${id.replace(/'/g, "\\'")}', '${mainText.replace(/'/g, "\\'")}', '${subText ? subText.replace(/'/g, "\\'") : ''}')" style="display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 12px; background: ${bg}; border: 1px solid ${border}; cursor: pointer; transition: all 0.2s;" onmouseover="if(!${isSelected}){this.style.background='rgba(255,255,255,0.05)'; this.style.borderColor='rgba(255,255,255,0.1)';}" onmouseout="if(!${isSelected}){this.style.background='rgba(255,255,255,0.02)'; this.style.borderColor='transparent';}">
+            <div style="width: 32px; height: 32px; border-radius: 50%; background: rgba(255,255,255,0.05); display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+              <i data-lucide="map-pin" style="color: ${isSelected ? 'var(--primary)' : 'rgba(255,255,255,0.6)'}; width: 14px; height: 14px;"></i>
+            </div>
+            <div style="display: flex; flex-direction: column; overflow: hidden; text-align: left;">
+                <span style="color: white; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${mainText}</span>
+                ${subText ? `<span style="color: rgba(255,255,255,0.4); font-size: 0.75rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${subText}</span>` : ''}
+            </div>
+            ${checkIcon}
+          </div>
+        `;
+    };
+
+    if (state === 'empty_default') {
+        container.style.display = 'none'; // hide if nothing typed
+    } else if (state === 'loading') {
+        container.style.display = 'flex';
+        container.innerHTML = `
+        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 16px; gap: 12px; color: rgba(255,255,255,0.6);">
+            <div class="he-spinner" style="width: 20px; height: 20px; border: 2px solid rgba(255,255,255,0.2); border-top-color: var(--primary); border-radius: 50%; animation: he-spin 1s linear infinite;"></div>
+        </div>`;
+    } else if (state === 'empty') {
+        container.style.display = 'flex';
+        container.innerHTML = `
+        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 16px; gap: 8px; color: rgba(255,255,255,0.6);">
+            <span style="font-size: 0.85rem;">No locations found.</span>
+        </div>`;
+    } else if (state === 'error') {
+        container.style.display = 'flex';
+        container.innerHTML = `
+        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 16px; gap: 8px; color: rgba(255,255,255,0.6);">
+            <span style="font-size: 0.85rem;">Couldn't load locations.</span>
+        </div>`;
+    } else if (state === 'results' && results) {
+        container.style.display = 'flex';
+        let html = `<div style="display: flex; flex-direction: column; gap: 8px;">`;
+        results.forEach(res => {
+            const isSelected = this.state.selectedLocation && String(this.state.selectedLocation.id) === String(res.id);
+            html += buildItemHTML(String(res.id), res.displayName, res.subText, isSelected);
+        });
+        html += `</div>`;
+        container.innerHTML = html;
+        if (window.lucide) window.lucide.createIcons();
+    }
+  },
+
+  selectLocation(id, displayName, subText) {
+    this.state.selectedLocation = {
+        id: id,
+        displayName: displayName,
+        subText: subText
+    };
+    
+    const searchInput = document.getElementById('he-location-search-input');
+    if (searchInput) {
+        searchInput.value = displayName;
+    }
+    
+    const resultsContainer = document.getElementById('he-location-results-container');
+    if (resultsContainer) {
+        resultsContainer.style.display = 'none';
+    }
+  },
+
+  openMusicSelector() {
+    const modal = document.getElementById('he-music-modal');
+    const list = document.getElementById('he-music-list');
+    const removeBtn = document.getElementById('he-music-remove-btn');
+    if(!modal || !list) return;
+    
+    // Mock Tracks
+    const tracks = [
+      { id: 'm1', title: 'Summer Vibes', artist: 'Chill Wave', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3' },
+      { id: 'm2', title: 'Urban Flow', artist: 'Beat Maker', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3' },
+      { id: 'm3', title: 'Ambient Journey', artist: 'Space Echo', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3' },
+      { id: 'm4', title: 'Acoustic Sunrise', artist: 'Folk Tales', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3' }
+    ];
+    
+    list.innerHTML = '';
+    tracks.forEach(t => {
+      const isSelected = window.HubbleEditor.state.musicTrack && window.HubbleEditor.state.musicTrack.id === t.id;
+      const el = document.createElement('div');
+      el.style.cssText = `display: flex; align-items: center; justify-content: space-between; padding: 12px; border-radius: 12px; background: ${isSelected ? 'rgba(168,85,247,0.2)' : 'rgba(255,255,255,0.05)'}; border: 1px solid ${isSelected ? 'var(--primary)' : 'rgba(255,255,255,0.1)'}; cursor: pointer; transition: all 0.2s;`;
+      el.innerHTML = `
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+          <span style="color: white; font-weight: 600; font-size: 0.95rem;">${t.title}</span>
+          <span style="color: rgba(255,255,255,0.5); font-size: 0.8rem;">${t.artist}</span>
+        </div>
+        ${isSelected ? '<i data-lucide="check-circle" style="color: var(--primary); width: 20px; height: 20px;"></i>' : '<i data-lucide="play-circle" style="color: rgba(255,255,255,0.5); width: 20px; height: 20px;"></i>'}
+      `;
+      el.onclick = () => {
+        window.HubbleEditor.pushHistory();
+        window.HubbleEditor.state.musicTrack = t;
+        window.HubbleEditor.GlobalAudio.setTrack(t.url);
+        window.HubbleEditor.openMusicSelector(); // re-render
+        
+        const canvasVideo = document.querySelector('#he-media-layer video');
+        if(canvasVideo && !canvasVideo.paused) {
+           window.HubbleEditor.GlobalAudio.play();
+        }
+      };
+      list.appendChild(el);
+    });
+    
+    removeBtn.style.display = window.HubbleEditor.state.musicTrack ? 'block' : 'none';
+    
+    modal.style.display = 'flex';
+    setTimeout(() => modal.style.opacity = '1', 10);
+    if(window.lucide) window.lucide.createIcons();
+  },
+
+  removeMusic() {
+    window.HubbleEditor.pushHistory();
+    window.HubbleEditor.state.musicTrack = null;
+    window.HubbleEditor.GlobalAudio.stop();
+    const modal = document.getElementById('he-music-modal');
+    if (modal) {
+      modal.style.opacity = '0';
+      setTimeout(() => modal.style.display = 'none', 300);
+    }
+  },
+
+  toggleSpeaker(e, forceMute = null) {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    
+    if (window.HubbleEditor._isTogglingSpeaker) return;
+    window.HubbleEditor._isTogglingSpeaker = true;
+    setTimeout(() => { window.HubbleEditor._isTogglingSpeaker = false; }, 150);
+
+    const state = window.HubbleEditor.state;
+    if (forceMute !== null) {
+      state.isMuted = forceMute;
+    } else {
+      state.isMuted = !state.isMuted;
+    }
+    
+    // Smooth Mute: Update volume to 0/1 to prevent decoder stutter on some browsers
+    const videos = [
+      document.querySelector('#he-media-layer video'),
+      ...document.querySelectorAll('#review-slider-wrapper video')
+    ];
+    
+    videos.forEach(v => {
+      if (v) {
+        v.muted = state.isMuted;
+        v.volume = state.isMuted ? 0 : 1;
+      }
+    });
+    
+    // Update speaker UI efficiently
+    const mutedIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>';
+    const unmutedIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>';
+    
+    document.querySelectorAll('.he-speaker-icon').forEach(icon => {
+      icon.innerHTML = state.isMuted ? mutedIcon : unmutedIcon;
+    });
+  },
+
+  buildVideoControls(container, videoNode, isReview = false) {
+    const controlsId = isReview ? 'he-review-controls' : 'he-video-controls';
+    let controls = document.createElement('div');
+    controls.id = controlsId;
+    controls.style.cssText = 'position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1000; display: flex; flex-direction: column; justify-content: flex-end; padding-bottom: 24px;';
+    
+    const playBtn = document.createElement('div');
+    playBtn.id = isReview ? 'he-review-play-btn' : 'he-play-btn';
+    playBtn.style.cssText = 'position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) scale(0.9); width: 64px; height: 64px; border-radius: 50%; background: rgba(0,0,0,0.4); backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; pointer-events: all; cursor: pointer; transition: all 0.3s; opacity: 0; box-shadow: 0 8px 32px rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1);';
+    playBtn.innerHTML = '<i data-lucide="pause" style="color: white; width: 32px; height: 32px;"></i>';
+    
+    let hideTimeout;
+    const showPlayBtn = (icon) => {
+      playBtn.innerHTML = `<i data-lucide="${icon}" style="color: white; width: 32px; height: 32px;"></i>`;
+      if (window.lucide) window.lucide.createIcons();
+      playBtn.style.opacity = '1';
+      playBtn.style.transform = 'scale(1)';
+      clearTimeout(hideTimeout);
+      if (icon === 'pause') {
+        hideTimeout = setTimeout(() => {
+          playBtn.style.opacity = '0';
+          playBtn.style.transform = 'scale(0.9)';
+        }, 2000);
+      }
+    };
+
+    const togglePlay = (e) => {
+      if (e) { e.preventDefault(); e.stopPropagation(); }
+      const vid = videoNode;
+      if (!vid) return;
+      if (vid.paused) {
+        vid.play();
+        showPlayBtn('pause');
+      } else {
+        vid.pause();
+        showPlayBtn('play');
+      }
+    };
+
+    playBtn.onclick = togglePlay;
+    container.addEventListener('mousemove', () => {
+      if (videoNode && !videoNode.paused) {
+        showPlayBtn('pause');
+      }
+    });
+    
+    showPlayBtn('pause'); // Set initial state
+
+    const bottomRow = document.createElement('div');
+    bottomRow.style.cssText = 'display: flex; align-items: center; justify-content: space-between; padding: 0 20px; pointer-events: all; gap: 16px; margin-top: auto; width: 100%; box-sizing: border-box;';
+
+    // Timeline container
+    const timelineContainer = document.createElement('div');
+    timelineContainer.id = isReview ? 'he-review-timeline' : 'he-timeline';
+    timelineContainer.style.cssText = 'flex-grow: 1; display: flex; flex-direction: column; gap: 8px; cursor: pointer; position: relative; padding: 10px 0;';
+
+    const timeText = document.createElement('div');
+    timeText.id = isReview ? 'he-review-time-text' : 'he-time-text';
+    timeText.style.cssText = 'color: white; font-size: 11px; font-weight: 600; font-family: monospace; text-shadow: 0 1px 4px rgba(0,0,0,0.8); display: flex; justify-content: space-between; opacity: 0.9;';
+    timeText.innerHTML = '<span>00:00</span><span>00:00</span>';
+    
+    const track = document.createElement('div');
+    track.style.cssText = 'width: 100%; height: 6px; border-radius: 4px; background: rgba(255,255,255,0.3); backdrop-filter: blur(4px); position: relative; overflow: hidden;';
+    
+    const fill = document.createElement('div');
+    fill.id = isReview ? 'he-review-timeline-fill' : 'he-timeline-fill';
+    fill.style.cssText = 'position: absolute; top: 0; left: 0; height: 100%; width: 0%; background: var(--primary, #a855f7); box-shadow: 0 0 10px rgba(168,85,247,0.5); border-radius: 4px; transition: width 0.1s linear;';
+    
+    track.appendChild(fill);
+    timelineContainer.appendChild(track);
+    timelineContainer.appendChild(timeText);
+
+    // Controls right side (Volume + Speaker)
+    const rightControls = document.createElement('div');
+    rightControls.style.cssText = 'display: flex; align-items: center; gap: 12px;';
+
+    // Volume Slider
+    const volumeSlider = document.createElement('input');
+    volumeSlider.type = 'range';
+    volumeSlider.min = '0';
+    volumeSlider.max = '1';
+    volumeSlider.step = '0.01';
+    volumeSlider.value = this.state.isMuted ? '0' : (this.state.volume || '1');
+    volumeSlider.id = isReview ? 'he-review-volume' : 'he-volume';
+    volumeSlider.className = 'he-glass-slider';
+    
+    volumeSlider.oninput = (e) => {
+      const val = parseFloat(e.target.value);
+      this.state.volume = val;
+      
+      const videos = [
+        document.querySelector('#he-media-layer video'),
+        ...document.querySelectorAll('#review-slider-wrapper video')
+      ];
+      videos.forEach(v => {
+        if (v) {
+          v.volume = val;
+          if (val > 0 && v.muted) v.muted = false;
+        }
+      });
+      
+      if (this.GlobalAudio && this.GlobalAudio.audio) {
+         this.GlobalAudio.audio.volume = val;
+      }
+
+      if (val === 0 && !this.state.isMuted) {
+         this.toggleSpeaker(null, true);
+      } else if (val > 0 && this.state.isMuted) {
+         this.toggleSpeaker(null, false);
+      }
+    };
+
+    // Speaker btn
+    const speakerBtn = document.createElement('div');
+    speakerBtn.id = 'he-speaker-btn';
+    speakerBtn.className = 'he-speaker-icon';
+    speakerBtn.style.cssText = 'width: 44px; height: 44px; border-radius: 50%; background: rgba(168,85,247,0.25); backdrop-filter: blur(12px); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1); box-shadow: 0 4px 15px rgba(168,85,247,0.4), inset 0 0 10px rgba(168,85,247,0.2); border: 1px solid rgba(168,85,247,0.5); color: white; flex-shrink: 0;';
+    speakerBtn.innerHTML = this.state.isMuted ? '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>' : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>';
+    
+    speakerBtn.onclick = (e) => {
+      this.toggleSpeaker(e);
+      if (this.state.isMuted) {
+        volumeSlider.value = '0';
+      } else {
+        volumeSlider.value = this.state.volume || '1';
+        
+        const videos = [
+          document.querySelector('#he-media-layer video'),
+          ...document.querySelectorAll('#review-slider-wrapper video')
+        ];
+        videos.forEach(v => { if (v) v.volume = parseFloat(volumeSlider.value); });
+      }
+    };
+    
+    rightControls.appendChild(volumeSlider);
+    rightControls.appendChild(speakerBtn);
+
+    bottomRow.appendChild(timelineContainer);
+    bottomRow.appendChild(rightControls);
+
+    controls.appendChild(playBtn);
+    controls.appendChild(bottomRow);
+    container.appendChild(controls);
+
+    if (window.lucide) window.lucide.createIcons();
+
+    // Timeline Drag Logic
+    const updateTimeline = (e) => {
+       const rect = timelineContainer.getBoundingClientRect();
+       let pos = (e.clientX - rect.left) / rect.width;
+       pos = Math.max(0, Math.min(pos, 1));
+       
+       if (videoNode && videoNode.duration) {
+          videoNode.currentTime = pos * videoNode.duration;
+       }
+    };
+    
+    let isDragging = false;
+    timelineContainer.onmousedown = (e) => {
+       isDragging = true;
+       updateTimeline(e);
+    };
+    window.addEventListener('mousemove', (e) => {
+       if (isDragging) updateTimeline(e);
+    });
+    window.addEventListener('mouseup', () => {
+       isDragging = false;
+    });
+
+    // RAF Update Loop for UI
+    const formatTime = (time) => {
+       if (isNaN(time)) return '00:00';
+       const m = Math.floor(time / 60).toString().padStart(2, '0');
+       const s = Math.floor(time % 60).toString().padStart(2, '0');
+       return `${m}:${s}`;
+    };
+
+    const updateUI = () => {
+       if (!controls.parentElement) return; // Cleanup when unmounted
+       
+       if (videoNode && videoNode.duration) {
+          const perc = (videoNode.currentTime / videoNode.duration) * 100;
+          fill.style.width = `${perc}%`;
+          timeText.innerHTML = `<span>${formatTime(videoNode.currentTime)}</span><span>${formatTime(videoNode.duration)}</span>`;
+       }
+
+       if (this.state.isMuted && volumeSlider.value !== '0') {
+          volumeSlider.value = '0';
+       }
+
+       requestAnimationFrame(updateUI);
+    };
+    requestAnimationFrame(updateUI);
+
+    return controls;
+  }
+};
+
+// Initialize GlobalAudio once on startup
+window.HubbleEditor.GlobalAudio.init();
+
+// Initialize after DOM loads
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
+  setTimeout(() => window.HubbleEditor.init(), 500);
+} else {
+  document.addEventListener('DOMContentLoaded', () => setTimeout(() => window.HubbleEditor.init(), 500));
+}
+
+// ==================== COLLABORATOR SELECTION LOGIC ====================
+window.selectedCollaborators = [];
+window.collaborationEnabled = true;
+let cachedHubbers = null;
+
+window.toggleCollaboration = function(enabled) {
+  window.collaborationEnabled = enabled;
+  const contentDiv = document.getElementById('ch-collab-content');
+  const msgDiv = document.getElementById('ch-collab-disabled-msg');
+  const addBtn = document.getElementById('btn-add-collaborators');
+  
+  if (window.renderCollaboratorChips) window.renderCollaboratorChips();
+  
+  if (!contentDiv || !msgDiv || !addBtn) return;
+  
+  if (enabled) {
+    contentDiv.style.opacity = '1';
+    contentDiv.style.pointerEvents = 'auto';
+    msgDiv.style.display = 'none';
+    addBtn.style.display = 'flex';
+  } else {
+    contentDiv.style.opacity = '0.55';
+    addBtn.style.display = 'none';
+    
+    if (window.selectedCollaborators.length === 0) {
+      msgDiv.style.display = 'block';
+    } else {
+      msgDiv.style.display = 'none';
+    }
+  }
+};
+
+window.openCollaboratorModal = async function() {
+  if (window.collaborationEnabled === false) return;
+  
+  const modal = document.getElementById('collaborator-modal');
+  const searchInput = document.getElementById('collaborator-search-input');
+  if(searchInput) searchInput.value = '';
+  modal.style.display = 'flex';
+  
+  if (cachedHubbers === null) {
+    const listContainer = document.getElementById('collaborator-list-container');
+    listContainer.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-muted);">Loading Hubbers...</div>';
+    
+    const token = localStorage.getItem('invibe_jwt_token');
+    const currentUserStr = localStorage.getItem('invibeUser');
+    if (!token || !currentUserStr) return;
+    
+    const currentUser = JSON.parse(currentUserStr);
+    const userId = currentUser.id || currentUser._id;
+    
+    try {
+      const res = await fetch(`${API_URL}/api/users/${userId}/followers-list`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error('Failed to load hubbers');
+      cachedHubbers = await res.json();
+    } catch (err) {
+      console.error(err);
+      cachedHubbers = [];
+    }
+  }
+  
+  window.renderCollaboratorModalList();
+};
+
+window.closeCollaboratorModal = function() {
+  const modal = document.getElementById('collaborator-modal');
+  modal.style.display = 'none';
+};
+
+window.renderCollaboratorModalList = function(query = '') {
+  const listContainer = document.getElementById('collaborator-list-container');
+  if (!listContainer) return;
+  
+  if (!cachedHubbers || cachedHubbers.length === 0) {
+    listContainer.innerHTML = `
+      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 20px; text-align: center;">
+        <i data-lucide="users" style="width: 48px; height: 48px; color: var(--text-muted); margin-bottom: 16px;"></i>
+        <h4 style="margin: 0 0 8px 0; font-size: 1.1rem; color: var(--text);">No Hubbers Found</h4>
+        <p style="margin: 0; color: var(--text-muted); font-size: 0.9rem;">You don't have any Hubbers yet.<br>Connect with people first before collaborating.</p>
+      </div>
+    `;
+    if(window.lucide) window.lucide.createIcons();
+    return;
+  }
+  
+  const lowerQuery = query.toLowerCase();
+  const filtered = cachedHubbers.filter(h => {
+    const name = (h.name || '').toLowerCase();
+    const username = (h.username || '').toLowerCase();
+    return name.includes(lowerQuery) || username.includes(lowerQuery);
+  });
+  
+  if (filtered.length === 0) {
+    listContainer.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-muted);">No matching Hubbers found.</div>';
+    return;
+  }
+  
+  const selectedIds = window.selectedCollaborators.map(c => c._id || c.id);
+  
+  listContainer.innerHTML = filtered.map(h => {
+    const isSelected = selectedIds.includes(h._id || h.id);
+    const avatar = h.profilePic || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=40&q=80';
+    return `
+      <div onclick='window.toggleCollaboratorSelection(${JSON.stringify(h).replace(/'/g, "&#39;")})' style="display: flex; align-items: center; justify-content: space-between; padding: 10px; border-radius: 12px; cursor: ${isSelected ? 'default' : 'pointer'}; background: ${isSelected ? 'rgba(168,85,247,0.1)' : 'transparent'}; border: 1px solid ${isSelected ? 'var(--primary)' : 'transparent'}; transition: all 0.2s; opacity: ${isSelected ? '0.6' : '1'};">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <img src="${avatar}" style="width: 36px; height: 36px; border-radius: 50%; object-fit: cover;">
+          <div style="display: flex; flex-direction: column;">
+            <span style="font-weight: 600; font-size: 0.9rem; color: var(--text);">${h.name || h.username}</span>
+            <span style="font-size: 0.8rem; color: var(--text-muted);">@${h.username}</span>
+          </div>
+        </div>
+        ${isSelected ? '<span style="font-size: 0.8rem; color: var(--primary); font-weight: 600;">Added</span>' : '<i data-lucide="plus" style="width: 16px; height: 16px; color: var(--text-muted);"></i>'}
+      </div>
+    `;
+  }).join('');
+  
+  if(window.lucide) window.lucide.createIcons();
+};
+
+window.toggleCollaboratorSelection = function(hubberObj) {
+  const hubberId = hubberObj._id || hubberObj.id;
+  const isSelected = window.selectedCollaborators.some(c => (c._id || c.id) === hubberId);
+  
+  if (isSelected) {
+    return; // Prevent duplicates / already added
+  } else {
+    window.selectedCollaborators.push(hubberObj);
+  }
+  
+  window.renderCollaboratorChips();
+  // Re-render modal to reflect "Added" state if modal is open
+  const searchInput = document.getElementById('collaborator-search-input');
+  if(searchInput) {
+    window.renderCollaboratorModalList(searchInput.value);
+  } else {
+    window.renderCollaboratorModalList();
+  }
+};
+
+window.removeCollaborator = function(hubberId) {
+  window.selectedCollaborators = window.selectedCollaborators.filter(c => (c._id || c.id) !== hubberId);
+  window.renderCollaboratorChips();
+  
+  // Re-render modal if open
+  const searchInput = document.getElementById('collaborator-search-input');
+  if(document.getElementById('collaborator-modal').style.display === 'flex') {
+    window.renderCollaboratorModalList(searchInput ? searchInput.value : '');
+  }
+};
+
+window.renderCollaboratorChips = function() {
+  const container = document.getElementById('ch-selected-collaborators');
+  const label = document.getElementById('ch-collaborators-label');
+  if (!container) return;
+  
+  if (window.selectedCollaborators.length > 0) {
+    if(label) label.style.display = 'block';
+  } else {
+    if(label) label.style.display = 'none';
+  }
+  
+  const isEnabled = window.collaborationEnabled !== false;
+  
+  container.innerHTML = window.selectedCollaborators.map(c => {
+    const id = c._id || c.id;
+    const avatar = c.profilePic || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=30&q=80';
+    return `
+      <div style="display: flex; align-items: center; gap: 8px; padding: 6px 12px 6px 6px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); border-radius: 20px;">
+        <img src="${avatar}" style="width: 20px; height: 20px; border-radius: 50%; object-fit: cover;">
+        <span style="font-size: 0.8rem; color: var(--text);">${c.name || c.username}</span>
+        ${isEnabled ? `<i data-lucide="x" style="width: 12px; height: 12px; cursor: pointer; color: var(--text-muted);" onclick="window.removeCollaborator('${id}')"></i>` : ''}
+      </div>
+    `;
+  }).join('');
+  
+  if (window.lucide) window.lucide.createIcons();
+};

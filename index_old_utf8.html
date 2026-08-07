@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head>
+﻿<!DOCTYPE html><html lang="en"><head>
   <meta charset="UTF-8">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -10,146 +10,10 @@
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
-  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&amp;family=Inter:wght@300;400;500;600;700&amp;family=Lato&amp;family=Merriweather&amp;family=Montserrat:wght@400;600&amp;family=Nunito&amp;family=Open+Sans&amp;family=Oswald&amp;family=Outfit:wght@400;500;600;700;800&amp;family=Playfair+Display&amp;family=Poppins:wght@400;600&amp;family=Quicksand&amp;family=Raleway&amp;family=Roboto:wght@400;700&amp;family=Ubuntu&amp;display=swap" rel="stylesheet">
-
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&amp;family=Outfit:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
 
   <!-- Lucide Icons -->
   <script src="https://unpkg.com/lucide@latest"></script>
-  <style>
-    .ch-layout-btn {
-      background: rgba(255,255,255,0.05);
-      border: 1px solid rgba(255,255,255,0.1);
-      color: var(--text-main);
-      padding: 8px 12px;
-      border-radius: 8px;
-      font-size: 0.8rem;
-      font-weight: 500;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-    .ch-layout-btn:hover {
-      background: rgba(255,255,255,0.1);
-    }
-    .ch-layout-btn.ch-layout-btn-active {
-      background: var(--primary);
-      color: white;
-      border-color: var(--primary);
-    }
-    
-    /* Layout specific styles for Media Preview Row */
-    .layout-side-by-side {
-      display: grid !important;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-      overflow: hidden !important;
-    }
-    .layout-vertical-split {
-      display: grid !important;
-      grid-template-columns: 1fr;
-      gap: 10px;
-      overflow: hidden !important;
-    }
-    .layout-2x2-grid {
-      display: grid !important;
-      grid-template-columns: 1fr 1fr;
-      grid-auto-rows: auto;
-      gap: 10px;
-      overflow: hidden !important;
-    }
-    .layout-collage {
-      display: grid !important;
-      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-      grid-auto-rows: auto;
-      grid-auto-flow: dense;
-      gap: 10px;
-      overflow: hidden !important;
-    }
-    /* make first item span 2 cols if there's enough space */
-    .layout-collage .ch-preview-item:first-child {
-      grid-column: span 2;
-    }
-    .layout-carousel {
-      display: flex !important;
-      overflow-x: auto !important;
-      scroll-snap-type: x mandatory;
-      flex-wrap: nowrap;
-      gap: 10px;
-    }
-    .layout-carousel .ch-preview-item {
-      width: auto !important;
-      height: 250px !important;
-      flex-shrink: 0;
-      scroll-snap-align: center;
-    }
-    .layout-masonry {
-      column-count: 2;
-      column-gap: 10px;
-      display: block !important;
-    }
-    .layout-masonry .ch-preview-item {
-      break-inside: avoid;
-      margin-bottom: 10px;
-      display: flex;
-      width: 100% !important;
-      height: auto !important;
-    }
-    .layout-single {
-      display: flex !important;
-      flex-direction: column;
-      gap: 10px;
-      overflow: hidden !important;
-    }
-    
-    /* Make sure preview items stretch in grid/columns */
-    .layout-side-by-side .ch-preview-item,
-    .layout-vertical-split .ch-preview-item,
-    .layout-2x2-grid .ch-preview-item,
-    .layout-collage .ch-preview-item,
-    .layout-single .ch-preview-item {
-      width: 100% !important;
-      height: auto !important;
-      aspect-ratio: 1 / 1;
-    }
-    
-    .layout-vertical-split .ch-preview-item {
-      aspect-ratio: 16 / 9;
-    }
-    
-    .layout-single .ch-preview-item {
-      aspect-ratio: auto;
-      height: 250px !important;
-    }
-
-    #review-slider-wrapper .layout-2x2-grid, #story-viewer-content-box .layout-2x2-grid {
-      grid-template-rows: 1fr 1fr;
-      height: 100%;
-    }
-    #review-slider-wrapper .layout-vertical-split, #story-viewer-content-box .layout-vertical-split {
-      grid-template-rows: 1fr 1fr;
-      height: 100%;
-    }
-    #review-slider-wrapper .layout-collage, #story-viewer-content-box .layout-collage {
-      grid-template-rows: 1fr 1fr;
-      height: 100%;
-    }
-    #review-slider-wrapper .layout-side-by-side, #story-viewer-content-box .layout-side-by-side {
-      height: 100%;
-    }
-    #review-slider-wrapper .ch-preview-item, #story-viewer-content-box .ch-preview-item {
-      height: 100% !important;
-      aspect-ratio: auto !important;
-      min-height: 0;
-      min-width: 0;
-    }
-
-    /* Contain Rendering Frame */
-    .ch-preview-item {
-      display: flex !important;
-      align-items: center !important;
-      justify-content: center !important;
-      container-type: size;
-    }
-  </style>
 </head>
 
 <body class="dark-theme">
@@ -174,13 +38,13 @@
               </div>
               <div class="brand-bubble-text">
                 <span class="brand-hi">Hi</span><span class="brand-hyphen">-</span><span class="brand-hubble">HUBBLE</span>
-                <div class="brand-heart">❤️</div>
+                <div class="brand-heart">Γ¥ñ∩╕Å</div>
               </div>
               <div class="brand-bubble-footer">
                 <span class="footer-dot">CONNECT</span>
-                <span class="footer-sep">•</span>
+                <span class="footer-sep">ΓÇó</span>
                 <span class="footer-dot pink">SHARE</span>
-                <span class="footer-sep">•</span>
+                <span class="footer-sep">ΓÇó</span>
                 <span class="footer-dot">BELONG</span>
               </div>
             </div>
@@ -268,7 +132,7 @@
               Didn't receive the code? <a href="#" id="inline-resend-otp-link" style="color: var(--primary, #a855f7); font-weight: 600; text-decoration: none;">Resend in <span id="inline-otp-timer">25</span>s</a>
             </div>
             <button id="btn-back-to-signup" type="button" style="background: none; border: none; color: var(--text-muted, #94a3b8); font-size: 13px; cursor: pointer; text-decoration: underline; margin-top: 2px;">
-              ← Back to Sign Up
+              ΓåÉ Back to Sign Up
             </button>
           </div>
 
@@ -388,7 +252,7 @@
           </div>
           <div class="header-logo-text">
             <span class="brand-hi">Hi</span><span class="brand-hyphen">-</span><span class="brand-hubble">HUBBLE</span>
-            <div class="brand-heart">❤️</div>
+            <div class="brand-heart">Γ¥ñ∩╕Å</div>
           </div>
         </div>
       </div>
@@ -485,7 +349,7 @@
         </nav>
 
         <div class="sidebar-footer">
-          <p>© 2026 Hi-HUBBLE Inc.</p>
+          <p>┬⌐ 2026 Hi-HUBBLE Inc.</p>
           <p>VisionOS Edition v1.2</p>
         </div>
       </aside>
@@ -514,28 +378,11 @@
                     <i data-lucide="chevron-down" style="width: 14px; height: 14px; color: var(--text-muted);"></i>
                   </div>
                 </div>
-                <div class="story-card draft-bubble-container" id="story-drafts-container" style="position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; cursor: pointer;">
-                  <button class="home-draft-bubble" id="story-drafts-btn" title="Saved Drafts">
-                    <i data-lucide="inbox" style="width: 22px; height: 22px;"></i>
-                  </button>
-                  <span class="story-username" style="margin-top: 4px;">Drafts</span>
-                  
-                  <!-- Floating Drafts Panel -->
-                  <div class="home-drafts-dropdown glass-panel" id="home-drafts-panel">
-                    <div class="hdd-header">
-                      <h3 style="margin: 0; font-size: 1rem; font-weight: 600;">Your Drafts</h3>
-                      <button id="close-hdd-btn" class="icon-btn" style="width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.1); border: none; border-radius: 50%; color: var(--text-main); cursor: pointer;"><i data-lucide="x" style="width: 14px; height: 14px;"></i></button>
-                    </div>
-                    <div class="hdd-content" id="hdd-list">
-                      <!-- Empty State (will be overridden by JS if drafts exist) -->
-                      <div class="hdd-empty" id="hdd-empty-state">
-                        <i data-lucide="archive" style="width: 48px; height: 48px; margin-bottom: 16px; color: var(--primary);"></i>
-                        <h4 style="margin: 0 0 8px 0; font-size: 1.1rem; font-weight: 600;">No Drafts Here</h4>
-                        <p style="margin: 0 0 20px 0; font-size: 0.85rem; color: var(--text-muted); text-align: center; line-height: 1.5;">You haven't saved any HUBBs yet.<br>Save a HUBB as Draft and it will appear here.</p>
-                        <button class="hdd-primary-btn" onclick="document.getElementById('close-hdd-btn').click(); window.switchView('create-hubbs');" style="width: 100%; padding: 12px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: var(--text-main); font-weight: 600; cursor: pointer; transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1); backdrop-filter: blur(10px);">Go to Share HUBBs</button>
-                      </div>
-                    </div>
+                <div class="story-card" id="story-drafts-btn" style="display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer;">
+                  <div class="story-avatar-container" style="background: rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center; width: 68px; height: 68px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2);">
+                    <i data-lucide="file-edit" style="color: white;"></i>
                   </div>
+                  <span class="story-username" style="margin-top: 4px;">Drafts</span>
                 </div>
 
               </div>
@@ -587,343 +434,18 @@
           <div class="story-tags-container">
             <div class="tags-carousel">
               <button class="tag-pill active" data-filter-tag="all"><i data-lucide="zap"></i> #trending</button>
-              <button class="tag-pill" data-filter-tag="happy">😊 Happy</button>
-              <button class="tag-pill" data-filter-tag="chill">😎 Chill</button>
-              <button class="tag-pill" data-filter-tag="hype">🔥 Hype</button>
-              <button class="tag-pill" data-filter-tag="love">💖 Love</button>
-              <button class="tag-pill" data-filter-tag="calm">🧘 Calm</button>
-              <button class="tag-pill" data-filter-tag="beats">🎵 Beats</button>
+              <button class="tag-pill" data-filter-tag="happy">≡ƒÿè Happy</button>
+              <button class="tag-pill" data-filter-tag="chill">≡ƒÿÄ Chill</button>
+              <button class="tag-pill" data-filter-tag="hype">≡ƒöÑ Hype</button>
+              <button class="tag-pill" data-filter-tag="love">≡ƒÆû Love</button>
+              <button class="tag-pill" data-filter-tag="calm">≡ƒºÿ Calm</button>
+              <button class="tag-pill" data-filter-tag="beats">≡ƒÄ╡ Beats</button>
             </div>
           </div>
 
 
           <!-- FEED CONTAINER -->
           <div class="feed-container" id="home-feed-posts"><div style="text-align:center; padding: 40px; color: rgba(255,255,255,0.5);">No posts yet.</div></div>
-        </div>
-
-        <!-- ==================== VIEW: CREATE HUBBS ==================== -->
-        <div id="view-create-hubbs" class="view-panel" style="flex-direction: column; height: 100vh; overflow: hidden; padding: 0;">
-          <!-- FIXED HEADER -->
-          <div class="create-hubbs-header" style="flex-shrink: 0; border-bottom: 1px solid rgba(255,255,255,0.08); background: rgba(18,18,18,0.95); z-index: 10;">
-            <div style="display: flex; align-items: center; justify-content: flex-start; max-width: 1400px; margin: 0 auto; padding: 12px 20px; min-height: 68px; gap: 20px;">
-              <button class="back-btn-new" onclick="if (window.chUploads && window.chUploads.length > 0) { window._silentDraftSave = true; if (window.saveCurrentDraft) window.saveCurrentDraft(); } document.getElementById('view-create-hubbs').classList.remove('active'); document.getElementById('view-home').classList.add('active'); document.body.classList.remove('create-hubbs-view-active')" style="display: flex; align-items: center; justify-content: center; gap: 8px; height: 38px; padding: 0 16px; border-radius: 999px; background: linear-gradient(135deg, var(--primary) 0%, #d946ef 100%); border: none; color: white; cursor: pointer; font-weight: 500; font-size: 0.85rem; white-space: nowrap; box-shadow: 0 4px 15px rgba(168,85,247,0.3); transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1); flex-shrink: 0;">
-                <i data-lucide="arrow-left" style="width: 16px; height: 16px;"></i> Back to Home
-              </button>
-              <div style="display: flex; flex-direction: column; justify-content: center;">
-                <h2 style="margin: 0; font-size: 1.2rem; color: white; font-weight: 700; line-height: 1.2;">Share HUBBs</h2>
-                <p style="margin: 4px 0 0 0; color: var(--text-muted); font-size: 0.8rem; line-height: 1.2;">Share your vibe with the world! ✨</p>
-              </div>
-            </div>
-          </div>
-          
-          <!-- SCROLLABLE CONTENT -->
-          <div class="create-hubbs-scroll-area" style="flex: 1; overflow-y: auto; padding: 20px; min-height: 0; padding-bottom: 20px;">
-            <div class="create-hubbs-layout" style="display: grid; grid-template-columns: minmax(280px, 1fr) minmax(280px, 1.2fr) minmax(220px, 0.8fr); gap: 20px; max-width: 1400px; margin: 0 auto;">
-              
-              <!-- LEFT PANEL -->
-              <div class="ch-panel ch-left-panel ch-layout-section" style="padding: 20px; gap: 20px;">
-                <h3 class="ch-panel-title" style="margin: 0; font-size: 1.1rem;">Media</h3>
-                
-                <!-- MEDIA UPLOAD BOX -->
-                <div id="ch-upload-box" class="ch-upload-box upload-card" style="padding: 20px; background: rgba(0,0,0,0.2); border: 1px dashed rgba(255,255,255,0.15); border-radius: 14px; cursor: pointer; transition: all 0.2s;">
-                  
-                  <input type="file" id="ch-hidden-file-input" multiple accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.mp4,.mov,.webm,.mkv,.m4v,.avi,image/*,video/*" style="display: none;" />
-                  
-                  <div id="ch-camera-btn" class="ch-upload-option" style="cursor: pointer;">
-                    <div class="ch-icon-circle" style="width: 40px; height: 40px;"><i data-lucide="camera" style="width: 18px; height: 18px;"></i></div>
-                    <div class="ch-option-text">
-                      <div class="ch-option-title" style="font-size: 0.9rem;">Camera</div>
-                      <div class="ch-option-subtitle" style="font-size: 0.75rem;">Take a photo/video</div>
-                    </div>
-                  </div>
-                  
-                  <div class="ch-divider" style="margin: 12px 0;"><span>OR</span></div>
-                  
-                  <div id="ch-add-media-btn" class="ch-upload-option" style="cursor: pointer;">
-                    <div class="ch-icon-circle" style="width: 40px; height: 40px;"><i data-lucide="image" style="width: 18px; height: 18px;"></i></div>
-                    <div class="ch-option-text">
-                      <div class="ch-option-title" style="font-size: 0.9rem;">Add Photos/Videos</div>
-                      <div class="ch-option-subtitle" style="font-size: 0.75rem;">Upload from device</div>
-                    </div>
-                  </div>
-                  
-                  <div class="ch-supported-formats" style="margin-top: 12px; font-size: 0.75rem;">Supported formats: JPG, PNG,<br>MP4, MOV, GIF &bull; Max size: 100MB</div>
-                </div>
-
-                <!-- DYNAMIC MEDIA PREVIEW SECTION (Hidden by default) -->
-                <div id="ch-media-preview-container" class="ch-media-preview-section" style="margin-top: 0; display: none;">
-                  <h4 class="ch-sub-title" style="margin-bottom: 12px; font-size: 0.95rem;">Media Preview</h4>
-                  
-                  <div id="ch-media-preview-row" class="ch-media-preview-row" style="display: flex; gap: 10px; margin-bottom: 8px; overflow-x: auto; padding-bottom: 4px;">
-                    <!-- Previews injected here via JS -->
-                    
-                    <!-- Persistent Add More button inside preview row -->
-                    <div id="ch-add-more-media-btn" class="ch-add-more-media" style="flex-shrink: 0; border-radius: 10px; border: 1px dashed rgba(255,255,255,0.2); background: rgba(0,0,0,0.1); transition: all 0.2s; cursor: pointer;">
-                      <i data-lucide="plus"></i>
-                    </div>
-                  </div>
-                  
-                  <div class="ch-drag-hint" style="font-size: 0.75rem;">You can drag to reorder media</div>
-                </div>
-
-                <div class="ch-image-tools-section" style="margin-top: 0;">
-                  <h4 class="ch-sub-title" style="margin-bottom: 12px; font-size: 0.95rem;">Image Tools</h4>
-                  <div class="ch-image-tools" style="display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 12px 16px;">
-                    <div class="ch-tool-container" style="display: flex; flex-direction: column; align-items: center; gap: 6px;">
-                      <button class="ch-premium-tool-btn ch-tool-filter" style="width: 42px; height: 42px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: var(--text-main); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;">
-                        <svg class="ch-custom-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M14.31 8l5.74 9.94M9.69 8h11.48M7.38 12l5.74-9.94M9.69 16L3.95 6.06M14.31 16H2.83M16.62 12l-5.74 9.94"/></svg>
-                      </button>
-                      <span style="font-size: 0.7rem; color: var(--text-muted);">Filters</span>
-                    </div>
-                    <div class="ch-tool-container" style="display: flex; flex-direction: column; align-items: center; gap: 6px;">
-                      <button class="ch-premium-tool-btn ch-tool-crop" style="width: 42px; height: 42px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: var(--text-main); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;">
-                        <svg class="ch-custom-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.13 1L6 16a2 2 0 002 2h15"/><path d="M1 6.13L16 6a2 2 0 012 2v15"/></svg>
-                      </button>
-                      <span style="font-size: 0.7rem; color: var(--text-muted);">Crop</span>
-                    </div>
-                    <div class="ch-tool-container" style="display: flex; flex-direction: column; align-items: center; gap: 6px;">
-                      <button class="ch-premium-tool-btn ch-tool-rotate" style="width: 42px; height: 42px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: var(--text-main); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;">
-                        <svg class="ch-custom-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 11-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
-                      </button>
-                      <span style="font-size: 0.7rem; color: var(--text-muted);">Rotate</span>
-                    </div>
-                    <div class="ch-tool-container" style="display: flex; flex-direction: column; align-items: center; gap: 6px;">
-                      <button class="ch-premium-tool-btn ch-tool-adjust" style="width: 42px; height: 42px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: var(--text-main); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;">
-                        <svg class="ch-custom-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7"/><path d="M4 10V3"/><path d="M12 21v-9"/><path d="M12 8V3"/><path d="M20 21v-5"/><path d="M20 12V3"/><path d="M1 14h6"/><path d="M9 8h6"/><path d="M17 16h6"/></svg>
-                      </button>
-                      <span style="font-size: 0.7rem; color: var(--text-muted);">Adjust</span>
-                    </div>
-                    <div class="ch-tool-container" style="display: flex; flex-direction: column; align-items: center; gap: 6px;">
-                      <button class="ch-premium-tool-btn ch-tool-stickers" style="width: 42px; height: 42px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: var(--text-main); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;">
-                        <svg class="ch-custom-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3 7h7l-5 5 2 7-7-4-7 4 2-7-5-5h7z"/></svg>
-                      </button>
-                      <span style="font-size: 0.7rem; color: var(--text-muted);">Stickers</span>
-                    </div>
-                    <div class="ch-tool-container" style="display: flex; flex-direction: column; align-items: center; gap: 6px;">
-                      <button class="ch-premium-tool-btn ch-tool-text" style="width: 42px; height: 42px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: var(--text-main); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;">
-                        <svg class="ch-custom-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V4h16v3"/><path d="M12 4v16"/><path d="M9 20h6"/></svg>
-                      </button>
-                      <span style="font-size: 0.7rem; color: var(--text-muted);">Text</span>
-                    </div>
-                    <div class="ch-tool-container" style="display: flex; flex-direction: column; align-items: center; gap: 6px;">
-                      <button id="ch-tool-music-btn" class="ch-premium-tool-btn ch-tool-music" style="width: 42px; height: 42px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: var(--text-main); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;" onclick="if(window.HubbleEditor) window.HubbleEditor.openMusicSelector();">
-                        <svg class="ch-custom-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
-                      </button>
-                      <span style="font-size: 0.7rem; color: var(--text-muted);">Music</span>
-                    </div>
-                    <div class="ch-tool-container" style="display: flex; flex-direction: column; align-items: center; gap: 6px;">
-                      <button id="ch-tool-location-btn" class="ch-premium-tool-btn ch-tool-location" style="width: 42px; height: 42px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: var(--text-main); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;" onclick="if(window.HubbleEditor) window.HubbleEditor.openLocationSelector();">
-                        <svg class="ch-custom-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
-                      </button>
-                      <span style="font-size: 0.7rem; color: var(--text-muted);">Location</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <!-- CENTER PANEL -->
-              <div class="ch-center-panel" style="display: flex; flex-direction: column; gap: 20px; z-index: 2; flex: 1;">
-                <h3 class="ch-panel-title" style="margin: 0; align-self: flex-start; position: relative; z-index: 3; font-size: 1.1rem; padding-left: 4px;">Content Editor</h3>
-                
-                <!-- SCHEDULING SECTION -->
-                <div class="ch-editor-card" style="padding: 20px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; backdrop-filter: blur(16px);">
-                  <div class="ch-setting-row" style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
-                    <span class="ch-setting-label" style="font-weight: 600; font-size: 0.9rem;">Scheduling</span>
-                    <label class="ch-switch" style="transform: scale(0.9);">
-                      <input type="checkbox" id="ch-schedule-toggle" onchange="window.toggleScheduling(this.checked)">
-                      <span class="ch-slider"><span class="ch-sparkle"></span></span>
-                    </label>
-                  </div>
-                  <div id="ch-schedule-datetime-row" class="ch-datetime-row" style="margin-top: 12px; display: none; gap: 12px; opacity: 0; transition: opacity 0.3s ease;">
-                    <div class="ch-datetime-group" style="flex: 1;">
-                      <span class="ch-datetime-label" style="margin-bottom: 6px; display: block; font-size: 0.75rem; color: var(--text-muted);">Date / dated</span>
-                      <div class="ch-input-with-icon ch-date-input" style="position: relative;">
-                        <input type="date" id="ch-schedule-date" class="ch-time-input" style="width: 100%; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.05); border-radius: 12px; padding: 10px 14px; color: white; font-family: inherit; font-size: 0.85rem; color-scheme: dark;">
-                      </div>
-                    </div>
-                    <div class="ch-datetime-group" style="flex: 1;">
-                      <span class="ch-datetime-label" style="margin-bottom: 6px; display: block; font-size: 0.75rem; color: var(--text-muted);">Time</span>
-                      <div class="ch-input-with-icon ch-time-input" style="position: relative;">
-                        <input type="time" id="ch-schedule-time" class="ch-time-input" style="width: 100%; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.05); border-radius: 12px; padding: 10px 14px; color: white; font-family: inherit; font-size: 0.85rem; color-scheme: dark;">
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- COLLABORATION SECTION -->
-                <div class="ch-editor-card" style="padding: 20px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; backdrop-filter: blur(16px);">
-                  <div class="ch-setting-row" style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
-                    <span class="ch-setting-label" style="font-weight: 600; font-size: 0.9rem;">Collaborate with Hubbers</span>
-                    <label class="ch-switch" style="transform: scale(0.9);">
-                      <input type="checkbox" id="ch-collab-toggle" checked onchange="window.toggleCollaboration(this.checked)">
-                      <span class="ch-slider"><span class="ch-sparkle"></span></span>
-                    </label>
-                  </div>
-                  <div id="ch-collab-content" style="transition: all 0.2s;">
-                    <div id="ch-collab-disabled-msg" style="display: none; padding: 20px; text-align: center; color: var(--text-muted); font-size: 0.85rem;">
-                      <div style="font-size: 1.2rem; margin-bottom: 8px;">🔒</div>
-                      <div style="font-weight: 600; margin-bottom: 4px; color: var(--text);">Collaboration is currently turned OFF.</div>
-                      <div>Turn on Collaboration to invite Hubbers to this HUBB.</div>
-                    </div>
-                    
-                    <div id="ch-collab-active-area">
-                      <div style="margin-top: 12px;">
-                        <span class="ch-datetime-label" id="ch-collaborators-label" style="display:block; margin-bottom:6px; font-size: 0.75rem; color: var(--text-muted); display: none;">Selected Hubbers</span>
-                        <div id="ch-selected-collaborators" style="display: flex; gap: 8px; flex-wrap: wrap;"></div>
-                      </div>
-                      <div style="margin-top: 12px;">
-                        <button id="btn-add-collaborators" class="ch-add-collab-btn" onclick="openCollaboratorModal()" style="background:transparent; border:none; color:var(--primary); display:flex; align-items:center; gap:6px; font-weight:600; cursor:pointer; padding: 0; font-size: 0.85rem;">
-                          <i data-lucide="plus" style="width:14px; height:14px;" class="add-collab-icon"></i> <span class="add-collab-text">Add more collaborators</span> <i data-lucide="chevron-right" style="width:12px; height:12px; margin-left: -2px;" class="add-collab-arrow"></i>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                
-                <!-- MEDIA LAYOUTS SECTION -->
-                <div class="ch-editor-card" id="ch-media-layouts-section" style="padding: 20px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; backdrop-filter: blur(16px); margin-top: 16px;">
-                  <div class="ch-setting-row" style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
-                    <span class="ch-setting-label" style="font-weight: 600; font-size: 0.9rem;">Media Layouts</span>
-                  </div>
-                  <div id="ch-layouts-disabled-msg" style="padding: 10px 0; text-align: left; color: var(--text-muted); font-size: 0.85rem;">
-                    Upload two or more media items to enable layouts.
-                  </div>
-                  <div id="ch-layouts-options" style="display: none; gap: 8px; flex-wrap: wrap;">
-                    <button class="ch-layout-btn" data-layout="side-by-side" onclick="window.HubbleEditor.setLayout('side-by-side')">Side by Side</button>
-                    <button class="ch-layout-btn" data-layout="vertical-split" onclick="window.HubbleEditor.setLayout('vertical-split')">Vertical Split</button>
-                    <button class="ch-layout-btn" data-layout="2x2-grid" onclick="window.HubbleEditor.setLayout('2x2-grid')">2×2 Grid</button>
-                    <button class="ch-layout-btn ch-layout-btn-active" data-layout="auto" onclick="window.HubbleEditor.setLayout('auto')">Auto Layout</button>
-                  </div>
-                </div>
-              </div>
-              
-              <!-- RIGHT PANEL (Drafts) -->
-              <div class="ch-panel ch-right-panel draft-card" style="align-self: start; padding: 16px;">
-                <div class="ch-drafts-header" style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
-                  <h3 style="margin:0; font-size:1rem; font-weight:600;">Drafts</h3>
-                  <span class="ch-drafts-count" style="color: var(--primary); font-weight: bold; font-size: 0.9rem;" id="drafts-count">0</span>
-                </div>
-                <div class="ch-drafts-list" id="ch-drafts-list" style="display: flex; flex-direction: column; gap: 12px;">
-                  <!-- Empty State -->
-                  <div id="drafts-empty-state" style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px 16px; text-align: center; border: 1px dashed rgba(255,255,255,0.1); border-radius: 12px; background: rgba(0,0,0,0.2);">
-                    <i data-lucide="archive" style="width: 48px; height: 48px; color: rgba(255,255,255,0.2); margin-bottom: 16px;" class="drafts-empty-icon"></i>
-                    <h4 style="margin: 0 0 8px 0; font-size: 1.1rem; color: var(--text-main);">No Drafts Yet</h4>
-                    <p style="margin: 0 0 16px 0; font-size: 0.85rem; color: var(--text-muted);">Your saved HUBBs will appear here.</p>
-                    <button class="ch-see-all-drafts hdd-primary-btn" onclick="document.getElementById('ch-hidden-file-input').click()" style="margin-top:4px; padding:10px 16px; background: rgba(255,255,255,0.05); color: var(--text-main); border: 1px solid rgba(255,255,255,0.1); border-radius:8px; font-weight:600; cursor:pointer; font-size: 0.85rem; transition: all 0.2s;">Start a new HUBB</button>
-                  </div>
-                </div>
-                <button class="ch-see-all-drafts text-btn" id="see-all-drafts-btn" style="display: none; width:100%; margin-top:16px; padding:8px; background:rgba(108,59,255,0.1); color:var(--primary); border:none; border-radius:8px; font-weight:600; cursor:pointer; font-size: 0.85rem;">See All Drafts</button>
-              </div>
-              
-            </div>
-          </div>
-          
-          <!-- FIXED BOTTOM BAR -->
-          <div class="ch-bottom-bar" style="flex-shrink: 0; display: flex; padding: 16px 20px; background: rgba(18,18,18,0.95); border-top: 1px solid rgba(255,255,255,0.08); z-index: 10;">
-            <div style="max-width: 1400px; width: 100%; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;">
-              <button class="ch-save-draft-btn" style="width: 280px; max-width: 100%; display:flex; align-items:center; justify-content:center; gap:10px; padding: 14px; border-radius: 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: white; cursor:pointer; min-height: unset; margin: 0; transition: all 0.2s;" onclick="if(window.saveCurrentDraft) window.saveCurrentDraft();">
-                <i data-lucide="file-text" style="width:20px; height:20px;"></i>
-                <div class="ch-btn-text" style="text-align:left;">
-                  <div class="ch-btn-title" style="font-weight:600; font-size:0.9rem;">Save as Draft</div>
-                  <div class="ch-btn-subtitle" style="font-size:0.75rem; color:var(--text-muted);">Last saved: 2m ago</div>
-                </div>
-              </button>
-              <button class="ch-next-btn" style="width: 280px; max-width: 100%; display:flex; flex-direction:column; align-items:center; justify-content:center; padding: 14px; border-radius: 12px; background: linear-gradient(135deg, var(--primary) 0%, #d946ef 100%); border: none; color: white; cursor:pointer; box-shadow: 0 4px 15px rgba(168,85,247,0.4); min-height: unset; margin: 0; transition: all 0.2s;" onclick="handleReviewNavigation()">
-                <div style="display:flex; align-items:center; gap:6px;">
-                  <span class="ch-btn-title" style="font-weight:700; font-size:1rem;">Next</span>
-                  <i data-lucide="arrow-right" style="width:18px; height:18px;"></i>
-                </div>
-                <div class="ch-btn-subtitle" style="font-size:0.75rem; opacity:0.9;">Preview and publish</div>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <!-- ==================== VIEW: REVIEW HUBBS ==================== -->
-        <div id="view-review-hubbs" class="view-panel" style="flex-direction: column; height: 100vh; overflow: hidden; padding: 0;">
-          <!-- FIXED HEADER -->
-          <div class="review-header" style="flex-shrink: 0; padding: 24px 24px 16px 24px; background: rgba(18,18,18,0.95); z-index: 10;">
-            <div style="display: flex; align-items: center; justify-content: space-between; max-width: 1400px; margin: 0 auto; gap: 20px; flex-wrap: wrap;">
-              <!-- Left side: Previous + Title -->
-              <div style="display: flex; align-items: center; gap: 20px;">
-                <button onclick="switchView('create-hubbs')" style="display: flex; align-items: center; justify-content: center; gap: 8px; height: 38px; padding: 0 16px; border-radius: 999px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: white; cursor: pointer; font-weight: 500; font-size: 0.85rem; white-space: nowrap; transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1); flex-shrink: 0;" onmouseover="this.style.background='rgba(255,255,255,0.1)'; this.style.transform='translateY(-2px)';" onmouseout="this.style.background='rgba(255,255,255,0.05)'; this.style.transform='none';">
-                  <i data-lucide="arrow-left" style="width: 16px; height: 16px;"></i> Previous
-                </button>
-                <div style="display: flex; flex-direction: column; justify-content: center;">
-                  <h2 style="margin: 0; font-size: 1.2rem; color: white; font-weight: 700; line-height: 1.2;">Preview</h2>
-                  <p style="margin: 4px 0 0 0; color: var(--text-muted); font-size: 0.8rem; line-height: 1.2;">Preview your HUBB before publishing ✨</p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- MAIN PREVIEW CONTAINER (scrollable) -->
-          <div style="flex: 1; overflow: hidden; padding: 24px; display: flex; flex-direction: column; align-items: stretch; min-height: 0;">
-            <div style="flex: 1; min-height: 0; width: 100%; margin: 0 auto; display: flex; flex-direction: column; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); border-radius: 20px; padding: 12px; box-shadow: 0 16px 40px rgba(0,0,0,0.2);">
-              
-              <!-- EMPTY STATE (Hidden by default) -->
-              <div id="review-empty-state" style="display: none; width: 100%; height: 100%; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 16px;">
-                <div style="width: 120px; height: 120px; border-radius: 50%; background: rgba(130, 80, 255, 0.1); display: flex; align-items: center; justify-content: center; margin-bottom: 8px;">
-                  <i data-lucide="image-off" style="width: 60px; height: 60px; color: var(--primary);"></i>
-                </div>
-                <h3 style="margin: 0; font-size: 1.5rem; color: #1F1235; font-weight: 700;" class="empty-state-title">No HUBB Selected</h3>
-                <p style="margin: 0; color: #65617C; max-width: 300px; line-height: 1.4;" class="empty-state-desc">Please upload a photo or video before previewing.</p>
-                <div style="display: flex; gap: 12px; margin-top: 12px;">
-                  <button onclick="switchView('create-hubbs')" style="padding: 10px 24px; border-radius: 8px; background: rgba(0,0,0,0.05); border: 1px solid rgba(0,0,0,0.1); color: #1F1235; font-weight: 600; cursor: pointer; transition: all 0.2s;" class="empty-state-back-btn">Back</button>
-                  <button onclick="switchView('create-hubbs'); setTimeout(()=>document.getElementById('ch-hidden-file-input').click(), 300);" style="padding: 10px 24px; border-radius: 8px; background: linear-gradient(135deg, var(--primary) 0%, #a855f7 100%); border: none; color: white; font-weight: 600; cursor: pointer; box-shadow: 0 4px 12px rgba(168,85,247,0.3); transition: all 0.2s;">Upload Media</button>
-                </div>
-              </div>
-
-              <!-- COMPARISON SLIDER CONTAINER -->
-              <div id="review-slider-wrapper" style="position: relative; flex: 1; min-height: 0; width: 100%; min-width: 900px; border-radius: 12px; overflow: hidden; box-shadow: 0 20px 50px rgba(0,0,0,0.5); background: #000;">
-                
-                <!-- After Media (Full background, Edited) -->
-                <div id="review-after-container" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1;">
-                  <!-- Injected via JS -->
-                  <div style="position: absolute; top: 12px; right: 12px; background: rgba(0,0,0,0.7); color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; backdrop-filter: blur(4px); z-index: 10;">EDITED POST</div>
-                </div>
-
-                <!-- Before Media (Clipped, Raw) -->
-                <div id="review-before-container" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; clip-path: inset(0 50% 0 0); z-index: 2;">
-                  <!-- Injected via JS -->
-                  <div style="position: absolute; top: 12px; left: 12px; background: rgba(0,0,0,0.7); color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; backdrop-filter: blur(4px); z-index: 10;">RAW POST</div>
-                  <!-- The divider line that moves with the handle -->
-                  <div id="review-slider-line" style="position: absolute; top: 0; right: 0; width: 2px; height: 100%; background: #6D3CFF; box-shadow: 0 0 10px rgba(108, 59, 255, 0.5); z-index: 5;"></div>
-                </div>
-
-                <!-- Handle -->
-                <div id="review-slider-handle" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 36px; height: 36px; background: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.3); z-index: 15; cursor: col-resize;">
-                  <i data-lucide="chevrons-left-right" style="color: #111; width: 20px; height: 20px;"></i>
-                </div>
-
-              </div>
-            </div>
-          </div>
-
-          <!-- BOTTOM ACTION BAR -->
-          <div style="flex-shrink: 0; padding: 16px 24px; background: rgba(18,18,18,0.95); border-top: 1px solid rgba(255,255,255,0.08); z-index: 10;">
-            <div style="display: flex; align-items: center; justify-content: space-between; max-width: 1400px; margin: 0 auto; gap: 16px;">
-              <!-- Save as Draft -->
-              <button id="review-save-draft-btn" style="display:flex; align-items:center; justify-content:center; gap:10px; height: 42px; padding: 0 20px; border-radius: 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: white; cursor:pointer; transition: all 0.2s;" onclick="if(window.saveCurrentDraft) window.saveCurrentDraft();">
-                <i data-lucide="file-text" style="width:16px; height:16px;"></i>
-                <div style="display:flex; flex-direction:column; align-items:flex-start; line-height: 1.1;">
-                  <span style="font-weight:500; font-size:0.85rem;">Save as Draft</span>
-                  <span id="review-draft-time" style="font-size:0.7rem; color:var(--text-muted);">Unsaved</span>
-                </div>
-              </button>
-
-              <div style="display: flex; gap: 12px; align-items: center;">
-                <div id="review-scheduled-info" style="display: none; align-items: center; gap: 10px; height: 42px; padding: 0 16px; border-radius: 12px; background: rgba(168,85,247,0.1); border: 1px solid rgba(168,85,247,0.3); color: #e879f9;">
-                  <i data-lucide="clock" style="width: 16px; height: 16px;"></i>
-                  <span id="review-scheduled-text" style="font-weight: 600; font-size: 0.85rem;">Scheduled</span>
-                </div>
-                <!-- Publish Button -->
-                <button id="review-publish-btn" onclick="publishHubb()" style="display: flex; align-items: center; justify-content: center; gap: 8px; height: 42px; padding: 0 24px; border-radius: 12px; background: linear-gradient(135deg, var(--primary) 0%, #d946ef 100%); border: none; color: white; cursor: pointer; font-weight: 600; font-size: 0.9rem; box-shadow: 0 4px 15px rgba(168,85,247,0.3); transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1); flex-shrink: 0;">
-                  <span id="review-publish-text">Publish Hubb</span> <i id="review-publish-icon" data-lucide="upload-cloud" style="width: 18px; height: 18px;"></i>
-                </button>
-              </div>
-            </div>
-          </div>
         </div>
 
         <!-- ==================== VIEW: SEARCH ==================== -->
@@ -1013,10 +535,10 @@
                   <button class="text-btn">Clear</button>
                 </div>
                 <div class="search-recent-items">
-                  <div class="search-recent-item"><span>music festival</span><button aria-label="Remove">×</button>
+                  <div class="search-recent-item"><span>music festival</span><button aria-label="Remove">├ù</button>
                   </div>
-                  <div class="search-recent-item"><span>nightlife</span><button aria-label="Remove">×</button></div>
-                  <div class="search-recent-item"><span>chill hubs</span><button aria-label="Remove">×</button></div>
+                  <div class="search-recent-item"><span>nightlife</span><button aria-label="Remove">├ù</button></div>
+                  <div class="search-recent-item"><span>chill hubs</span><button aria-label="Remove">├ù</button></div>
                 </div>
               </div>
             </div>
@@ -1049,9 +571,9 @@
                   <div class="reel-left-info">
                     <div class="reel-user">
                       <img src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&amp;fit=crop&amp;w=100&amp;h=100&amp;q=80" alt="Jamie Sun">
-                      <span>Jamie Sun • <strong class="reel-follow-btn">Follow</strong></span>
+                      <span>Jamie Sun ΓÇó <strong class="reel-follow-btn">Follow</strong></span>
                     </div>
-                    <p class="reel-caption">Coding the main float engine. HMR speed check! 💻🚀 #javascript #vite #code
+                    <p class="reel-caption">Coding the main float engine. HMR speed check! ≡ƒÆ╗≡ƒÜÇ #javascript #vite #code
                     </p>
                     <div class="reel-music"><i data-lucide="music" class="music-icon-spin"></i> <span>Original Audio -
                         Jamie Sun</span></div>
@@ -1116,9 +638,9 @@
                   <div class="reel-left-info">
                     <div class="reel-user">
                       <img src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&amp;fit=crop&amp;w=150&amp;h=150&amp;q=80" alt="Alex Rivers">
-                      <span>Alex Rivers • <strong class="reel-follow-btn">Follow</strong></span>
+                      <span>Alex Rivers ΓÇó <strong class="reel-follow-btn">Follow</strong></span>
                     </div>
-                    <p class="reel-caption">Offsite trip of a lifetime. Highly recommend the lake view 🏔️✨ #nature
+                    <p class="reel-caption">Offsite trip of a lifetime. Highly recommend the lake view ≡ƒÅö∩╕ÅΓ£¿ #nature
                       #hubs</p>
                     <div class="reel-music"><i data-lucide="music" class="music-icon-spin"></i> <span>Original Audio -
                         Alex Rivers</span></div>
@@ -1305,7 +827,7 @@
 
                     <!-- Received Message -->
                     <div class="chat-bubble received">
-                      <div class="bubble-content">Hey Alex! 👋</div>
+                      <div class="bubble-content">Hey Alex! ≡ƒæï</div>
                       <div class="bubble-time">9:40 AM <i data-lucide="sparkle" class="ai-status"></i></div>
                     </div>
 
@@ -1317,13 +839,13 @@
 
                     <!-- Received Message -->
                     <div class="chat-bubble received">
-                      <div class="bubble-content">I'm good! Want to watch something together? 🎁</div>
+                      <div class="bubble-content">I'm good! Want to watch something together? ≡ƒÄü</div>
                       <div class="bubble-time">9:41 AM</div>
                     </div>
 
                     <!-- Sent Message -->
                     <div class="chat-bubble sent">
-                      <div class="bubble-content">Sure! Let's Watch Together 🥳</div>
+                      <div class="bubble-content">Sure! Let's Watch Together ≡ƒÑ│</div>
                       <div class="bubble-time">9:42 AM <i data-lucide="diamond"></i></div>
                     </div>
 
@@ -1331,9 +853,9 @@
                     <div class="chat-bubble received-react">
                       <div class="bubble-content">Awesome, clicking the Watch Together widget now!</div>
                       <div class="bubble-reactions-row">
-                        <span class="react-pill">❤️</span>
-                        <span class="react-pill">😍</span>
-                        <span class="react-pill">🔥</span>
+                        <span class="react-pill">Γ¥ñ∩╕Å</span>
+                        <span class="react-pill">≡ƒÿì</span>
+                        <span class="react-pill">≡ƒöÑ</span>
                       </div>
                       <div class="bubble-time">9:42 AM</div>
                     </div>
@@ -1479,13 +1001,13 @@
                       <div class="emoji-picker-header">
                         <div class="emoji-picker-tabs">
                           <button class="emoji-category-btn active" data-emoji-category="All">All</button>
-                          <button class="emoji-category-btn" data-emoji-category="Smileys">😊</button>
-                          <button class="emoji-category-btn" data-emoji-category="People">👋</button>
-                          <button class="emoji-category-btn" data-emoji-category="Animals">🐶</button>
-                          <button class="emoji-category-btn" data-emoji-category="Food">🍕</button>
-                          <button class="emoji-category-btn" data-emoji-category="Activities">⚽</button>
-                          <button class="emoji-category-btn" data-emoji-category="Travel">✈️</button>
-                          <button class="emoji-category-btn" data-emoji-category="Objects">💡</button>
+                          <button class="emoji-category-btn" data-emoji-category="Smileys">≡ƒÿè</button>
+                          <button class="emoji-category-btn" data-emoji-category="People">≡ƒæï</button>
+                          <button class="emoji-category-btn" data-emoji-category="Animals">≡ƒÉ╢</button>
+                          <button class="emoji-category-btn" data-emoji-category="Food">≡ƒìò</button>
+                          <button class="emoji-category-btn" data-emoji-category="Activities">ΓÜ╜</button>
+                          <button class="emoji-category-btn" data-emoji-category="Travel">Γ£ê∩╕Å</button>
+                          <button class="emoji-category-btn" data-emoji-category="Objects">≡ƒÆí</button>
                         </div>
                         <input class="emoji-picker-search" type="search" placeholder="Search" aria-label="Search emoji">
                       </div>
@@ -1704,10 +1226,8 @@
             <h4>Suggested Hubbers</h4>
             <button class="see-all-btn" id="sug-see-all-btn">See All</button>
           </div>
-          <div class="suggested-users-list" id="suggested-users-list">
-            <!-- Dynamically populated by loadFollowSuggestions() -->
-          </div>
-        </div>
+          
+        <div style="padding: 20px; text-align: center; color: rgba(255, 255, 255, 0.5);">No suggestions available.</div></div>
 
         <!-- Trending Content Card -->
         <div class="sidebar-card trending-card glass-panel">
@@ -1864,7 +1384,7 @@
       <img src="" id="story-creation-preview" style="flex: 1; width: 100%; border-radius: 16px; object-fit: contain; background: black; min-height: 0;">
       <div style="display: flex; gap: 16px; justify-content: center; padding-top: 12px;">
         <button id="story-creation-cancel" class="btn btn-secondary" style="padding: 12px 24px; border-radius: 30px; border: 1px solid rgba(255,255,255,0.2); background: transparent; color: white; font-weight: 600;">Cancel</button>
-        <button id="story-creation-draft" class="btn btn-secondary" style="padding: 12px 24px; border-radius: 30px; border: 1px solid rgba(255,255,255,0.2); background: transparent; color: white; font-weight: 600;" onclick="if(window.saveCurrentDraft) window.saveCurrentDraft();">Save as Draft</button>
+        <button id="story-creation-draft" class="btn btn-secondary" style="padding: 12px 24px; border-radius: 30px; border: 1px solid rgba(255,255,255,0.2); background: transparent; color: white; font-weight: 600;">Save as Draft</button>
         <button id="story-creation-publish" class="btn btn-primary" style="padding: 12px 32px; border-radius: 30px; background: var(--primary-gradient); color: white; border: none; font-weight: 600;">Publish</button>
       </div>
     </div>
@@ -2085,7 +1605,7 @@
           A premium social hub connecting creators, thinkers, and builders globally. Experience next-gen privacy, dynamic reels, and interactive hubs.
         </p>
         <p style="margin: 15px 0 0 0; font-size: 0.75rem; opacity: 0.5;">
-          © 2026 HI-HUBBLE Inc. All rights reserved.
+          ┬⌐ 2026 HI-HUBBLE Inc. All rights reserved.
         </p>
       </div>
 
@@ -2254,48 +1774,6 @@
     </div>
   </div>
 
-  <!-- ==================== VIEW: COLLABORATE WITH HUBBERS MODAL ==================== -->
-  <style>
-    .light-theme #collaborator-modal h3 {
-      color: #FFFFFF !important;
-    }
-    .light-theme #collaborator-search-input {
-      color: #FFFFFF !important;
-    }
-    .light-theme #collaborator-search-input::placeholder {
-      color: rgba(255, 255, 255, 0.65) !important;
-    }
-    .light-theme #collaborator-modal h4 {
-      color: #FFFFFF !important;
-      font-weight: 600 !important;
-    }
-    .light-theme #collaborator-modal p {
-      color: rgba(255, 255, 255, 0.80) !important;
-    }
-    .light-theme #collaborator-modal svg.lucide-x {
-      color: #FFFFFF !important;
-      transition: color 0.2s ease;
-    }
-    .light-theme #collaborator-modal svg.lucide-x:hover {
-      color: #A855F7 !important;
-    }
-    .light-theme #collaborator-modal svg.lucide-users {
-      color: #A855F7 !important;
-    }
-  </style>
-  <div id="collaborator-modal" class="modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 9999; background: rgba(0,0,0,0.5); align-items: center; justify-content: center; backdrop-filter: blur(5px);">
-    <div style="background: var(--bg-card, #1a1a1a); border: 1px solid rgba(255,255,255,0.05); border-radius: 16px; width: 90%; max-width: 400px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); display: flex; flex-direction: column; max-height: 80vh;">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-        <h3 style="margin: 0; font-size: 1.1rem; color: var(--text);">Collaborate with Hubbers</h3>
-        <i data-lucide="x" style="cursor: pointer; color: var(--text-muted);" onclick="closeCollaboratorModal()"></i>
-      </div>
-      <input type="text" id="collaborator-search-input" placeholder="Search by name or username..." oninput="renderCollaboratorModalList(this.value)" style="width: 100%; padding: 10px 14px; border-radius: 12px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); margin-bottom: 16px; color: var(--text);">
-      <div id="collaborator-list-container" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;">
-         <!-- Users injected here -->
-      </div>
-    </div>
-  </div>
-
   <script type="module" src="/src/main.js"></script>
   <!-- FORWARD MESSAGE MODAL -->
   <div id="forward-message-modal" class="auth-modal">
@@ -2336,19 +1814,4 @@
 
 
 
-  <!-- Music Selector Modal -->
-  <div id="he-music-modal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); backdrop-filter: blur(12px); z-index: 10000; display: none; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.3s;">
-    <div style="width: 90%; max-width: 400px; background: rgba(20,20,25,0.85); border: 1px solid rgba(255,255,255,0.1); border-radius: 24px; padding: 24px; box-shadow: 0 20px 50px rgba(0,0,0,0.5); display: flex; flex-direction: column; gap: 16px; position: relative;">
-      <h3 style="margin: 0; font-size: 1.2rem; color: white; display: flex; align-items: center; gap: 8px;">
-        <i data-lucide="music" style="color: var(--primary);"></i> Add Music
-      </h3>
-      <button onclick="document.getElementById('he-music-modal').style.opacity = '0'; setTimeout(() => document.getElementById('he-music-modal').style.display = 'none', 300);" style="position: absolute; top: 20px; right: 20px; background: none; border: none; color: white; cursor: pointer; opacity: 0.7;"><i data-lucide="x"></i></button>
-      
-      <div id="he-music-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto;">
-        <!-- Tracks injected here via JS -->
-      </div>
-      
-      <button id="he-music-remove-btn" onclick="if(window.HubbleEditor) window.HubbleEditor.removeMusic();" style="display: none; padding: 12px; border-radius: 12px; background: rgba(255,59,48,0.1); color: #ff3b30; border: 1px solid rgba(255,59,48,0.2); font-weight: 600; cursor: pointer; transition: all 0.2s;">Remove Music</button>
-    </div>
-  </div>
 </body></html>

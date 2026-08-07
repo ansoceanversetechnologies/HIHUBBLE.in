@@ -4611,7 +4611,9 @@ body.dark-theme .floating-nav-container {
     display: none; /* Hide trending and suggested */
   }
   
-  body.chats-view-active #app-main-layout {
+  body.chats-view-active #app-main-layout,
+  body.create-hubbs-view-active #app-main-layout,
+body.review-hubbs-view-active #app-main-layout {
     grid-template-columns: 80px 1fr; /* Maintain same for chats */
   }
   
@@ -4654,7 +4656,9 @@ body.dark-theme .floating-nav-container {
     padding: 0 8px;
   }
   
-  body.chats-view-active #app-main-layout {
+  body.chats-view-active #app-main-layout,
+  body.create-hubbs-view-active #app-main-layout,
+body.review-hubbs-view-active #app-main-layout {
     grid-template-columns: 1fr;
   }
   
@@ -5779,7 +5783,7 @@ body.dark-theme .floating-nav-container {
 /* TABLET (Max Width 1024px) */
 @media screen and (max-width: 1024px) {
   .main-layout {
-    grid-template-columns: 280px 1fr !important;
+    grid-template-columns: 280px minmax(0, 1fr) !important;
   }
   
   #app-sidebar-right,
@@ -5795,8 +5799,10 @@ body.dark-theme .floating-nav-container {
     grid-template-columns: 1fr !important;
   }
   
-  body.chats-view-active #app-main-layout {
-    grid-template-columns: 280px 1fr !important;
+  body.chats-view-active #app-main-layout,
+  body.create-hubbs-view-active #app-main-layout,
+body.review-hubbs-view-active #app-main-layout {
+    grid-template-columns: 280px minmax(0, 1fr) !important;
   }
 }
 
@@ -5818,7 +5824,9 @@ body.dark-theme .floating-nav-container {
     display: none !important;
   }
   
-  body.chats-view-active #app-main-layout {
+  body.chats-view-active #app-main-layout,
+  body.create-hubbs-view-active #app-main-layout,
+body.review-hubbs-view-active #app-main-layout {
     grid-template-columns: 1fr !important;
   }
   

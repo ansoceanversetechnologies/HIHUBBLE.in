@@ -72,4 +72,44 @@ if (!process.env.NO_AUTO_LISTEN && (process.env.NODE_ENV !== 'production' || !pr
   });
 }
 
+// Background Scheduler for Scheduled HUBBs
+import { supabase } from './supabase.js';
+
+setInterval(async () => {
+  try {
+    const now = new Date().toISOString();
+    const { data: scheduledStories, error } = await supabase
+      .from('stories')
+      .select('_id, scheduledAt')
+      .eq('status', 'scheduled')
+      .lte('scheduledAt', now);
+
+    if (error) {
+      console.error('[Scheduler] Error fetching scheduled stories:', error.message);
+      return;
+    }
+
+    if (scheduledStories && scheduledStories.length > 0) {
+      for (const story of scheduledStories) {
+        const { error: updateError } = await supabase
+          .from('stories')
+          .update({
+            status: 'published',
+            isScheduled: false,
+            createdAt: now // Reset createdAt so it appears at the top of the feed now
+          })
+          .eq('_id', story._id);
+        
+        if (updateError) {
+          console.error(`[Scheduler] Failed to publish story ${story._id}:`, updateError.message);
+        } else {
+          console.log(`[Scheduler] Successfully auto-published scheduled story ${story._id}`);
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[Scheduler] Unexpected error:', err.message);
+  }
+}, 60000); // Check every minute
+
 export default app;
