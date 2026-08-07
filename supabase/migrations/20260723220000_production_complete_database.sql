@@ -201,6 +201,7 @@ CREATE TABLE IF NOT EXISTS public.comments (
     author_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
     post_id UUID REFERENCES public.posts(id) ON DELETE CASCADE,
     reel_id UUID REFERENCES public.reels(id) ON DELETE CASCADE,
+    parent_comment_id UUID REFERENCES public.comments(id) ON DELETE CASCADE,
     content TEXT NOT NULL CHECK (char_length(content) <= 1000),
     like_count INT DEFAULT 0 CHECK (like_count >= 0),
     reply_count INT DEFAULT 0 CHECK (reply_count >= 0),
@@ -217,7 +218,9 @@ CREATE TABLE IF NOT EXISTS public.likes (
     comment_id UUID REFERENCES public.comments(id) ON DELETE CASCADE,
     reel_id UUID REFERENCES public.reels(id) ON DELETE CASCADE,
     story_id UUID REFERENCES public.stories(id) ON DELETE CASCADE,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT unique_post_user_like UNIQUE (user_id, post_id),
+    CONSTRAINT unique_comment_user_like UNIQUE (user_id, comment_id)
 );
 
 -- ------------------------------------------------------------------------------

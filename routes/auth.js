@@ -7,7 +7,7 @@ import { otps, sendOTPEmailHelper } from '../utils.js';
 const router = express.Router();
 
 // Secret from .env for signing JWTs (must match Supabase JWT secret to work with RLS)
-const JWT_SECRET = process.env.SUPABASE_JWT_SECRET || 'super-secret-jwt-token-replace-me';
+const JWT_SECRET = process.env.SUPABASE_JWT_SECRET || process.env.VITE_SUPABASE_ANON_KEY || 'hihubble-secure-jwt-secret';
 
 // ==========================================
 // 1. SIGNUP OTP: Generate 6-digit OTP and send email
@@ -50,13 +50,11 @@ router.post('/api/auth/signup-otp', async (req, res) => {
     if (result.success) {
       res.json({
         success: true,
-        message: '6-digit verification code sent to your email.',
-        devFallbackOtp: result.devFallbackOtp
+        message: '6-digit verification code sent to your email.'
       });
     } else {
       res.status(result.cooldown ? 429 : 500).json({
         error: result.details || 'Failed to send OTP via email.',
-        devFallbackOtp: result.devFallbackOtp,
         cooldown: result.cooldown
       });
     }
@@ -106,17 +104,7 @@ router.post('/api/auth/verify-action-otp', async (req, res) => {
 
     if (createError) {
       console.error('Error creating profile in Supabase profiles table:', createError);
-      // Fallback object if record already inserted or schema variation
-      userObj = {
-        id: 'usr_' + Date.now(),
-        username: username,
-        email: normalizedEmail,
-        full_name: fullName,
-        phone_number: phoneNumber
-      };
-    } else {
-      try { await supabase.from('settings').insert([{ user_id: userObj.id }]); } catch (_) {}
-      try { await supabase.from('privacy_settings').insert([{ user_id: userObj.id }]); } catch (_) {}
+      return res.status(500).json({ error: `Failed to create user profile in database: ${createError.message}. Please check database table permissions.` });
     }
 
     const userId = userObj.id;
@@ -143,7 +131,7 @@ router.post('/api/auth/verify-action-otp', async (req, res) => {
 
     // Issue JWT token
     const token = jwt.sign(
-      { sub: userId, role: 'authenticated', email: normalizedEmail, aud: 'authenticated' },
+      { id: userId, sub: userId, username: userObj.username, email: normalizedEmail, role: 'authenticated', aud: 'authenticated' },
       JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -219,12 +207,18 @@ router.post('/api/auth/login', async (req, res) => {
 
     // Track active user in public.online_users table
     try {
-      await supabase.from('online_users').upsert([{ user_id: user.id, last_seen_at: nowIso }]);
+      await supabase.from('online_users').upsert({
+        user_id: user.id,
+        status: 'online',
+        login_at: nowIso,
+        last_seen: nowIso,
+        updated_at: nowIso
+      }, { onConflict: 'user_id' });
     } catch (_) {}
 
     // Issue JWT token
     const token = jwt.sign(
-      { sub: user.id, role: 'authenticated', email: user.email, aud: 'authenticated' },
+      { id: user.id, sub: user.id, username: user.username, email: user.email, role: 'authenticated', aud: 'authenticated' },
       JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -327,7 +321,7 @@ router.post('/api/auth/forgot-otp', async (req, res) => {
     if (result.success) {
       res.json({ success: true, message: 'OTP sent successfully.', email: user.email });
     } else {
-      res.status(500).json({ error: `Failed to send OTP`, devFallbackOtp: result.devFallbackOtp });
+      res.status(500).json({ error: `Failed to send OTP` });
     }
   } catch (err) {
     res.status(500).json({ error: err.message });
