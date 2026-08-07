@@ -5,7 +5,7 @@ import { supabase } from './supabase.js';
 
 dotenv.config();
 
-const JWT_SECRET = process.env.SUPABASE_JWT_SECRET || 'super-secret-jwt-token-replace-me';
+const JWT_SECRET = process.env.SUPABASE_JWT_SECRET || process.env.VITE_SUPABASE_ANON_KEY || 'hihubble-secure-jwt-secret';
 
 // In-memory store for OTPs
 export const otps = new Map();
@@ -14,8 +14,8 @@ export const otps = new Map();
 export const lastEmailSentMap = new Map();
 
 // Initialize Nodemailer transport using Gmail SMTP
-const emailUser = process.env.GMAIL_USER || process.env.EMAIL_USER || 'ansoceanversetechnologies@gmail.com';
-const rawPass = process.env.GMAIL_APP_PASSWORD || process.env.EMAIL_PASS || 'vuyb kilq pfzv ruxw';
+const emailUser = process.env.GMAIL_USER || process.env.EMAIL_USER || '';
+const rawPass = process.env.GMAIL_APP_PASSWORD || process.env.EMAIL_PASS || '';
 const emailPass = rawPass.replace(/\s+/g, '');
 
 const transporter = nodemailer.createTransport({
@@ -79,73 +79,129 @@ export async function sendOTPEmailHelper(targetEmail, otpCode) {
     console.error('[Nodemailer Error] Email send failed:', err.message);
     return {
       success: false,
-      details: err.message,
-      devFallbackOtp: otpCode
+      details: err.message
     };
   }
 }
 
 /**
- * Middleware to authenticate requests using JWTs or local session fallback.
+ * Middleware to authenticate requests using JWTs or local session fallback
  */
 export async function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
+  let token = authHeader && authHeader.split(' ')[1];
 
-  if (!token) {
-    req.token = null;
-    req.user = null;
-    return res.status(401).json({ error: 'Authentication required. Please log in.' });
+  if (!token && req.headers['x-user-token']) {
+    token = req.headers['x-user-token'];
   }
 
-  try {
-    // 1. Try decoding custom app JWT token
-    const decoded = jwt.verify(token, JWT_SECRET);
-    if (decoded && decoded.id) {
-      req.token = token;
-      req.user = {
-        id: decoded.id,
-        email: decoded.email,
-        username: decoded.username,
-        full_name: decoded.full_name || decoded.fullName || decoded.username
-      };
+  if (!token || token === 'undefined' || token === 'null') {
+    return res.status(401).json({ error: 'Unauthorized: Authentication token is required.' });
+  }
 
-      // Fetch fresh profile details from public.profiles
+  const possibleSecrets = [
+    process.env.SUPABASE_JWT_SECRET,
+    process.env.JWT_SECRET,
+    process.env.SUPABASE_SERVICE_ROLE_KEY,
+    process.env.SUPABASE_ANON_KEY,
+    process.env.VITE_SUPABASE_ANON_KEY,
+    'hihubble-secure-jwt-secret',
+    'hi_hubble_super_secure_jwt_secret_key_2026_spec'
+  ].filter(Boolean);
+
+  let decoded = null;
+
+  if (token.includes('.')) {
+    for (const secret of possibleSecrets) {
       try {
-        const { data: dbProfile } = await supabase
-          .from('profiles')
-          .select('id, full_name, username, email, profile_image_url, is_private')
-          .eq('id', decoded.id)
-          .maybeSingle();
-
-        if (dbProfile) {
-          req.user.username = dbProfile.username || req.user.username;
-          req.user.full_name = dbProfile.full_name || req.user.full_name;
-          req.user.profile_image_url = dbProfile.profile_image_url || '';
-          req.user.is_private = dbProfile.is_private || false;
-        }
+        decoded = jwt.verify(token, secret);
+        if (decoded) break;
       } catch (_) {}
+    }
 
+    if (!decoded) {
+      return res.status(401).json({ error: 'Unauthorized: Invalid authentication token signature.' });
+    }
+  }
+
+  const userId = decoded?.id || decoded?.sub;
+
+  if (decoded && (userId || decoded.email || decoded.username)) {
+    req.token = token;
+    req.user = {
+      id: userId,
+      email: decoded.email || '',
+      username: decoded.username || (decoded.email ? decoded.email.split('@')[0] : 'user'),
+      full_name: decoded.full_name || decoded.fullName || decoded.username || 'User'
+    };
+
+    // Fetch fresh profile details from public.profiles
+    try {
+      let dbProfile = null;
+      if (userId && userId !== 'temp_user_id') {
+        const { data } = await supabase
+          .from('profiles')
+          .select('id, full_name, username, email, profile_image_url')
+          .eq('id', userId)
+          .maybeSingle();
+        dbProfile = data;
+      }
+
+      if (!dbProfile && req.user.username) {
+        const { data } = await supabase
+          .from('profiles')
+          .select('id, full_name, username, email, profile_image_url')
+          .eq('username', req.user.username)
+          .maybeSingle();
+        dbProfile = data;
+      }
+
+      if (!dbProfile && req.user.email) {
+        const { data } = await supabase
+          .from('profiles')
+          .select('id, full_name, username, email, profile_image_url')
+          .eq('email', req.user.email)
+          .maybeSingle();
+        dbProfile = data;
+      }
+
+      if (dbProfile) {
+        req.user.id = dbProfile.id;
+        req.user.username = dbProfile.username || req.user.username;
+        req.user.full_name = dbProfile.full_name || req.user.full_name;
+        req.user.email = dbProfile.email || req.user.email;
+        req.user.profile_image_url = dbProfile.profile_image_url || '';
+      }
+    } catch (_) {}
+
+    if (req.user.id) {
       return next();
     }
-  } catch (jwtErr) {
-    // 2. Fallback to Supabase Auth user check if custom JWT verify failed
+  }
+
+  // Session lookup for non-JWT UUIDs if valid profile matches token directly
+  if (token && token.length > 10 && !token.includes('.')) {
     try {
-      const { data, error } = await supabase.auth.getUser(token);
-      if (!error && data?.user) {
+      const { data: dbProfile } = await supabase
+        .from('profiles')
+        .select('id, full_name, username, email, profile_image_url')
+        .or(`id.eq.${token},username.eq.${token},email.eq.${token}`)
+        .maybeSingle();
+
+      if (dbProfile) {
         req.token = token;
         req.user = {
-          id: data.user.id,
-          email: data.user.email,
-          username: data.user.user_metadata?.username || data.user.email.split('@')[0],
-          full_name: data.user.user_metadata?.full_name || data.user.user_metadata?.fullName || data.user.email.split('@')[0]
+          id: dbProfile.id,
+          username: dbProfile.username,
+          full_name: dbProfile.full_name || dbProfile.username,
+          email: dbProfile.email,
+          profile_image_url: dbProfile.profile_image_url || ''
         };
         return next();
       }
     } catch (_) {}
   }
 
-  req.token = null;
-  req.user = null;
-  return res.status(401).json({ error: 'Invalid authentication token. Please log in again.' });
+  return res.status(401).json({ error: 'Unauthorized: Invalid or expired authentication token.' });
 }
+

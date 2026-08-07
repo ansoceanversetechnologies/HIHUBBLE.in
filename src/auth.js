@@ -8,17 +8,30 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey);
  * Safe API Fetch Helper to prevent raw JSON parsing failures
  */
 async function apiFetch(endpoint, options = {}) {
-  const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-  const baseUrl = isLocal ? 'http://localhost:3000' : '';
-  const url = endpoint.startsWith('http') ? endpoint : `${baseUrl}${endpoint}`;
-
   const defaultHeaders = { 'Content-Type': 'application/json' };
   const config = {
     ...options,
     headers: { ...defaultHeaders, ...(options.headers || {}) }
   };
 
-  const response = await fetch(url, config);
+  let response;
+  try {
+    // 1. Try relative path first (leveraging Vite dev proxy or standard server host)
+    response = await fetch(endpoint, config);
+  } catch (netErr) {
+    // 2. Fallback to direct http://localhost:3000 if relative fetch hit a network error
+    if (!endpoint.startsWith('http')) {
+      const fallbackUrl = `http://localhost:3000${endpoint}`;
+      try {
+        response = await fetch(fallbackUrl, config);
+      } catch (fbErr) {
+        throw new Error('Failed to connect to backend server. Please ensure the backend server is running on port 3000.');
+      }
+    } else {
+      throw netErr;
+    }
+  }
+
   const rawText = await response.text();
 
   let data;
@@ -327,10 +340,6 @@ export async function initAuth() {
 
       clearOtpInputs();
       startOtpTimer(data.cooldown || 25);
-
-      if (data.devFallbackOtp) {
-        console.log(`[HI-HUBBLE Dev OTP Code]: ${data.devFallbackOtp}`);
-      }
     } catch (err) {
       showError(usernameError, err.message);
     } finally {

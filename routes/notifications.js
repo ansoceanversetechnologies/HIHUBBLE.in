@@ -7,27 +7,19 @@ const router = express.Router();
 router.get('/api/notifications', authenticateToken, async (req, res) => {
   if (!req.user) return res.json([]);
   try {
+    const userId = req.user.id;
     const { data: notificationsData, error } = await supabase
       .from('notifications')
       .select(`
         *,
         sender_profile:profiles!sender_id(id, full_name, username, profile_image_url)
       `)
-      .eq('recipient_id', req.user.id)
+      .or(`recipient_id.eq.${userId},user_id.eq.${userId}`)
       .order('created_at', { ascending: false });
 
     if (error) {
-      // Fallback try with recipient column
-      const { data: altNotifs } = await supabase
-        .from('notifications')
-        .select(`
-          *,
-          sender_profile:profiles!sender_id(id, full_name, username, profile_image_url)
-        `)
-        .eq('recipient', req.user.id)
-        .order('created_at', { ascending: false });
-        
-      return res.json(mapNotifications(altNotifs || []));
+      console.warn("Notifications query warning:", error.message);
+      return res.json([]);
     }
 
     res.json(mapNotifications(notificationsData || []));
@@ -60,6 +52,15 @@ function mapNotifications(items) {
         break;
       case 'comment':
         text = `${fullName} (@${username}) commented on your post.`;
+        break;
+      case 'reply':
+        text = `${fullName} (@${username}) replied to your comment.`;
+        break;
+      case 'comment_like':
+        text = `${fullName} (@${username}) liked your comment.`;
+        break;
+      case 'mention':
+        text = `${fullName} (@${username}) mentioned you in a comment.`;
         break;
     }
 

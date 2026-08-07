@@ -26,5 +26,9 @@
     "nodemailer": "^9.0.1",
     "pg": "^8.22.0",
     "twilio": "^6.0.2"
+  },
+  "overrides": {
+    "brace-expansion": "^5.0.8",
+    "postcss": "^8.5.23"
   }
 }

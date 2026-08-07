@@ -1,6 +1,6 @@
 import './style.css'
 import './auth.css'
-import { initAuth, updateAppUI, handleLogout } from './auth.js'
+import { initAuth, updateAppUI, handleLogout, supabase } from './auth.js'
 
 document.addEventListener('DOMContentLoaded', () => {
   const API_URL = (
@@ -213,18 +213,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (viewName === 'profile') {
       const currentUserStr = localStorage.getItem('invibeUser');
-      if (currentUserStr) {
-        const currentUser = JSON.parse(currentUserStr);
-        const targetId = userId || currentUser.id || currentUser._id;
-        loadUserProfile(targetId);
+      let targetId = userId;
+      if (!targetId && currentUserStr) {
+        try {
+          const currentUser = JSON.parse(currentUserStr);
+          targetId = currentUser.id || currentUser._id || currentUser.username;
+        } catch (_) {}
       }
+      loadUserProfile(targetId || 'me');
     }
 
-    // Toggle body active class to hide right sidebar and expand content width (Congestion Fix!)
+    // Maintain unified 3-column layout frame across all views
+    document.body.classList.remove('chats-view-active');
     if (viewName === 'chats') {
-      document.body.classList.add('chats-view-active');
       if (appContainer) appContainer.classList.remove('chatting');
-      // Reset to empty state — no conversation auto-selected
       state.currentChatThread = null;
       const emptyState = document.getElementById('chat-empty-state');
       const chatHeader = document.getElementById('chat-window-header');
@@ -234,8 +236,6 @@ document.addEventListener('DOMContentLoaded', () => {
       if (chatHeader) chatHeader.style.display = 'none';
       if (chatViewport) chatViewport.style.display = 'none';
       if (chatFooter) chatFooter.style.display = 'none';
-    } else {
-      document.body.classList.remove('chats-view-active');
     }
 
     // Update active view panels
@@ -1292,6 +1292,23 @@ document.addEventListener('DOMContentLoaded', () => {
         const isVideo = file.type.startsWith('video/');
         selectedPostMediaType = isVideo ? 'video' : 'image';
 
+        if (isVideo) {
+          const tempVideo = document.createElement('video');
+          tempVideo.preload = 'metadata';
+          tempVideo.onloadedmetadata = () => {
+            try { URL.revokeObjectURL(tempVideo.src); } catch (e) {}
+            if (tempVideo.duration > 300) {
+              showToast('Video length exceeds 5 minutes limit (max 5 mins allowed). ⏱️');
+              createPostFileInput.value = '';
+              selectedPostMediaBase64 = null;
+              selectedPostMediaBlobUrl = null;
+              if (createPostPreviewContainer) createPostPreviewContainer.style.display = 'none';
+              updateSubmitButtonState();
+            }
+          };
+          tempVideo.src = URL.createObjectURL(file);
+        }
+
         const reader = new FileReader();
         reader.onload = (e) => {
           selectedPostMediaBase64 = e.target.result;
@@ -1336,12 +1353,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (createPostSubmitBtn) {
     createPostSubmitBtn.addEventListener('click', async () => {
       const captionText = createPostCaption.value.trim();
-      const token = localStorage.getItem('invibe_jwt_token');
-
-      if (!token) {
-        showToast('Please log in to publish a post! 🔐');
-        return;
-      }
+      const token = localStorage.getItem('invibe_jwt_token') || localStorage.getItem('invibe_token') || 'session_token';
 
       if (!selectedPostMediaBase64 && !captionText) {
         showToast('Please write a caption or add a photo/video.');
@@ -1354,8 +1366,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
       try {
         const currentUserStr = localStorage.getItem('invibeUser');
-        const currentUser = currentUserStr ? JSON.parse(currentUserStr) : { username: 'qewre', fullName: 'qewre' };
-        const userPhoto = localStorage.getItem('invibeProfileImage') || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80';
+        const currentUser = currentUserStr ? JSON.parse(currentUserStr) : { username: 'user', fullName: 'User' };
+        const userPhoto = localStorage.getItem('invibeProfileImage') || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=400&q=80';
         const mediaUrlPayload = selectedPostMediaBase64 || selectedPostMediaBlobUrl || '';
         const mediaType = selectedPostMediaType || 'image';
 
@@ -1368,69 +1380,54 @@ document.addEventListener('DOMContentLoaded', () => {
           likes: [],
           comments: [],
           author: {
-            _id: currentUser.id || 'usr_' + (currentUser.username || 'user'),
-            username: currentUser.username || 'qewre',
-            fullName: currentUser.fullName || currentUser.username || 'qewre',
+            _id: currentUser.id || currentUser._id || 'usr_' + (currentUser.username || 'user'),
+            username: currentUser.username || 'user',
+            fullName: currentUser.fullName || currentUser.username || 'User',
             profileImage: userPhoto
           }
         };
 
-        // In-memory array for high timeline video posts
-        window.invibe_memory_posts = window.invibe_memory_posts || [];
-        window.invibe_memory_posts.unshift(newPostObj);
+        // Send backend network call to store in Supabase public.posts and public.post_media
+        const apiRes = await fetch('/api/posts', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+            'X-User-Token': token
+          },
+          body: JSON.stringify({
+            caption: captionText,
+            mediaUrl: mediaUrlPayload,
+            mediaType: mediaType,
+            userId: currentUser.id || currentUser._id,
+            username: currentUser.username,
+            email: currentUser.email
+          })
+        });
 
-        // Store post locally with quota protection
-        try {
-          const localPosts = JSON.parse(localStorage.getItem('invibe_custom_posts') || '[]');
-          localPosts.unshift(newPostObj);
-          localStorage.setItem('invibe_custom_posts', JSON.stringify(localPosts));
-        } catch (quotaErr) {
-          console.warn("Storage quota notice (large video file):", quotaErr.message);
-          try {
-            const lightPosts = (JSON.parse(localStorage.getItem('invibe_custom_posts') || '[]'))
-              .slice(0, 5)
-              .map(p => p.mediaType === 'video' ? { ...p, mediaUrl: '' } : p);
-            lightPosts.unshift({ ...newPostObj, mediaUrl: '' });
-            localStorage.setItem('invibe_custom_posts', JSON.stringify(lightPosts));
-          } catch (e) {}
+        if (apiRes.ok) {
+          const data = await apiRes.json();
+          showToast('New hub published successfully! 📸✨');
+
+          // Reset fields
+          createPostCaption.value = '';
+          if (createPostFileInput) createPostFileInput.value = '';
+          selectedPostMediaBlobUrl = null;
+          selectedPostMediaBase64 = null;
+          if (createPostPreviewContainer) createPostPreviewContainer.style.display = 'none';
+          if (createPostPreviewImg) createPostPreviewImg.src = '';
+          if (createPostPreviewVideo) createPostPreviewVideo.src = '';
+          updateSubmitButtonState();
+
+          // Refresh lists
+          await loadFeedPosts();
+          loadUserProfile('me');
+        } else {
+          const errData = await apiRes.json().catch(() => ({}));
+          const errMsg = errData.error || apiRes.statusText || 'Server error';
+          console.error("Backend post save error:", errMsg);
+          showToast(`Failed to publish post: ${errMsg} ❌`);
         }
-
-        // Try backend network call asynchronously if backend is online
-        try {
-          fetch(`${API_URL}/api/posts`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify({
-              caption: captionText,
-              mediaUrl: mediaUrlPayload,
-              mediaType: mediaType
-            })
-          }).then(res => res.json()).then(data => {
-            if (data && data.mediaUrl) {
-              newPostObj.mediaUrl = data.mediaUrl;
-              loadFeedPosts();
-            }
-          }).catch(e => console.warn("Backend sync notice:", e.message));
-        } catch (netErr) {}
-
-        showToast('New hub published successfully! 📸✨');
-
-        // Reset fields
-        createPostCaption.value = '';
-        if (createPostFileInput) createPostFileInput.value = '';
-        selectedPostMediaBlobUrl = null;
-        selectedPostMediaBase64 = null;
-        if (createPostPreviewContainer) createPostPreviewContainer.style.display = 'none';
-        if (createPostPreviewImg) createPostPreviewImg.src = '';
-        if (createPostPreviewVideo) createPostPreviewVideo.src = '';
-        updateSubmitButtonState();
-
-        // Refresh lists
-        loadFeedPosts();
-        loadProfileStats();
       } catch (err) {
         console.error("Publish post handler:", err);
         showToast('New hub published successfully! 📸✨');
@@ -1777,55 +1774,56 @@ document.addEventListener('DOMContentLoaded', () => {
   // Fetch messages between current user and target user
   async function fetchMessages(targetUserId, forceRender = true) {
     const token = localStorage.getItem('invibe_jwt_token');
-    if (!token) return;
+    if (!token || !targetUserId) return;
+
+    if (messagesScroll && (!chatFeeds[targetUserId] || chatFeeds[targetUserId].length === 0)) {
+      messagesScroll.innerHTML = `
+        <div class="chat-messages-skeleton" style="display:flex; flex-direction:column; gap:12px; padding:20px;">
+          <div style="width:40%; height:36px; background:rgba(255,255,255,0.06); border-radius:16px; align-self:flex-start; animation:pulse 1.5s infinite;"></div>
+          <div style="width:55%; height:42px; background:rgba(108,59,255,0.15); border-radius:16px; align-self:flex-end; animation:pulse 1.5s infinite;"></div>
+          <div style="width:35%; height:36px; background:rgba(255,255,255,0.06); border-radius:16px; align-self:flex-start; animation:pulse 1.5s infinite;"></div>
+        </div>
+      `;
+    }
 
     try {
-      const res = await fetch(`${API_URL}/api/chats/${targetUserId}`, {
+      const res = await fetch(`${API_URL}/api/chats/messages/${targetUserId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (!res.ok) throw new Error('Failed to fetch messages');
       const messages = await res.json();
 
-      const prevCount = (chatFeeds[targetUserId] || []).length;
-      chatFeeds[targetUserId] = messages;
-
-      if (forceRender || messages.length !== prevCount) {
-        renderChatMessages(targetUserId);
-      }
+      chatFeeds[targetUserId] = Array.isArray(messages) ? messages : [];
+      renderChatMessages(targetUserId);
     } catch (err) {
       console.error('Error fetching messages:', err);
+      if (messagesScroll) {
+        renderChatMessages(targetUserId);
+      }
     }
   }
 
   function getChatDateSeparatorText(dateInput) {
+    if (!dateInput) return 'Today';
     const messageDate = new Date(dateInput);
+    if (isNaN(messageDate.getTime())) return 'Today';
 
-    // Set time of messageDate to midnight for day-based comparison
     const d = new Date(messageDate.getFullYear(), messageDate.getMonth(), messageDate.getDate());
-
-    // Set time of today to midnight
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-    // Set time of yesterday to midnight
     const yesterday = new Date(today);
     yesterday.setDate(today.getDate() - 1);
 
-    const diffTime = today.getTime() - d.getTime();
-    const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
-
-    if (diffDays === 0) {
+    if (d.getTime() === today.getTime()) {
       return 'Today';
-    } else if (diffDays === 1) {
+    } else if (d.getTime() === yesterday.getTime()) {
       return 'Yesterday';
-    } else if (diffDays > 1 && diffDays < 7) {
-      // Show weekday name e.g. "Monday"
-      const options = { weekday: 'long' };
-      return messageDate.toLocaleDateString([], options);
     } else {
-      // Show formatted date e.g. "14 Jul 2026"
-      const options = { day: '2-digit', month: 'short', year: 'numeric' };
-      return messageDate.toLocaleDateString([], options);
+      const day = messageDate.getDate();
+      const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      const month = monthNames[messageDate.getMonth()];
+      const year = messageDate.getFullYear();
+      return `${day} ${month} ${year}`;
     }
   }
 
@@ -1836,24 +1834,36 @@ document.addEventListener('DOMContentLoaded', () => {
     const messages = chatFeeds[targetUserId] || [];
     const currentUser = getCurrentUser();
     if (!currentUser) return;
-    const currentUserId = currentUser.id || currentUser._id;
+    const currentUserId = (currentUser.id || currentUser._id || '').toString();
     const secretKey = getChatSecretKey(currentUserId, targetUserId);
+
+    if (messages.length === 0) {
+      messagesScroll.innerHTML = `
+        <div class="chat-empty-messages" style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; min-height:280px; color:var(--text-muted); text-align:center; padding:40px 20px;">
+          <div style="font-size:42px; margin-bottom:12px; filter:drop-shadow(0 0 12px rgba(108,59,255,0.4));">👋</div>
+          <h4 style="font-size:16px; font-weight:600; color:#ffffff; margin:0 0 6px 0;">No messages yet</h4>
+          <p style="font-size:13px; color:rgba(255,255,255,0.6); max-width:240px; margin:0;">Start the conversation 👋</p>
+        </div>
+      `;
+      return;
+    }
 
     let lastDateKey = null;
 
     messages.forEach(msg => {
-      const msgDate = new Date(msg.createdAt);
-      const dateKey = `${msgDate.getFullYear()}-${msgDate.getMonth() + 1}-${msgDate.getDate()}`;
+      const rawDate = msg.createdAt || msg.created_at || msg.timestamp;
+      const msgDate = rawDate ? new Date(rawDate) : new Date();
+      const validDate = isNaN(msgDate.getTime()) ? new Date() : msgDate;
+      const dateKey = `${validDate.getFullYear()}-${validDate.getMonth() + 1}-${validDate.getDate()}`;
 
       if (dateKey !== lastDateKey) {
         lastDateKey = dateKey;
         const separator = document.createElement('div');
         separator.className = 'chat-date-separator';
-        separator.textContent = getChatDateSeparatorText(msg.createdAt);
+        separator.textContent = getChatDateSeparatorText(validDate);
         messagesScroll.appendChild(separator);
       }
 
-      const bubble = document.createElement('div');
       let decryptedText = decryptMessage(msg.content, secretKey);
 
       // Attempt to parse embedded reply info from text
@@ -1867,22 +1877,27 @@ document.addEventListener('DOMContentLoaded', () => {
         // Normal text message, ignore parsing error
       }
 
-      const time = new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const time = validDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-      const isSent = msg.sender.toString() === currentUserId.toString();
-      bubble.className = isSent ? 'chat-bubble sent' : 'chat-bubble received';
+      // Robust sender ID resolution
+      const msgSenderId = typeof msg.sender === 'object' 
+        ? (msg.sender._id || msg.sender.id || '') 
+        : (msg.sender || msg.sender_id || '');
+
+      const isSent = msgSenderId.toString() === currentUserId;
 
       // Linkify standard text content
       const urlRegex = /(\b(https?):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
-      const linkifiedText = decryptedText.replace(urlRegex, (url) => {
+      const linkifiedText = (decryptedText || '').replace(urlRegex, (url) => {
         return `<a href="${url}" target="_blank" style="color: #6c3bff; text-decoration: underline; word-break: break-all;">${url}</a>`;
       });
+
       let displayContent = `<div class="bubble-content">${linkifiedText}</div>`;
 
-      if (msg.mediaType) {
+      if (msg.mediaType && msg.mediaType !== 'text') {
         if (msg.mediaType === 'image') {
           displayContent = `
-            <div class="bubble-content chat-shared-media-card" onclick="openMediaViewer('${msg._id}')">
+            <div class="bubble-content chat-shared-media-card" onclick="openMediaViewer('${msg._id || msg.id}')">
               <img src="${decryptedText}" style="max-width: 240px; border-radius: var(--radius-md); max-height: 200px; object-fit: cover;" />
             </div>
           `;
@@ -1890,15 +1905,12 @@ document.addEventListener('DOMContentLoaded', () => {
           displayContent = `
             <div class="bubble-content chat-shared-media-card" style="padding: 0; background: none; max-width: 240px; position: relative;">
               <video src="${decryptedText}" style="width: 100%; border-radius: var(--radius-md); max-height: 200px; display: block;" controls></video>
-              <button class="icon-btn" onclick="openMediaViewer('${msg._id}')" style="position: absolute; top: 8px; right: 8px; background: rgba(0,0,0,0.5); border: none; border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; color: white; cursor: pointer; z-index: 10;" title="Expand Video">
-                <i data-lucide="maximize-2" style="width: 14px; height: 14px;"></i>
-              </button>
             </div>
           `;
         } else if (msg.mediaType === 'file') {
           displayContent = `
             <div class="chat-shared-file-container" style="display: flex; justify-content: space-between; align-items: center; width: 100%; gap: 12px;">
-              <div onclick="openMediaViewer('${msg._id}')" style="display: flex; align-items: center; gap: 8px; flex-grow: 1; cursor: pointer;">
+              <div onclick="openMediaViewer('${msg._id || msg.id}')" style="display: flex; align-items: center; gap: 8px; flex-grow: 1; cursor: pointer;">
                 <i data-lucide="file-text" style="width:24px; height:24px; color:var(--primary); min-width:24px;"></i>
                 <div class="chat-shared-file-info" style="text-align: left;">
                   <span class="chat-shared-file-title" style="word-break: break-all; display: block;">${msg.mediaName || 'Document'}</span>
@@ -1914,33 +1926,6 @@ document.addEventListener('DOMContentLoaded', () => {
           displayContent = `
             <div class="bubble-content chat-shared-media-card" style="background: none; padding: 0; max-width: 240px; display: flex; align-items: center; gap: 8px; position: relative;">
               <audio src="${decryptedText}" controls style="flex-grow: 1; display: block; max-width: calc(100% - 36px); height: 40px;"></audio>
-              <button class="icon-btn" onclick="openMediaViewer('${msg._id}')" style="background: rgba(255,255,255,0.05); border: none; border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; color: white; cursor: pointer; min-width: 28px;" title="View Details">
-                <i data-lucide="maximize-2" style="width: 14px; height: 14px;"></i>
-              </button>
-            </div>
-          `;
-        } else if (msg.mediaType === 'hub') {
-          displayContent = `
-            <div class="bubble-content chat-shared-media-card" onclick="openMediaViewer('${msg._id}')">
-              <div style="padding:10px 14px; border:1px solid rgba(255,255,255,0.1); border-radius:var(--radius-md); background:rgba(108,59,255,0.1); display:flex; align-items:center; gap:8px;">
-                <i data-lucide="sparkles" style="width:16px; height:16px; color:var(--primary);"></i>
-                <div style="text-align:left;">
-                  <span style="font-size:12px; font-weight:600; display:block;">${msg.mediaName || 'Shared Post'}</span>
-                  <span style="font-size:10px; color:var(--text-muted);">Shared from Hub</span>
-                </div>
-              </div>
-            </div>
-          `;
-        } else if (msg.mediaType === 'location') {
-          displayContent = `
-            <div class="bubble-content chat-shared-location-card" onclick="window.open('${decryptedText}', '_blank')" style="cursor: pointer; padding: 0;">
-              <div style="display:flex; align-items:center; gap:10px; padding:10px 14px; border:1px solid rgba(239,68,68,0.2); border-radius:var(--radius-md); background:rgba(239,68,68,0.1); transition: background 0.2s;">
-                <i data-lucide="map-pin" style="width:20px; height:20px; color:#ef4444; min-width:20px;"></i>
-                <div style="text-align:left;">
-                  <span style="font-size:12px; font-weight:600; display:block; color:#fff;">Shared Location</span>
-                  <span style="font-size:10px; color:var(--text-muted);">Click to open in Google Maps 📍</span>
-                </div>
-              </div>
             </div>
           `;
         }
@@ -1959,19 +1944,25 @@ document.addEventListener('DOMContentLoaded', () => {
         displayContent = replyPreviewHtml + displayContent;
       }
 
-      let diamondHtml = '';
+      let tickHtml = '';
       if (isSent) {
-        diamondHtml = msg.read ? '<span class="msg-status-diamond-seen" title="Seen">💎</span>' : '<span class="msg-status-diamond-sent" title="Sent">◆</span>';
+        if (msg.status === 'read' || msg.is_read || msg.read) {
+          tickHtml = '<span style="color: #38bdf8; font-weight: bold; font-size: 12px; margin-left: 4px;" title="Read">✓✓</span>';
+        } else if (msg.status === 'delivered') {
+          tickHtml = '<span style="color: rgba(255,255,255,0.7); font-size: 12px; margin-left: 4px;" title="Delivered">✓✓</span>';
+        } else {
+          tickHtml = '<span style="color: rgba(255,255,255,0.7); font-size: 12px; margin-left: 4px;" title="Sent">✓</span>';
+        }
       }
 
-      const msgIdAttr = msg._id ? `data-msg-id="${msg._id}"` : '';
-      const rawTextAttr = `data-raw-text="${decryptedText.replace(/"/g, '&quot;')}"`;
+      const msgIdAttr = (msg._id || msg.id) ? `data-msg-id="${msg._id || msg.id}"` : '';
+      const rawTextAttr = `data-raw-text="${(decryptedText || '').replace(/"/g, '&quot;')}"`;
       const senderNameAttr = `data-sender-name="${isSent ? 'You' : (document.querySelector('.chat-header-name')?.textContent || 'User')}"`;
 
       const bubbleHtml = `
         <div class="${isSent ? 'chat-bubble sent' : 'chat-bubble received'}" ${msgIdAttr} ${rawTextAttr} ${senderNameAttr}>
           ${displayContent}
-          <div class="bubble-time">${time} ${diamondHtml}</div>
+          <div class="bubble-time">${time} ${tickHtml}</div>
         </div>
       `;
 
@@ -1999,7 +1990,12 @@ document.addEventListener('DOMContentLoaded', () => {
       messagesScroll.appendChild(wrapper);
     });
 
-    messagesScroll.scrollTop = messagesScroll.scrollHeight;
+    setTimeout(() => {
+      if (messagesScroll) {
+        messagesScroll.scrollTop = messagesScroll.scrollHeight;
+      }
+    }, 50);
+
     debouncedCreateIcons();
   }
 
@@ -5200,9 +5196,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const feedContainer = document.getElementById('home-feed-posts');
     if (!feedContainer) return;
 
+    // Clear legacy local post caches from previous schemas
+    try {
+      localStorage.removeItem('invibe_custom_posts');
+      localStorage.removeItem('invibe_posts');
+      window.invibe_memory_posts = [];
+    } catch (_) {}
+
     let posts = [];
     try {
-      const res = await fetch(`${API_URL}/api/posts`);
+      const res = await fetch('/api/posts');
       if (res.ok) {
         posts = await res.json();
       }
@@ -5210,30 +5213,17 @@ document.addEventListener('DOMContentLoaded', () => {
       console.warn("API loadFeedPosts notice:", err.message);
     }
 
-    const memoryPosts = window.invibe_memory_posts || [];
-    const localPosts = JSON.parse(localStorage.getItem('invibe_custom_posts') || '[]');
-    
-    const combinedMap = new Map();
-    memoryPosts.forEach(p => combinedMap.set(p._id, p));
-    localPosts.forEach(p => { if (!combinedMap.has(p._id)) combinedMap.set(p._id, p); });
-    posts.forEach(p => { if (!combinedMap.has(p._id)) combinedMap.set(p._id, p); });
-
-    // Filter out any legacy placeholder hubble_user posts
-    posts = posts.filter(p => {
-      const u = p.author?.username;
-      const id = p.author?._id || p.author?.id;
-      return u !== 'hubble_user' && u !== 'haribol' && id !== '00000000-0000-0000-0000-000000000001';
-    });
-
-    const emptyState = document.getElementById('feed-empty-state');
     feedContainer.innerHTML = '';
-    if (emptyState) {
-      if (posts.length === 0) {
-        emptyState.style.display = 'block';
-      } else {
-        emptyState.style.display = 'none';
-      }
-      feedContainer.appendChild(emptyState);
+
+    if (!posts || posts.length === 0) {
+      feedContainer.innerHTML = `
+        <div id="feed-empty-state" style="text-align: center; padding: 48px 20px; background: var(--card-bg); border: var(--card-border); border-radius: var(--radius-lg); margin-top: 10px;">
+          <div style="font-size: 32px; margin-bottom: 10px;">✨</div>
+          <h3 style="font-family: var(--font-display); font-size: 18px; font-weight: 700; color: var(--text-main); margin-bottom: 6px;">No posts published yet</h3>
+          <p style="font-size: 13px; color: var(--text-muted); margin: 0;">Be the first to share a hub with the world using the form above!</p>
+        </div>
+      `;
+      return;
     }
 
     const currentUserStr = localStorage.getItem('invibeUser');
@@ -5499,32 +5489,69 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function togglePostLike(postId, btnElement) {
-    const token = localStorage.getItem('invibe_jwt_token');
-    let useFrontendFallback = false;
+    const token = localStorage.getItem('invibe_jwt_token') || localStorage.getItem('invibe_token');
 
     if (!token) {
-      useFrontendFallback = true;
+      showToast('Please log in to like posts.');
+      return;
     }
 
+    // 1. Snapshot initial state for rollback
+    const isOriginallyLiked = btnElement.classList.contains('liked');
+    const countSpan = btnElement.querySelector('.action-count');
+    const heartIcon = btnElement.querySelector('i, svg');
+    const originalCount = parseInt(countSpan ? countSpan.textContent : '0') || 0;
+
+    // 2. Optimistic UI Update
+    const nextIsLiked = !isOriginallyLiked;
+    const nextCount = nextIsLiked ? originalCount + 1 : Math.max(0, originalCount - 1);
+
+    if (nextIsLiked) {
+      btnElement.classList.add('liked');
+      if (heartIcon) {
+        heartIcon.style.fill = '#8b5cf6';
+        heartIcon.style.stroke = '#8b5cf6';
+      }
+      triggerBtnHeartExplosion(btnElement);
+    } else {
+      btnElement.classList.remove('liked');
+      if (heartIcon) {
+        heartIcon.style.fill = 'none';
+        heartIcon.style.stroke = 'currentColor';
+      }
+    }
+    if (countSpan) countSpan.textContent = nextCount;
+
     try {
-      if (useFrontendFallback) throw new Error('No token');
-      const res = await fetch(`${API_URL}/api/posts/${postId}/like`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      const path = `/api/posts/${postId}/like`;
+      let res;
+      try {
+        res = await fetch(path, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'X-User-Token': token
+          }
+        });
+      } catch (_) {
+        res = await fetch(`${API_URL}${path}`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'X-User-Token': token
+          }
+        });
+      }
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      if (!res.ok) throw new Error(data.error || 'Failed to toggle like.');
 
-      const countSpan = btnElement.querySelector('.action-count');
-      const heartIcon = btnElement.querySelector('i, svg');
-
+      // 3. Confirm with official server state
       if (data.isLiked) {
         btnElement.classList.add('liked');
         if (heartIcon) {
           heartIcon.style.fill = '#8b5cf6';
           heartIcon.style.stroke = '#8b5cf6';
         }
-        triggerBtnHeartExplosion(btnElement);
         showToast('Liked post! 💜');
       } else {
         btnElement.classList.remove('liked');
@@ -5535,112 +5562,213 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       if (countSpan) countSpan.textContent = data.likesCount;
     } catch (err) {
-      // Fallback to frontend-only state
-      const isLiked = btnElement.classList.contains('liked');
-      const countSpan = btnElement.querySelector('.action-count');
-      const heartIcon = btnElement.querySelector('i, svg');
-
-      let count = parseInt(countSpan ? countSpan.textContent : '0') || 0;
-
-      if (!isLiked) {
+      console.error("Post like failed, rolling back UI:", err);
+      // 4. ROLL BACK ON FAILURE
+      if (isOriginallyLiked) {
         btnElement.classList.add('liked');
         if (heartIcon) {
           heartIcon.style.fill = '#8b5cf6';
           heartIcon.style.stroke = '#8b5cf6';
         }
-        if (countSpan) countSpan.textContent = count + 1;
-        triggerBtnHeartExplosion(btnElement);
-        showToast('Liked post! 💜');
       } else {
         btnElement.classList.remove('liked');
         if (heartIcon) {
           heartIcon.style.fill = 'none';
           heartIcon.style.stroke = 'currentColor';
         }
-        if (countSpan && count > 0) countSpan.textContent = count - 1;
       }
+      if (countSpan) countSpan.textContent = originalCount;
+      showToast(err.message || 'Failed to like post.');
     }
   }
 
-  async function submitComment(postId, text, inputField) {
-    const token = localStorage.getItem('invibe_jwt_token');
-    let useFrontendFallback = false;
-
+  async function toggleCommentLike(commentId, btnElement) {
+    const token = localStorage.getItem('invibe_jwt_token') || localStorage.getItem('invibe_token');
     if (!token) {
-      useFrontendFallback = true;
+      showToast('Please log in to like comments.');
+      return;
     }
 
+    const isOriginallyLiked = btnElement.classList.contains('liked');
+    const countSpan = btnElement.querySelector('.comment-like-count');
+    const originalCount = parseInt(countSpan ? countSpan.textContent : '0') || 0;
+
+    // Optimistic Update
+    btnElement.classList.toggle('liked', !isOriginallyLiked);
+    if (countSpan) countSpan.textContent = !isOriginallyLiked ? originalCount + 1 : Math.max(0, originalCount - 1);
+
     try {
-      if (useFrontendFallback) throw new Error('No token');
-      const res = await fetch(`${API_URL}/api/posts/${postId}/comment`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ text })
-      });
-      const comments = await res.json();
-      if (!res.ok) throw new Error(comments.error);
+      const path = `/api/comments/${commentId}/like`;
+      let res;
+      try {
+        res = await fetch(path, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+      } catch (_) {
+        res = await fetch(`${API_URL}${path}`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+      }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to like comment.');
 
-      inputField.value = '';
+      btnElement.classList.toggle('liked', data.isLiked);
+      if (countSpan) countSpan.textContent = data.likesCount;
+    } catch (err) {
+      // Rollback
+      btnElement.classList.toggle('liked', isOriginallyLiked);
+      if (countSpan) countSpan.textContent = originalCount;
+      showToast(err.message || 'Failed to like comment.');
+    }
+  }
 
+  async function submitComment(postId, text, inputField, parentCommentId = null) {
+    const token = localStorage.getItem('invibe_jwt_token') || localStorage.getItem('invibe_token');
+
+    if (!token) {
+      showToast('Please log in to post a comment.');
+      return;
+    }
+
+    if (!text || !text.trim()) {
+      showToast('Comment text cannot be empty.');
+      return;
+    }
+
+    const originalValue = inputField.value;
+    inputField.value = '';
+
+    try {
+      const path = parentCommentId ? `/api/comments/${parentCommentId}/reply` : `/api/posts/${postId}/comment`;
+      let res;
+      try {
+        res = await fetch(path, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+            'X-User-Token': token
+          },
+          body: JSON.stringify({ text: text.trim(), parentCommentId })
+        });
+      } catch (_) {
+        res = await fetch(`${API_URL}${path}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+            'X-User-Token': token
+          },
+          body: JSON.stringify({ text: text.trim(), parentCommentId })
+        });
+      }
+
+      const responseData = await res.json();
+      if (!res.ok) throw new Error(responseData.error || 'Failed to post comment.');
+
+      const commentsList = Array.isArray(responseData) ? responseData : (responseData.comments || [responseData.comment]);
+
+      // Update post card comment count badge
       const card = document.getElementById(`post-${postId}`) || inputField.closest('.feed-card') || document.querySelector(`[data-post-id="${postId}"]`)?.closest('.feed-card');
       if (card) {
         const countBadge = card.querySelector('.comment-btn-action .action-count');
-        if (countBadge) countBadge.textContent = comments.length;
+        if (countBadge) countBadge.textContent = commentsList.length;
       }
 
+      // Update list container
       const listContainer = document.getElementById(`comments-list-${postId}`) || document.querySelector('#comments-modal .comments-list');
-      if (listContainer) {
+      if (listContainer && Array.isArray(commentsList)) {
         listContainer.innerHTML = '';
-        comments.forEach(comment => {
+        commentsList.forEach(comment => {
           const item = document.createElement('div');
-          item.className = 'comment-item';
-          item.style = 'display: flex; gap: 8px; margin-bottom: 8px; font-size: 13px;';
+          item.className = `comment-item ${comment.parentCommentId ? 'nested-reply' : ''}`;
+          item.style = `display: flex; gap: 8px; margin-bottom: 8px; font-size: 13px; ${comment.parentCommentId ? 'margin-left: 24px; border-left: 2px solid rgba(255,255,255,0.1); padding-left: 8px;' : ''}`;
+          const cAuthor = comment.author || { username: 'user', profileImage: '' };
           item.innerHTML = `
-            <img src="${comment.author.profileImage || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=80&h=80&q=80'}" alt="" style="width: 24px; height: 24px; border-radius: 50%; object-fit: cover;" />
-            <div>
-              <strong style="color: var(--text-color); margin-right: 4px;">${comment.author.username}</strong>
+            <img src="${cAuthor.profileImage || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=80&h=80&q=80'}" alt="" style="width: 24px; height: 24px; border-radius: 50%; object-fit: cover;" />
+            <div style="flex: 1;">
+              <strong style="color: var(--text-color); margin-right: 4px;">${cAuthor.username || 'user'}</strong>
               <span style="color: var(--text-muted);">${comment.text}</span>
             </div>
           `;
           listContainer.appendChild(item);
         });
       }
+
       showToast('Comment posted! 💬');
     } catch (err) {
-      // Fallback to frontend-only state
-      inputField.value = '';
-
-      const card = document.getElementById(`post-${postId}`) || inputField.closest('.feed-card') || document.querySelector(`[data-post-id="${postId}"]`)?.closest('.feed-card');
-      if (card) {
-        const countBadge = card.querySelector('.comment-btn-action .action-count');
-        if (countBadge) {
-          const count = parseInt(countBadge.textContent || '0');
-          countBadge.textContent = count + 1;
-        }
-      }
-
-      const listContainer = document.getElementById(`comments-list-${postId}`) || document.querySelector('#comments-modal .comments-list');
-      if (listContainer) {
-        const userStr = localStorage.getItem('invibeUser');
-        const user = userStr ? JSON.parse(userStr) : { username: 'Guest', profileImage: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=80&h=80&q=80' };
-        const item = document.createElement('div');
-        item.className = 'comment-item';
-        item.style = 'display: flex; gap: 8px; margin-bottom: 8px; font-size: 13px;';
-        item.innerHTML = `
-          <img src="${user.profileImage || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=80&h=80&q=80'}" alt="" style="width: 24px; height: 24px; border-radius: 50%; object-fit: cover;" />
-          <div>
-            <strong style="color: var(--text-color); margin-right: 4px;">${user.username}</strong>
-            <span style="color: var(--text-muted);">${text}</span>
-          </div>
-        `;
-        listContainer.appendChild(item);
-      }
-      showToast('Comment posted! 💬');
+      console.error("Comment submission failed, rolling back UI:", err);
+      // ROLL BACK INPUT
+      inputField.value = originalValue;
+      showToast(err.message || 'Failed to post comment.');
     }
   }
+
+  // --- SUPABASE REALTIME FEED SYNCHRONIZATION ---
+  function initRealtimeFeedSubscriptions() {
+    if (!supabase) return;
+
+    try {
+      supabase
+        .channel('public:feed_realtime')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, payload => {
+          if (payload.new && payload.new.post_id) {
+            refreshPostCommentsCount(payload.new.post_id);
+          } else if (payload.old && payload.old.post_id) {
+            refreshPostCommentsCount(payload.old.post_id);
+          }
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'likes' }, payload => {
+          if (payload.new && payload.new.post_id) {
+            refreshPostLikesCount(payload.new.post_id);
+          } else if (payload.old && payload.old.post_id) {
+            refreshPostLikesCount(payload.old.post_id);
+          }
+        })
+        .subscribe();
+    } catch (rtErr) {
+      console.warn("Realtime subscription notice:", rtErr.message);
+    }
+  }
+
+  async function refreshPostCommentsCount(postId) {
+    const card = document.getElementById(`post-${postId}`);
+    if (!card) return;
+    try {
+      const res = await fetch(`${API_URL}/api/posts/${postId}/comments`);
+      if (res.ok) {
+        const comments = await res.json();
+        const countBadge = card.querySelector('.comment-btn-action .action-count');
+        if (countBadge && Array.isArray(comments)) {
+          countBadge.textContent = comments.length;
+        }
+      }
+    } catch (_) {}
+  }
+
+  async function refreshPostLikesCount(postId) {
+    const card = document.getElementById(`post-${postId}`);
+    if (!card) return;
+    try {
+      const res = await fetch(`${API_URL}/api/posts`);
+      if (res.ok) {
+        const posts = await res.json();
+        const targetPost = posts.find(p => p._id === postId);
+        if (targetPost) {
+          const countBadge = card.querySelector('.like-btn-action .action-count');
+          if (countBadge) countBadge.textContent = (targetPost.likes || []).length;
+        }
+      }
+    } catch (_) {}
+  }
+
+  initRealtimeFeedSubscriptions();
 
   async function loadFeedReels() {
     const scroller = document.querySelector('#explore-reels-container .reels-scroller');
@@ -5794,88 +5922,189 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  async function loadFollowSuggestions() {
-    const listContainer = document.querySelector('.suggested-users-list');
-    if (!listContainer) return;
-
-    const token = localStorage.getItem('invibe_jwt_token');
+  // --- ONLINE PRESENCE HEARTBEAT SYSTEM ---
+  function sendPresenceHeartbeat() {
+    const token = localStorage.getItem('invibe_jwt_token') || localStorage.getItem('invibe_token');
     if (!token) return;
+    fetch(`${API_URL}/api/presence/heartbeat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      }
+    }).catch(() => {});
+  }
+
+  sendPresenceHeartbeat();
+  setInterval(sendPresenceHeartbeat, 30000);
+  setTimeout(() => {
+    loadFollowSuggestions();
+    loadActiveVibers();
+  }, 100);
+
+  const sendLogoutBeacon = () => {
+    const token = localStorage.getItem('invibe_jwt_token') || localStorage.getItem('invibe_token');
+    if (token) {
+      if (navigator.sendBeacon) {
+        const blob = new Blob([JSON.stringify({})], { type: 'application/json' });
+        navigator.sendBeacon(`${API_URL}/api/users/logout-presence?token=${encodeURIComponent(token)}`, blob);
+      }
+      fetch(`${API_URL}/api/users/logout-presence`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+        keepalive: true
+      }).catch(() => {});
+    }
+  };
+
+  window.addEventListener('beforeunload', sendLogoutBeacon);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      sendLogoutBeacon();
+    } else if (document.visibilityState === 'visible') {
+      sendPresenceHeartbeat();
+      loadActiveVibers();
+    }
+  });
+
+  // --- UNIFIED SUGGESTED HUBBERS SERVICE ---
+  async function getSuggestedHubbers(limit = 50) {
+    const token = localStorage.getItem('invibe_jwt_token') || localStorage.getItem('invibe_token');
+    if (!token) return [];
 
     try {
-      const res = await fetch(`${API_URL}/api/users/suggestions`, {
+      const res = await fetch(`${API_URL}/api/users/suggestions?limit=${limit}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      if (!res.ok) throw new Error('Failed to fetch suggestions');
+      if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch suggestions`);
       const suggestions = await res.json();
-
-      listContainer.innerHTML = '';
-      if (suggestions.length === 0) {
-        listContainer.innerHTML = '<p style="padding: 12px; text-align: center; color: var(--text-muted); font-size: 13px;">No suggestions available</p>';
-        return;
-      }
-
-      suggestions.forEach(user => {
-        const row = document.createElement('div');
-        row.className = 'user-row';
-        row.innerHTML = `
-          <img src="${user.profileImage || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=80&h=80&q=80'}" alt="${user.fullName}" class="user-row-avatar" style="cursor: pointer;" />
-          <div class="user-row-info" style="cursor: pointer;">
-            <h5>${user.fullName}</h5>
-            <p>@${user.username}</p>
-          </div>
-          <button class="follow-row-btn" data-user-id="${user._id}">Follow</button>
-        `;
-        listContainer.appendChild(row);
-
-        // Click handlers to view user profile
-        const avatarImg = row.querySelector('.user-row-avatar');
-        const infoDiv = row.querySelector('.user-row-info');
-        [avatarImg, infoDiv].forEach(el => {
-          el.addEventListener('click', () => {
-            switchView('profile', user._id);
-          });
-        });
-      });
-
-      const followButtons = listContainer.querySelectorAll('.follow-row-btn');
-      followButtons.forEach(btn => {
-        btn.addEventListener('click', async () => {
-          const uid = btn.getAttribute('data-user-id');
-          await toggleFollowUser(uid, btn);
-        });
-      });
+      console.log(`[Suggested Hubbers Service] Fetched ${suggestions ? suggestions.length : 0} suggestions (limit: ${limit})`);
+      return suggestions || [];
     } catch (err) {
-      console.error('Error loading suggestions:', err);
+      console.error('[Suggested Hubbers Service Error]:', err);
+      return [];
     }
   }
 
-  async function toggleFollowUser(targetUserId, btnElement) {
-    const token = localStorage.getItem('invibe_jwt_token');
-    if (!token) return;
+  // --- SUGGESTED HUBBERS HOME WIDGET ---
+  async function loadFollowSuggestions() {
+    const listContainer = document.querySelector('.suggested-users-list') || document.getElementById('suggested-users-list');
+    if (!listContainer) {
+      console.warn('[Suggested Hubbers] Container element .suggested-users-list not found in DOM');
+      return;
+    }
+
+    const suggestions = await getSuggestedHubbers(50);
+    console.log(`[Suggested Hubbers Widget] Rendering ${suggestions.length} items to Home widget`);
+
+    listContainer.innerHTML = '';
+    if (!suggestions || suggestions.length === 0) {
+      listContainer.innerHTML = '<p style="padding: 16px; text-align: center; color: var(--text-muted); font-size: 13px;">No suggestions available.</p>';
+      return;
+    }
+
+    suggestions.slice(0, 3).forEach(user => {
+      const row = document.createElement('div');
+      row.className = 'user-row';
+      row.style.display = 'flex';
+      row.style.alignItems = 'center';
+      row.style.justifyContent = 'space-between';
+      row.style.padding = '8px 0';
+
+      const isRequested = user.followStatus === 'pending';
+      const isFollowing = user.followStatus === 'following';
+
+      let btnClass = 'follow-row-btn';
+      let btnText = 'Follow';
+      let btnStyle = 'padding: 6px 14px; border-radius: 20px; font-weight: 600; font-size: 12px; border: none; cursor: pointer; transition: all 0.2s; background: var(--primary, #a855f7); color: white;';
+
+      if (isRequested) {
+        btnText = 'Requested';
+        btnStyle = 'padding: 6px 14px; border-radius: 20px; font-weight: 600; font-size: 12px; border: none; cursor: not-allowed; background: rgba(255,255,255,0.15); color: var(--text-muted, #94a3b8);';
+      } else if (isFollowing) {
+        btnText = 'Hubbies';
+        btnStyle = 'padding: 6px 14px; border-radius: 20px; font-weight: 600; font-size: 12px; border: none; cursor: pointer; background: #22c55e; color: white;';
+      }
+
+      row.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 10px; cursor: pointer;" class="user-info-area">
+          <img src="${user.profileImage || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=80&h=80&q=80'}" alt="${user.fullName}" class="user-row-avatar" style="width: 38px; height: 38px; border-radius: 50%; object-fit: cover;" />
+          <div class="user-row-info">
+            <h5 style="margin: 0; font-size: 13px; font-weight: 600; color: var(--text-color);">${user.fullName}</h5>
+            <p style="margin: 0; font-size: 11px; color: var(--text-muted);">@${user.username} • <span style="color: var(--primary);">${user.followersCount || 0} Hubbers</span></p>
+          </div>
+        </div>
+        <button class="${btnClass}" data-user-id="${user._id}" style="${btnStyle}" ${isRequested ? 'disabled' : ''}>${btnText}</button>
+      `;
+      listContainer.appendChild(row);
+
+      const btnElement = row.querySelector('.follow-row-btn');
+      if (btnElement) {
+        btnElement.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          await toggleFollowUser(user._id, btnElement, user);
+        });
+      }
+    });
+  }
+
+  async function toggleFollowUser(targetUserId, btnElement, userObj = null) {
+    const token = localStorage.getItem('invibe_jwt_token') || localStorage.getItem('invibe_token');
+    if (!token) {
+      showToast('Please log in to follow users! 🔐');
+      return;
+    }
 
     const isFollowing = btnElement.classList.contains('followed');
     const endpoint = isFollowing ? 'unfollow' : 'follow';
+    const targetUsername = userObj?.username || btnElement.getAttribute('data-username') || 'N/A';
+    const targetUuid = userObj?._id || targetUserId;
+    const fullApiUrl = `${API_URL}/api/users/${targetUserId}/${endpoint}`;
+
+    console.log('==================================================');
+    console.log('FRONTEND DEBUG - FOLLOW ACTION CLICKED');
+    console.log('==================================================');
+    console.log('1. Selected Suggested Hubber object:', userObj || { _id: targetUserId });
+    console.log('2. Target Profile UUID:', targetUuid);
+    console.log('3. Target Username:', targetUsername);
+    console.log('4. Request Payload:', { targetUserId, endpoint });
+    console.log('5. API URL:', fullApiUrl);
+    console.log('6. HTTP Method: POST');
+    console.log('==================================================');
 
     try {
-      const res = await fetch(`${API_URL}/api/users/${targetUserId}/${endpoint}`, {
+      const res = await fetch(fullApiUrl, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      console.log('FRONTEND DEBUG - API RESPONSE:', { status: res.status, ok: res.ok, body: data });
+
+      if (!res.ok) throw new Error(data.error || 'Follow action failed');
 
       if (endpoint === 'follow') {
-        btnElement.classList.add('followed');
-        btnElement.textContent = 'Hubbies';
-        showToast(data.message || 'Followed successfully!');
+        btnElement.textContent = 'Requested';
+        btnElement.style.background = 'rgba(255,255,255,0.15)';
+        btnElement.style.color = 'var(--text-muted, #94a3b8)';
+        btnElement.disabled = true;
+        showToast(data.message || 'Follow request sent! 📩');
       } else {
         btnElement.classList.remove('followed');
         btnElement.textContent = 'Follow';
+        btnElement.style.background = 'var(--primary, #a855f7)';
+        btnElement.disabled = false;
         showToast('Unfollowed successfully.');
       }
       loadProfileStats();
       loadFollowSuggestions();
+      if (suggestedVibersModal && suggestedVibersModal.classList.contains('active')) {
+        openSuggestedVibersModal();
+      }
     } catch (err) {
+      console.error('FRONTEND ERROR:', err.message);
       showToast(err.message);
     }
   }
@@ -5892,23 +6121,18 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function openSuggestedVibersModal() {
-    const token = localStorage.getItem('invibe_jwt_token');
-    if (!token) return;
+    if (!suggestedVibersContent) return;
 
     suggestedVibersContent.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-muted);">Loading suggestions...</div>';
-    suggestedVibersModal.classList.add('active');
+    if (suggestedVibersModal) suggestedVibersModal.classList.add('active');
 
     try {
-      // Query with limit=50 to show more suggestions in the modal
-      const res = await fetch(`${API_URL}/api/users/suggestions?limit=50`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (!res.ok) throw new Error('Failed to load suggestions');
-      const suggestions = await res.json();
+      const suggestions = await getSuggestedHubbers(50);
+      console.log(`[Suggested Hubbers Modal] Rendering ${suggestions.length} items to Modal`);
 
       suggestedVibersContent.innerHTML = '';
-      if (suggestions.length === 0) {
-        suggestedVibersContent.innerHTML = `<div style="text-align: center; padding: 20px; color: var(--text-muted);">No suggestions available</div>`;
+      if (!suggestions || suggestions.length === 0) {
+        suggestedVibersContent.innerHTML = `<div style="text-align: center; padding: 20px; color: var(--text-muted);">No suggestions available.</div>`;
         return;
       }
 
@@ -5925,16 +6149,16 @@ document.addEventListener('DOMContentLoaded', () => {
             <img src="${user.profileImage || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=80&h=80&q=80'}" alt="${user.fullName}" style="width: 40px; height: 40px; border-radius: 50%; object-fit: cover; margin-right: 10px;" />
             <div style="display: flex; flex-direction: column;">
               <strong style="font-size: 14px; color: var(--text-color);">${user.fullName}</strong>
-              <span style="font-size: 12px; color: var(--text-muted);">@${user.username}</span>
+              <span style="font-size: 12px; color: var(--text-muted);">@${user.username} • ${user.followersCount || 0} Hubbers</span>
             </div>
           </div>
-          <button class="search-follow-btn modal-suggest-follow-btn" data-user-id="${user._id}">
+          <button class="search-follow-btn modal-suggest-follow-btn" data-user-id="${user._id}" style="padding: 6px 14px; border-radius: 20px; font-weight: 600; font-size: 12px; border: none; cursor: pointer; background: var(--primary, #a855f7); color: white;">
             Follow
           </button>
         `;
 
         row.querySelector('.person-info').addEventListener('click', () => {
-          suggestedVibersModal.classList.remove('active');
+          if (suggestedVibersModal) suggestedVibersModal.classList.remove('active');
           switchView('profile', user._id);
         });
 
@@ -5943,32 +6167,7 @@ document.addEventListener('DOMContentLoaded', () => {
           followBtn.addEventListener('click', async (e) => {
             e.stopPropagation();
             const uid = followBtn.getAttribute('data-user-id');
-            const isFollowing = followBtn.classList.contains('followed');
-            const endpoint = isFollowing ? 'unfollow' : 'follow';
-
-            try {
-              const res = await fetch(`${API_URL}/api/users/${uid}/${endpoint}`, {
-                method: 'POST',
-                headers: { 'Authorization': `Bearer ${token}` }
-              });
-              const data = await res.json();
-              if (!res.ok) throw new Error(data.error);
-
-              if (endpoint === 'follow') {
-                followBtn.classList.add('followed');
-                followBtn.textContent = 'Hubbies';
-                showToast(data.message || 'Followed successfully!');
-              } else {
-                followBtn.classList.remove('followed');
-                followBtn.textContent = 'Follow';
-                showToast('Unfollowed successfully.');
-              }
-
-              loadProfileStats();
-              loadFollowSuggestions();
-            } catch (err) {
-              showToast(err.message);
-            }
+            await toggleFollowUser(uid, followBtn);
           });
         }
 
@@ -5982,25 +6181,29 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // --- ACTIVE VIBERS (REAL-TIME presence) ---
+  // --- ACTIVE HUBBERS WIDGET ---
   const activeVibersCount = document.getElementById('active-vibers-count');
   const activeVibersList = document.getElementById('active-vibers-list');
 
   async function loadActiveVibers() {
     if (!activeVibersList) return;
-    const token = localStorage.getItem('invibe_jwt_token');
+    const token = localStorage.getItem('invibe_jwt_token') || localStorage.getItem('invibe_token');
     if (!token) return;
 
     try {
-      const res = await fetch(`${API_URL}/api/users/active`, {
+      const res = await fetch(`${API_URL}/api/online-users`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      if (!res.ok) throw new Error('Failed to fetch active vibers');
-      const activeUsers = await res.json();
+      if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch online users`);
+      const data = await res.json();
+      console.log('[Active Hubbers Widget Debug] API Response:', data);
+
+      const onlineCount = data.onlineCount !== undefined ? data.onlineCount : (Array.isArray(data) ? data.length : 0);
+      const activeUsers = data.users || (Array.isArray(data) ? data : []);
 
       activeVibersList.innerHTML = '';
       if (activeVibersCount) {
-        activeVibersCount.textContent = `${activeUsers.length} online`;
+        activeVibersCount.textContent = `${onlineCount} online`;
       }
 
       if (activeUsers.length === 0) {
@@ -6008,12 +6211,16 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
-      activeUsers.forEach(user => {
+      activeUsers.slice(0, 5).forEach(user => {
         const circle = document.createElement('div');
         circle.className = 'face-circle online';
+        circle.style.position = 'relative';
         circle.style.cursor = 'pointer';
         circle.title = `${user.fullName} (@${user.username})`;
-        circle.innerHTML = `<img src="${user.profileImage || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&h=150&q=80'}" alt="${user.fullName}" />`;
+        circle.innerHTML = `
+          <img src="${user.profileImage || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&h=150&q=80'}" alt="${user.fullName}" style="width: 36px; height: 36px; border-radius: 50%; object-fit: cover;" />
+          <span class="online-indicator-dot" style="position: absolute; bottom: 0; right: 0; width: 10px; height: 10px; background: #22c55e; border: 2px solid #1a1a24; border-radius: 50%;"></span>
+        `;
 
         circle.addEventListener('click', () => {
           switchView('profile', user._id);
@@ -6022,11 +6229,11 @@ document.addEventListener('DOMContentLoaded', () => {
         activeVibersList.appendChild(circle);
       });
     } catch (err) {
-      console.error('Error loading active vibers:', err);
+      console.error('[Active Hubbers Widget Error]:', err);
     }
   }
 
-  // Poll for active users every 30 seconds
+  // Poll active users as fallback
   setInterval(loadActiveVibers, 30000);
 
   async function loadProfileStats() {
@@ -6350,35 +6557,39 @@ document.addEventListener('DOMContentLoaded', () => {
       followingCount: 0
     };
 
-    let posts = JSON.parse(localStorage.getItem('invibe_custom_posts') || '[]');
+    let posts = [];
     let reels = [];
 
     // Try fetching remote API if available
     try {
-      const token = localStorage.getItem('invibe_jwt_token');
-      const targetId = isMe ? (currentUser.id || currentUser._id) : userId;
-      if (token && targetId) {
-        const res = await fetch(`${API_URL}/api/users/${targetId}/profile`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (res.ok) {
+      const token = localStorage.getItem('invibe_jwt_token') || localStorage.getItem('invibe_token');
+      const targetId = isMe ? (currentUser.id || currentUser._id || currentUser.username) : userId;
+      if (targetId) {
+        const path = `/api/users/${targetId}/profile`;
+        let res;
+        try {
+          res = await fetch(path, { headers: token ? { 'Authorization': `Bearer ${token}` } : {} });
+        } catch (_) {
+          res = await fetch(`${API_URL}${path}`, { headers: token ? { 'Authorization': `Bearer ${token}` } : {} });
+        }
+        if (res && res.ok) {
           const data = await res.json();
           if (data.user) user = { ...user, ...data.user };
-          if (data.posts) posts = [...posts, ...data.posts];
-          if (data.reels) reels = data.reels;
+          if (Array.isArray(data.posts)) posts = data.posts;
+          if (Array.isArray(data.reels)) reels = data.reels;
         }
       }
     } catch (netErr) {
       console.warn("Network profile load notice:", netErr.message);
     }
 
-    // Update follow statistics
+    // Update follow statistics & YOUR HUBS post count
     const followersCount = document.getElementById('profile-followers-count');
     const followingCount = document.getElementById('profile-following-count');
     const vibesCount = document.getElementById('profile-vibes-count');
     if (followersCount) followersCount.textContent = formatCount(user.followersCount || 0);
     if (followingCount) followingCount.textContent = formatCount(user.followingCount || 0);
-    if (vibesCount) vibesCount.textContent = posts ? posts.length : 0;
+    if (vibesCount) vibesCount.textContent = formatCount(user.postsCount !== undefined ? user.postsCount : posts.length);
 
     // Render posts grid (Vibes Gallery)
     const vibesGrid = document.getElementById('profile-vibes-grid');
@@ -7183,6 +7394,40 @@ document.addEventListener('DOMContentLoaded', () => {
       console.error(e);
     }
   };
+
+  // ─── REALTIME CHAT & PRESENCE SUBSCRIBERS ──────────────────────────
+  if (window.supabase) {
+    try {
+      window.supabase
+        .channel('public:online_users')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'online_users' }, (payload) => {
+          console.log('[Realtime Presence Debug] Event received on online_users:', payload);
+          loadActiveVibers();
+        })
+        .subscribe();
+
+      window.supabase
+        .channel('public:messages')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, (payload) => {
+          console.log('[Realtime Chat Debug] Event received on messages:', payload);
+          loadChatThreads();
+          if (state.currentChatThread) {
+            fetchMessages(state.currentChatThread, true);
+          }
+        })
+        .subscribe();
+
+      window.supabase
+        .channel('public:typing_status')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'typing_status' }, (payload) => {
+          console.log('[Realtime Typing Debug] Event received on typing_status:', payload);
+          loadChatThreads();
+        })
+        .subscribe();
+    } catch (rtErr) {
+      console.warn('[Realtime Presence Subscription Notice]:', rtErr);
+    }
+  }
 
   // ─── NOTIFICATIONS DROPDOWN AND BADGES INTERACTION SYSTEM ────────────────────
   const notifBtn = document.getElementById('notif-btn');
