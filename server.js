@@ -80,7 +80,7 @@ setInterval(async () => {
     const now = new Date().toISOString();
     const { data: scheduledStories, error } = await supabase
       .from('stories')
-      .select('_id, scheduledAt')
+      .select('id, scheduledAt')
       .eq('status', 'scheduled')
       .lte('scheduledAt', now);
 
@@ -96,14 +96,14 @@ setInterval(async () => {
           .update({
             status: 'published',
             isScheduled: false,
-            createdAt: now // Reset createdAt so it appears at the top of the feed now
+            created_at: now // Reset created_at so it appears at the top of the feed now
           })
-          .eq('_id', story._id);
+          .eq('id', story.id);
         
         if (updateError) {
-          console.error(`[Scheduler] Failed to publish story ${story._id}:`, updateError.message);
+          console.error(`[Scheduler] Failed to publish story ${story.id}:`, updateError.message);
         } else {
-          console.log(`[Scheduler] Successfully auto-published scheduled story ${story._id}`);
+          console.log(`[Scheduler] Successfully auto-published scheduled story ${story.id}`);
         }
       }
     }

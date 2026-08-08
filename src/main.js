@@ -1,196 +1,10 @@
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import CreatePost from './pages/CreatePost/CreatePost.jsx';
+import { initVideoEditor } from './video_editor_controller.js';
 import './style.css'
-import './auth.css'
-import { initAuth, updateAppUI, handleLogout, supabase } from './auth.js'
 
-document.addEventListener('DOMContentLoaded', () => {
-  const API_URL = (
-    window.location.hostname === 'localhost' ||
-    window.location.hostname === '127.0.0.1' ||
-    window.location.hostname === '[::1]' ||
-    window.location.hostname === '::1' ||
-    window.location.hostname.startsWith('192.168.') ||
-    window.location.hostname.startsWith('10.') ||
-    window.location.hostname.startsWith('172.') ||
-    window.location.hostname.endsWith('.local')
-  ) ? `${window.location.protocol}//${window.location.hostname}:3000`
-    : window.location.origin;
-
-  window.savedHubbs = window.savedHubbs || [];
-
-  initAuth();
-  updateAppUI();
-  window.addEventListener('auth-changed', updateAppUI);
-
-  // Global Logout Handling (Applies to sidebar logout, mobile logout, profile header avatar)
-  document.addEventListener('click', (e) => {
-    const logoutBtn = e.target.closest('#logout-btn, .logout-btn, [data-action="logout"], #header-profile-avatar');
-    if (logoutBtn) {
-      e.preventDefault();
-      if (confirm('Are you sure you want to log out of Hi-Hubble?')) {
-        handleLogout();
-      }
-    }
-  });
-
-  // Global Follow / Unfollow Button Handling
-  document.addEventListener('click', async (e) => {
-    const followBtn = e.target.closest('.btn-follow-user');
-    if (followBtn) {
-      e.preventDefault();
-      e.stopPropagation();
-
-      const targetId = followBtn.getAttribute('data-user-id');
-      const targetUsername = followBtn.getAttribute('data-username') || 'user';
-      const token = localStorage.getItem('invibe_jwt_token');
-
-      if (!token) {
-        showToast('Please log in to follow users! 🔐');
-        return;
-      }
-
-      const followingList = JSON.parse(localStorage.getItem('invibe_following_users') || '[]');
-      const pendingList = JSON.parse(localStorage.getItem('invibe_pending_users') || '[]');
-      const isCurrentlyFollowing = followingList.includes(targetId);
-      const isCurrentlyPending = pendingList.includes(targetId);
-
-      followBtn.disabled = true;
-
-      try {
-        const endpoint = (isCurrentlyFollowing || isCurrentlyPending) ? `/api/users/${targetId}/unfollow` : `/api/users/${targetId}/follow`;
-        const res = await fetch(`${API_URL}${endpoint}`, {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-
-        if (res.ok) {
-          const resData = await res.json();
-          if (resData.status === 'pending') {
-            if (!pendingList.includes(targetId)) pendingList.push(targetId);
-            localStorage.setItem('invibe_pending_users', JSON.stringify(pendingList));
-            showToast(resData.message || `Follow request sent to @${targetUsername}. ⏳`);
-
-            document.querySelectorAll(`.btn-follow-user[data-user-id="${targetId}"]`).forEach(btn => {
-              btn.className = 'btn-follow-user pending';
-              btn.style.background = 'rgba(234, 179, 8, 0.2)';
-              btn.style.color = '#eab308';
-              btn.textContent = 'Requested';
-            });
-          } else if (resData.status === 'following' || resData.isFollowing) {
-            if (!followingList.includes(targetId)) followingList.push(targetId);
-            const pIdx = pendingList.indexOf(targetId);
-            if (pIdx > -1) pendingList.splice(pIdx, 1);
-
-            localStorage.setItem('invibe_following_users', JSON.stringify(followingList));
-            localStorage.setItem('invibe_pending_users', JSON.stringify(pendingList));
-            showToast(resData.message || `Now following @${targetUsername}! 🎉`);
-
-            document.querySelectorAll(`.btn-follow-user[data-user-id="${targetId}"]`).forEach(btn => {
-              btn.className = 'btn-follow-user following';
-              btn.style.background = 'rgba(255,255,255,0.1)';
-              btn.style.color = '#ffffff';
-              btn.textContent = 'Following';
-            });
-          } else {
-            // Unfollowed
-            const fIdx = followingList.indexOf(targetId);
-            if (fIdx > -1) followingList.splice(fIdx, 1);
-            const pIdx = pendingList.indexOf(targetId);
-            if (pIdx > -1) pendingList.splice(pIdx, 1);
-
-            localStorage.setItem('invibe_following_users', JSON.stringify(followingList));
-            localStorage.setItem('invibe_pending_users', JSON.stringify(pendingList));
-            showToast(resData.message || `Unfollowed @${targetUsername}`);
-
-            document.querySelectorAll(`.btn-follow-user[data-user-id="${targetId}"]`).forEach(btn => {
-              btn.className = 'btn-follow-user';
-              btn.style.background = 'var(--primary, #a855f7)';
-              btn.style.color = '#ffffff';
-              btn.textContent = '+ Follow';
-            });
-          }
-
-          if (typeof updateAppUI === 'function') updateAppUI();
-        }
-      } catch (err) {
-        console.error("Follow action error:", err);
-      } finally {
-        followBtn.disabled = false;
-      }
-    }
-  });
-
-  // Initialize Lucide Icons (Debounced for performance)
-  let iconRenderQueued = false;
-  const debouncedCreateIcons = () => {
-    if (!window.lucide || iconRenderQueued) return;
-    iconRenderQueued = true;
-    requestAnimationFrame(() => {
-      if (window.lucide) window.lucide.createIcons();
-      iconRenderQueued = false;
-    });
-  };
-  window.debouncedCreateIcons = debouncedCreateIcons;
-
-  debouncedCreateIcons();
-
-  // --- STATE SYSTEM ---
-  const state = {
-    theme: 'dark',
-    activeView: 'home',
-    currentChatThread: null,
-    chatMode: 'chat', // chat, watch, call, game, media
-    callTimerInterval: null,
-    callSeconds: 1455, // starts at 00:24:15
-    isLiked: {
-      post1: false,
-      post2: false
-    },
-    likesCount: {
-      post1: 12400,
-      post2: 8200
-    },
-    storyGroups: [],
-    activeGroupIndex: 0,
-    activeStoryIndex: 0,
-    storyProgressInterval: null,
-    storyProgressPercent: 0,
-    isStoryPaused: false,
-    isLudoRolling: false
-  };
-
-  // --- STICKY HEADER progressive BLUR ---
-  const header = document.getElementById('main-header');
-  let tickingScroll = false;
-  window.addEventListener('scroll', () => {
-    if (!tickingScroll) {
-      window.requestAnimationFrame(() => {
-        if (window.scrollY > 20) {
-          header.classList.add('scrolled');
-        } else {
-          header.classList.remove('scrolled');
-        }
-        tickingScroll = false;
-      });
-      tickingScroll = true;
-    }
-  });
-
-  // --- THEME TOGGLE CONTROLLER ---
-  const themeToggleBtn = document.getElementById('theme-toggle-btn');
-  themeToggleBtn.addEventListener('click', () => {
-    if (document.body.classList.contains('dark-theme')) {
-      document.body.classList.replace('dark-theme', 'light-theme');
-      state.theme = 'light';
-      showToast('Switched to Light Theme ☀️');
-    } else {
-      document.body.classList.replace('light-theme', 'dark-theme');
-      state.theme = 'dark';
-      showToast('Switched to Dark Theme 🌌');
-    }
-  });
-
-
-  // --- INDEXEDDB DRAFTS WRAPPER ---
+// --- INDEXEDDB DRAFTS WRAPPER ---
   const DraftsDB = {
     dbName: 'HiHubbleDrafts',
     dbVersion: 1,
@@ -453,7 +267,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // --- AUTO SAVE DEBOUNCE ---
   let autoSaveTimeout = null;
   window.triggerAutoSave = function() {
-    if (state.activeView === 'create-hubbs' && window.chUploads && window.chUploads.length > 0) {
+    const activeHubbsView = document.getElementById('view-create-hubbs');
+    const isActive = activeHubbsView && activeHubbsView.classList.contains('active');
+    if (isActive && window.chUploads && window.chUploads.length > 0) {
       clearTimeout(autoSaveTimeout);
       autoSaveTimeout = setTimeout(() => {
         window._silentDraftSave = true;
@@ -510,6 +326,196 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
+  import './auth.css'
+import { initAuth, updateAppUI, handleLogout, supabase } from './auth.js'
+
+document.addEventListener('DOMContentLoaded', () => {
+  const API_URL = (
+    window.location.hostname === 'localhost' ||
+    window.location.hostname === '127.0.0.1' ||
+    window.location.hostname === '[::1]' ||
+    window.location.hostname === '::1' ||
+    window.location.hostname.startsWith('192.168.') ||
+    window.location.hostname.startsWith('10.') ||
+    window.location.hostname.startsWith('172.') ||
+    window.location.hostname.endsWith('.local')
+  ) ? `${window.location.protocol}//${window.location.hostname}:3000`
+    : window.location.origin;
+
+  window.savedHubbs = window.savedHubbs || [];
+
+  initAuth();
+  updateAppUI();
+  window.addEventListener('auth-changed', updateAppUI);
+
+  // Global Logout Handling (Applies to sidebar logout, mobile logout, profile header avatar)
+  document.addEventListener('click', (e) => {
+    const logoutBtn = e.target.closest('#logout-btn, .logout-btn, [data-action="logout"], #header-profile-avatar');
+    if (logoutBtn) {
+      e.preventDefault();
+      if (confirm('Are you sure you want to log out of Hi-Hubble?')) {
+        handleLogout();
+      }
+    }
+  });
+
+  // Global Follow / Unfollow Button Handling
+  document.addEventListener('click', async (e) => {
+    const followBtn = e.target.closest('.btn-follow-user');
+    if (followBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const targetId = followBtn.getAttribute('data-user-id');
+      const targetUsername = followBtn.getAttribute('data-username') || 'user';
+      const token = localStorage.getItem('invibe_jwt_token');
+
+      if (!token) {
+        showToast('Please log in to follow users! 🔐');
+        return;
+      }
+
+      const followingList = JSON.parse(localStorage.getItem('invibe_following_users') || '[]');
+      const pendingList = JSON.parse(localStorage.getItem('invibe_pending_users') || '[]');
+      const isCurrentlyFollowing = followingList.includes(targetId);
+      const isCurrentlyPending = pendingList.includes(targetId);
+
+      followBtn.disabled = true;
+
+      try {
+        const endpoint = (isCurrentlyFollowing || isCurrentlyPending) ? `/api/users/${targetId}/unfollow` : `/api/users/${targetId}/follow`;
+        const res = await fetch(`${API_URL}${endpoint}`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (res.ok) {
+          const resData = await res.json();
+          if (resData.status === 'pending') {
+            if (!pendingList.includes(targetId)) pendingList.push(targetId);
+            localStorage.setItem('invibe_pending_users', JSON.stringify(pendingList));
+            showToast(resData.message || `Follow request sent to @${targetUsername}. ⏳`);
+
+            document.querySelectorAll(`.btn-follow-user[data-user-id="${targetId}"]`).forEach(btn => {
+              btn.className = 'btn-follow-user pending';
+              btn.style.background = 'rgba(234, 179, 8, 0.2)';
+              btn.style.color = '#eab308';
+              btn.textContent = 'Requested';
+            });
+          } else if (resData.status === 'following' || resData.isFollowing) {
+            if (!followingList.includes(targetId)) followingList.push(targetId);
+            const pIdx = pendingList.indexOf(targetId);
+            if (pIdx > -1) pendingList.splice(pIdx, 1);
+
+            localStorage.setItem('invibe_following_users', JSON.stringify(followingList));
+            localStorage.setItem('invibe_pending_users', JSON.stringify(pendingList));
+            showToast(resData.message || `Now following @${targetUsername}! 🎉`);
+
+            document.querySelectorAll(`.btn-follow-user[data-user-id="${targetId}"]`).forEach(btn => {
+              btn.className = 'btn-follow-user following';
+              btn.style.background = 'rgba(255,255,255,0.1)';
+              btn.style.color = '#ffffff';
+              btn.textContent = 'Following';
+            });
+          } else {
+            // Unfollowed
+            const fIdx = followingList.indexOf(targetId);
+            if (fIdx > -1) followingList.splice(fIdx, 1);
+            const pIdx = pendingList.indexOf(targetId);
+            if (pIdx > -1) pendingList.splice(pIdx, 1);
+
+            localStorage.setItem('invibe_following_users', JSON.stringify(followingList));
+            localStorage.setItem('invibe_pending_users', JSON.stringify(pendingList));
+            showToast(resData.message || `Unfollowed @${targetUsername}`);
+
+            document.querySelectorAll(`.btn-follow-user[data-user-id="${targetId}"]`).forEach(btn => {
+              btn.className = 'btn-follow-user';
+              btn.style.background = 'var(--primary, #a855f7)';
+              btn.style.color = '#ffffff';
+              btn.textContent = '+ Follow';
+            });
+          }
+
+          if (typeof updateAppUI === 'function') updateAppUI();
+        }
+      } catch (err) {
+        console.error("Follow action error:", err);
+      } finally {
+        followBtn.disabled = false;
+      }
+    }
+  });
+
+  // Initialize Lucide Icons (Debounced for performance)
+  let iconRenderQueued = false;
+  const debouncedCreateIcons = () => {
+    if (!window.lucide || iconRenderQueued) return;
+    iconRenderQueued = true;
+    requestAnimationFrame(() => {
+      if (window.lucide) window.lucide.createIcons();
+      iconRenderQueued = false;
+    });
+  };
+  window.debouncedCreateIcons = debouncedCreateIcons;
+
+  debouncedCreateIcons();
+
+  // --- STATE SYSTEM ---
+  const state = {
+    theme: 'dark',
+    activeView: 'home',
+    currentChatThread: null,
+    chatMode: 'chat', // chat, watch, call, game, media
+    callTimerInterval: null,
+    callSeconds: 1455, // starts at 00:24:15
+    isLiked: {
+      post1: false,
+      post2: false
+    },
+    likesCount: {
+      post1: 12400,
+      post2: 8200
+    },
+    storyGroups: [],
+    activeGroupIndex: 0,
+    activeStoryIndex: 0,
+    storyProgressInterval: null,
+    storyProgressPercent: 0,
+    isStoryPaused: false,
+    isLudoRolling: false
+  };
+
+  // --- STICKY HEADER progressive BLUR ---
+  const header = document.getElementById('main-header');
+  let tickingScroll = false;
+  window.addEventListener('scroll', () => {
+    if (!tickingScroll) {
+      window.requestAnimationFrame(() => {
+        if (window.scrollY > 20) {
+          header.classList.add('scrolled');
+        } else {
+          header.classList.remove('scrolled');
+        }
+        tickingScroll = false;
+      });
+      tickingScroll = true;
+    }
+  });
+
+  // --- THEME TOGGLE CONTROLLER ---
+  const themeToggleBtn = document.getElementById('theme-toggle-btn');
+  themeToggleBtn.addEventListener('click', () => {
+    if (document.body.classList.contains('dark-theme')) {
+      document.body.classList.replace('dark-theme', 'light-theme');
+      state.theme = 'light';
+      showToast('Switched to Light Theme ☀️');
+    } else {
+      document.body.classList.replace('light-theme', 'dark-theme');
+      state.theme = 'dark';
+      showToast('Switched to Dark Theme 🌌');
+    }
+  });
+
   // --- TOAST HELPER ---
   const toast = document.getElementById('toast-notif');
   function showToast(message) {
@@ -527,10 +533,31 @@ document.addEventListener('DOMContentLoaded', () => {
   const mobileNavItems = document.querySelectorAll('.mobile-nav-btn');
   const appContainer = document.querySelector('.chats-layout-grid');
 
-  window.switchView = switchView; // Expose to global scope for inline onclick
+  let createPostRoot = null;
+  function mountCreatePost() {
+    const container = document.getElementById('view-create-post');
+    if (!container) return;
+    if (!createPostRoot) {
+      createPostRoot = ReactDOM.createRoot(container);
+    }
+    createPostRoot.render(
+      React.createElement(CreatePost, {
+        onNavigateBack: () => {
+          switchView('home');
+        }
+      })
+    );
+  }
 
   function switchView(viewName, userId) {
     if (!viewName) return;
+
+    if (viewName === 'create-post') {
+      document.body.classList.add('create-post-view-active');
+      mountCreatePost();
+    } else {
+      document.body.classList.remove('create-post-view-active');
+    }
 
     if (state.activeView === 'create-hubbs' && viewName !== 'create-hubbs' && window.chUploads && window.chUploads.length > 0) {
       window._silentDraftSave = true;
@@ -564,21 +591,6 @@ document.addEventListener('DOMContentLoaded', () => {
       if (chatHeader) chatHeader.style.display = 'none';
       if (chatViewport) chatViewport.style.display = 'none';
       if (chatFooter) chatFooter.style.display = 'none';
-    }
-
-    if (viewName === 'create-hubbs') {
-      document.body.classList.add('create-hubbs-view-active');
-    } else {
-      document.body.classList.remove('create-hubbs-view-active');
-    }
-
-    if (viewName === 'review-hubbs') {
-      document.body.classList.add('review-hubbs-view-active');
-      if (typeof window.initBeforeAfterSlider === 'function') {
-        setTimeout(window.initBeforeAfterSlider, 50);
-      }
-    } else {
-      document.body.classList.remove('review-hubbs-view-active');
     }
 
     // Update active view panels
@@ -1503,6 +1515,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const closeStoryCreation = () => {
     if (storyCreationModal) storyCreationModal.classList.remove('active');
     currentStoryImageBase64 = null;
+    window.currentStoryImageBase64 = null;
   };
   if (storyCreationCancel) storyCreationCancel.addEventListener('click', closeStoryCreation);
 
@@ -1516,7 +1529,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const res = await fetch(`${API_URL}/api/stories`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ mediaUrl: currentStoryImageBase64, mediaType: 'image', isDraft })
+        body: JSON.stringify({ mediaUrl: window.currentStoryImageBase64 || currentStoryImageBase64, mediaType: 'image', isDraft })
       });
       if (!res.ok) throw new Error('Failed to save story');
       showToast(isDraft ? 'Draft saved!' : 'Story published successfully! 📸✨');
@@ -1527,6 +1540,8 @@ document.addEventListener('DOMContentLoaded', () => {
       showToast('Failed to process story.');
     }
   }
+
+  window.submitStory = submitStory;
 
   if (storyCreationPublish) storyCreationPublish.addEventListener('click', () => submitStory(false));
   if (storyCreationDraft) storyCreationDraft.addEventListener('click', () => submitStory(true));
@@ -1550,7 +1565,7 @@ document.addEventListener('DOMContentLoaded', () => {
           const div = document.createElement('div');
           div.style = 'display: flex; gap: 12px; align-items: center; background: rgba(255,255,255,0.05); padding: 12px; border-radius: 12px;';
           div.innerHTML = `
-            <img src="${draft.mediaUrl}" style="width: 60px; height: 60px; object-fit: contain; object-position: center; border-radius: 8px;" />
+            <img src="${draft.mediaUrl}" style="width: 60px; height: 60px; object-fit: cover; border-radius: 8px;" />
             <div style="flex: 1; color: white;">
               <p style="margin: 0; font-size: 14px; color: var(--text-muted);">${formatTimeAgo(draft.createdAt)}</p>
             </div>
@@ -1610,20 +1625,22 @@ document.addEventListener('DOMContentLoaded', () => {
   let selectedPostMediaBase64 = null;
   let selectedPostMediaType = 'image';
 
-  if (createPostMediaBtn && createPostFileInput) {
-    createPostMediaBtn.addEventListener('click', () => {
-      createPostFileInput.click();
+  if (createPostMediaBtn) {
+    createPostMediaBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      switchView('create-post');
     });
   }
 
-  function updateSubmitButtonState() {
-    const hasCaption = createPostCaption.value.trim().length > 0;
-    const hasMedia = !!selectedPostMediaBase64;
-    createPostSubmitBtn.disabled = !(hasCaption || hasMedia);
-  }
-
   if (createPostCaption) {
-    createPostCaption.addEventListener('input', updateSubmitButtonState);
+    createPostCaption.addEventListener('click', (e) => {
+      e.preventDefault();
+      switchView('create-post');
+    });
+    createPostCaption.addEventListener('focus', (e) => {
+      e.preventDefault();
+      switchView('create-post');
+    });
   }
 
   let selectedPostMediaBlobUrl = null;
@@ -8552,6 +8569,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 });
 
+
 // ==========================================
 // BEFORE / AFTER SLIDER LOGIC
 // ==========================================
@@ -9497,16 +9515,10 @@ window.saveReviewDraft = function(btn) {
   }, 1000);
 };
 
+
 window.publishHubb = async function() {
-  if (!window.chUploads || window.chUploads.length === 0) {
-    if (window.showValidationModal) window.showValidationModal();
-    return;
-  }
-  
+  if (!window.chUploads || window.chUploads.length === 0) return;
   const media = window.chUploads[0];
-  const url = media.thumbUrl || URL.createObjectURL(media.file);
-  const caption = document.querySelector('.ch-caption-input')?.value || '';
-  const filter = window.HubbleEditor.buildCSSFilterString();
   
   const pubBtn = document.getElementById('review-publish-btn');
   if (pubBtn) {
@@ -9515,32 +9527,71 @@ window.publishHubb = async function() {
     pubBtn.innerHTML = '<i data-lucide="loader" class="animate-spin"></i> Processing...';
     if (window.lucide) window.lucide.createIcons();
   }
-  
-  if (window.chScheduledAt) {
-    // Scheduled HUBB - Send to backend
-    try {
+
+  try {
+    // Create an offscreen canvas
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    
+    // Load image
+    const img = new Image();
+    img.crossOrigin = 'Anonymous';
+    img.src = media.thumbUrl || URL.createObjectURL(media.file);
+    
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = reject;
+    });
+    
+    canvas.width = img.width;
+    canvas.height = img.height;
+    
+    // Apply CSS filters if present
+    const state = media.editorState || {};
+    const cssFilter = window.HubbleEditor && window.HubbleEditor.buildCSSFilterString ? window.HubbleEditor.buildCSSFilterString(state.filter || 'original', state.adjustments || {}) : 'none';
+    ctx.filter = cssFilter !== 'none' ? cssFilter : 'none';
+    
+    // Draw base image
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    
+    // Reset filter for drawing text/stickers
+    ctx.filter = 'none';
+    
+    // Render layers (Text & Stickers)
+    if (state.layers && state.layers.length > 0) {
+      state.layers.forEach(layer => {
+         if (layer.type === 'text') {
+            ctx.font = `${layer.fontSize}px ${layer.fontFamily}`;
+            ctx.fillStyle = layer.color;
+            const x = (parseFloat(layer.x) / 100) * canvas.width || 0;
+            const y = (parseFloat(layer.y) / 100) * canvas.height || 0;
+            ctx.fillText(layer.text, x, y);
+         } else if (layer.type === 'sticker') {
+            const emojiFont = '100px Arial'; 
+            ctx.font = emojiFont;
+            const x = (parseFloat(layer.x) / 100) * canvas.width || 0;
+            const y = (parseFloat(layer.y) / 100) * canvas.height || 0;
+            ctx.fillText(layer.emoji, x, y);
+         }
+      });
+    }
+
+    const base64Image = canvas.toDataURL('image/jpeg', 0.9);
+    
+    if (window.chScheduledAt) {
+      // Scheduled HUBB - Send to backend
       const token = localStorage.getItem('invibe_jwt_token');
       if (!token) {
         if (window.showToast) window.showToast('Please log in to schedule a HUBB! 🔐', 'error');
         throw new Error('No token');
       }
       
-      // Convert file to base64
-      const getBase64 = (file) => new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.readAsDataURL(file);
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = error => reject(error);
-      });
-      
-      const base64Media = await getBase64(media.file);
-      
       const API_URL = window.API_URL || '';
       const res = await fetch(`${API_URL}/api/stories/schedule`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ 
-          mediaUrl: base64Media, 
+          mediaUrl: base64Image, 
           mediaType: media.type || 'image',
           scheduledAt: window.chScheduledAt 
         })
@@ -9549,91 +9600,52 @@ window.publishHubb = async function() {
       if (!res.ok) throw new Error('Failed to schedule HUBB');
       
       if (window.showToast) window.showToast('HUBB scheduled successfully! 🗓️✨');
-    } catch (err) {
-      console.error('Scheduling error:', err);
-      if (window.showToast) window.showToast('Failed to schedule HUBB.', 'error');
       
-      if (pubBtn) {
-        pubBtn.disabled = false;
-        pubBtn.style.opacity = '1';
-        pubBtn.innerHTML = '<span id="review-publish-text">Schedule Hubb</span> <i id="review-publish-icon" data-lucide="calendar-clock" style="width: 18px; height: 18px;"></i>';
-        if (window.lucide) window.lucide.createIcons();
+      // Reset scheduling
+      window.chScheduledAt = null;
+      const toggle = document.getElementById('ch-schedule-toggle');
+      if (toggle) toggle.checked = false;
+      const row = document.getElementById('ch-schedule-datetime-row');
+      if (row) row.style.display = 'none';
+      const infoBox = document.getElementById('review-scheduled-info');
+      if (infoBox) infoBox.style.display = 'none';
+    } else {
+      // Link to Project A's upload logic
+      window.currentStoryImageBase64 = base64Image;
+      if (typeof window.submitStory === 'function') {
+         await window.submitStory(false);
+      } else if (typeof submitStory === 'function') {
+         await submitStory(false);
+      } else {
+         console.error("submitStory function not found!");
+         showToast('Error: submitStory not found');
       }
-      return;
     }
-  } else {
-    // Non-scheduled HUBB - existing local flow
-    let layout = (window.HubbleEditor && window.HubbleEditor.activeLayout) || 'original';
-    layout = window.getEffectiveLayout(layout, window.chUploads);
-
-    const allMedia = window.chUploads.map(m => {
-       const state = m.editorState || {
-          filter: 'original', rotation: 0, zoom: 1, panX: 0, panY: 0,
-          adjustments: { brightness: 100, contrast: 100, exposure: 100, highlights: 100, shadows: 100, temperature: 0, tint: 0, saturation: 100, vibrance: 100, sharpness: 0, blur: 0, opacity: 100 },
-          crop: null, layers: [], isMuted: false, musicTrack: null, selectedLocation: null
-       };
-       return {
-          url: m.thumbUrl || URL.createObjectURL(m.file),
-          type: m.type,
-          filter: window.HubbleEditor.buildCSSFilterString ? window.HubbleEditor.buildCSSFilterString(state.filter, state.adjustments) : '',
-          rotation: state.rotation || 0,
-          zoom: state.zoom || 1,
-          panX: state.panX || 0,
-          panY: state.panY || 0,
-          crop: state.crop,
-          layers: state.layers,
-          ar: (window.HubbleEditor && window.HubbleEditor.getEditedAspectRatio) ? window.HubbleEditor.getEditedAspectRatio(m) : 1
-       };
-    });
-
-    const newStoryHTML = `
-      <div class="story-card has-story" onclick="window.openPublishedStory(this)">
-        <div class="story-avatar-container">
-          <img src="${url}" alt="My Story" style="filter: ${filter}; object-fit: contain; object-position: center;">
-        </div>
-        <span class="story-username">Your Story</span>
-        <template class="story-data">
-          ${JSON.stringify({
-            allMedia: allMedia,
-            layout: layout,
-            caption: caption,
-            collaborationEnabled: window.collaborationEnabled !== false,
-            collaboratorIds: window.collaborationEnabled !== false ? (window.selectedCollaborators || []).map(c => c._id || c.id) : [],
-            time: Date.now()
-          })}
-        </template>
-      </div>
-    `;
-    
-    const currentBtn = document.getElementById('story-btn-current');
-    if (currentBtn) {
-      currentBtn.insertAdjacentHTML('afterend', newStoryHTML);
+  } catch (e) {
+    console.error("Rasterization Error:", e);
+    if (window.showToast) window.showToast('Failed to process image', 'error');
+  } finally {
+    window.chUploads = [];
+    if (window.currentDraftId) {
+      DraftsDB.deleteDraft(window.currentDraftId).then(() => {
+        window.currentDraftId = null;
+        window.currentDraftCreatedAt = null;
+        window.renderDraftsList();
+      }).catch(console.error);
     }
-    
-    if (window.showToast) window.showToast('Story published! 🚀');
+    if (pubBtn) {
+      pubBtn.disabled = false;
+      pubBtn.style.opacity = '1';
+      pubBtn.innerHTML = '<span id="review-publish-text">Publish Hubb</span> <i id="review-publish-icon" data-lucide="upload-cloud" style="width: 18px; height: 18px;"></i>';
+      if (window.lucide) window.lucide.createIcons();
+    }
+    setTimeout(() => {
+      switchView('home');
+      if (typeof initCreateHubbsUpload === 'function') initCreateHubbsUpload();
+    }, 100);
   }
-  
-  window.chUploads = [];
-  
-  if (window.currentDraftId) {
-    DraftsDB.deleteDraft(window.currentDraftId).then(() => {
-      window.currentDraftId = null;
-      window.currentDraftCreatedAt = null;
-      window.renderDraftsList();
-    }).catch(console.error);
-  }
-  
-  if (pubBtn) {
-    pubBtn.disabled = false;
-    pubBtn.style.opacity = '1';
-    pubBtn.innerHTML = '<span id="review-publish-text">Publish Hubb</span> <i id="review-publish-icon" data-lucide="upload-cloud" style="width: 18px; height: 18px;"></i>';
-  }
-  
-  setTimeout(() => {
-    switchView('home');
-    if (typeof initCreateHubbsUpload === 'function') initCreateHubbsUpload();
-  }, 100);
 };
+
 
 window.openPublishedStory = function(card) {
   const dataNode = card.querySelector('.story-data');
@@ -12136,3 +12148,9 @@ window.renderCollaboratorChips = function() {
   
   if (window.lucide) window.lucide.createIcons();
 };
+
+document.addEventListener('DOMContentLoaded', () => {
+  const api = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' ? 'http://localhost:5000' : 'https://hi-hubble-backend.vercel.app';
+  initVideoEditor(api, window.showToast, window.loadFeedReels || window.loadFeed);
+});
+
