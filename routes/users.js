@@ -253,8 +253,15 @@ router.get('/api/users/suggestions', authenticateToken, async (req, res) => {
 
     if (error) throw error;
 
-    const filteredSuggestions = (profilesData || [])
-      .filter(p => !excludeIds.has(p.id) && !p.username?.toLowerCase().startsWith('test_runner_') && !p.username?.toLowerCase().startsWith('test_'))
+    let filteredSuggestions = (profilesData || [])
+      .filter(p => !excludeIds.has(p.id) && !p.username?.toLowerCase().startsWith('test_runner_') && !p.username?.toLowerCase().startsWith('test_'));
+
+    if (filteredSuggestions.length === 0) {
+      filteredSuggestions = (profilesData || [])
+        .filter(p => p.id !== currentUserId && !p.username?.toLowerCase().startsWith('test_runner_') && !p.username?.toLowerCase().startsWith('test_'));
+    }
+
+    const suggestions = filteredSuggestions
       .slice(0, limitVal)
       .map(u => ({
         _id: u.id,
@@ -263,10 +270,10 @@ router.get('/api/users/suggestions', authenticateToken, async (req, res) => {
         profileImage: u.profile_image_url || '',
         followersCount: u.follower_count || 0,
         followingCount: u.following_count || 0,
-        followStatus: 'none'
+        followStatus: followedIds.includes(u.id) ? 'following' : (pendingIds.includes(u.id) ? 'pending' : 'none')
       }));
 
-    res.json(filteredSuggestions);
+    res.json(suggestions);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -279,9 +286,9 @@ async function resolveProfileByIdOrUsername(targetId) {
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanId);
 
   const filterColumn = isUuid ? 'id' : 'username';
-  console.log(`[Database Query Executed] SELECT id, username, full_name, profile_image_url FROM profiles WHERE ${filterColumn} = '${cleanId}'`);
+  console.log(`[Database Query Executed] SELECT id, username, full_name, profile_image_url, is_private FROM profiles WHERE ${filterColumn} = '${cleanId}'`);
 
-  let query = supabase.from('profiles').select('id, username, full_name, profile_image_url');
+  let query = supabase.from('profiles').select('id, username, full_name, profile_image_url, is_private');
   if (isUuid) {
     query = query.eq('id', cleanId);
   } else {
@@ -298,21 +305,52 @@ async function resolveProfileByIdOrUsername(targetId) {
   return profile;
 }
 
-// --- FOLLOW ACTION (CREATES PENDING REQUEST & NOTIFICATION) ---
+// --- HELPER TO RECALCULATE PROFILE COUNTS RELIABLY ---
+async function updateProfileCounts(userId) {
+  try {
+    // 1. Count active followers (where following_id = userId)
+    const { count: followersCount } = await supabase
+      .from('followers')
+      .select('*', { count: 'exact', head: true })
+      .eq('following_id', userId);
+
+    // 2. Count active following (where follower_id = userId)
+    const { count: followingCount } = await supabase
+      .from('followers')
+      .select('*', { count: 'exact', head: true })
+      .eq('follower_id', userId);
+
+    // 3. Count pending sent requests (where sender_id = userId AND status = 'pending')
+    const { count: pendingCount } = await supabase
+      .from('follow_requests')
+      .select('*', { count: 'exact', head: true })
+      .eq('sender_id', userId)
+      .eq('status', 'pending');
+
+    const totalFollowing = (followingCount || 0) + (pendingCount || 0);
+
+    // Update the profile columns
+    await supabase
+      .from('profiles')
+      .update({
+        follower_count: followersCount || 0,
+        following_count: totalFollowing
+      })
+      .eq('id', userId);
+  } catch (err) {
+    console.error(`[updateProfileCounts Error] User: ${userId}, error:`, err.message);
+  }
+}
+
+// --- FOLLOW ACTION (CREATES FOLLOW RELATION OR PENDING REQUEST) ---
 router.post('/api/users/:id/follow', authenticateToken, async (req, res) => {
   console.log('==================================================');
   console.log('BACKEND DEBUG - FOLLOW REQUEST RECEIVED');
   console.log('==================================================');
   console.log('1. req.params:', req.params);
-  console.log('2. req.body:', req.body);
-  console.log('3. req.query:', req.query);
   console.log('4. Authenticated User ID (req.user.id):', req.user ? req.user.id : 'UNAUTHENTICATED');
-  console.log('5. Raw Target Identifier Param (:id):', req.params.id);
 
   if (!req.user) {
-    console.log('==================================================');
-    console.log('API RESPONSE SENT: 401 Unauthorized');
-    console.log('==================================================');
     return res.status(401).json({ error: 'Authentication required.' });
   }
 
@@ -322,85 +360,80 @@ router.post('/api/users/:id/follow', authenticateToken, async (req, res) => {
   try {
     const targetProfile = await resolveProfileByIdOrUsername(rawParam);
     if (!targetProfile) {
-      console.warn(`⚠️ Target user '${rawParam}' lookup returned NULL from Supabase profiles table!`);
-      console.log('==================================================');
-      console.log('API RESPONSE SENT: 404 Not Found');
-      console.log('==================================================');
       return res.status(404).json({ error: `User '${rawParam}' not found.` });
     }
 
     const targetUserId = targetProfile.id;
-    console.log(`✓ Resolved Target User Profile -> UUID: ${targetUserId}, Username: @${targetProfile.username}`);
 
     if (targetUserId === currentUserId) {
-      console.log('API RESPONSE SENT: 400 Cannot follow self');
       return res.status(400).json({ error: 'You cannot follow yourself.' });
     }
 
     // Check if already following
     const { data: existingFollow } = await supabase
       .from('followers')
-      .select('id')
+      .select('follower_id')
       .eq('follower_id', currentUserId)
       .eq('following_id', targetUserId)
       .maybeSingle();
 
     if (existingFollow) {
-      const respObj = { success: true, status: 'following', isFollowing: true, message: `Already following @${targetProfile.username}.` };
-      console.log('API RESPONSE SENT: 200 OK (Already Following):', respObj);
-      return res.json(respObj);
+      return res.json({ success: true, status: 'following', isFollowing: true, message: `Already following @${targetProfile.username}.` });
     }
 
-    // Insert pending follow request
-    const followReqData = {
-      sender_id: currentUserId,
-      receiver_id: targetUserId,
-      status: 'pending',
-      created_at: new Date().toISOString()
-    };
-    console.log('[Database Insert Executed] UPSERT INTO follow_requests:', followReqData);
+    // Check if request is already pending
+    const { data: existingPending } = await supabase
+      .from('follow_requests')
+      .select('status')
+      .eq('sender_id', currentUserId)
+      .eq('receiver_id', targetUserId)
+      .eq('status', 'pending')
+      .maybeSingle();
 
+    if (existingPending) {
+      return res.json({ success: true, status: 'pending', isFollowing: false, message: `Follow request is already pending with @${targetProfile.username}.` });
+    }
+
+    const { data: senderProf } = await supabase.from('profiles').select('username').eq('id', currentUserId).maybeSingle();
+    const senderName = senderProf?.username || 'Someone';
+
+    // All follow requests now go to pending status by default
     const { error: reqErr } = await supabase
       .from('follow_requests')
-      .upsert(followReqData, { onConflict: 'sender_id,receiver_id' });
+      .upsert([{
+        sender_id: currentUserId,
+        receiver_id: targetUserId,
+        status: 'pending',
+        created_at: new Date().toISOString()
+      }], { onConflict: 'sender_id,receiver_id' });
 
-    if (reqErr) {
-      console.error('[Database Error] Failed to insert follow_request:', reqErr.message);
-      throw reqErr;
-    }
-    console.log('✓ Successfully inserted pending follow request into public.follow_requests!');
+    if (reqErr) throw reqErr;
 
-    // Create Notification for Target User
+    // Create follow_request notification
     try {
-      const { data: senderProf } = await supabase.from('profiles').select('username').eq('id', currentUserId).maybeSingle();
-      const senderName = senderProf?.username || 'Someone';
-
-      const notifData = {
+      await supabase.from('notifications').insert([{
         user_id: targetUserId,
         recipient_id: targetUserId,
         sender_id: currentUserId,
         type: 'follow_request',
-        message: `@${senderName} sent you a follow request.`,
+        message: `@${senderName} requested to follow you.`,
         is_read: false,
         created_at: new Date().toISOString()
-      };
-      console.log('[Database Insert Executed] INSERT INTO notifications:', notifData);
-      await supabase.from('notifications').insert([notifData]);
-      console.log('✓ Successfully inserted notification into public.notifications table!');
+      }]);
     } catch (nErr) {
       console.warn("Notification insert notice:", nErr.message);
     }
 
-    const finalResp = {
+    // Recalculate counts (A's following count will increase because of the pending request)
+    await updateProfileCounts(currentUserId);
+    await updateProfileCounts(targetUserId);
+
+    return res.json({
       success: true,
       status: 'pending',
       isFollowing: false,
-      message: `Follow request sent to @${targetProfile.username}.`
-    };
-    console.log('==================================================');
-    console.log('API RESPONSE SENT: 200 OK', finalResp);
-    console.log('==================================================');
-    res.json(finalResp);
+      message: `Follow request sent to @${targetProfile.username}. ⏳`
+    });
   } catch (err) {
     console.error("Follow route error:", err);
     res.status(500).json({ error: err.message });
@@ -410,13 +443,26 @@ router.post('/api/users/:id/follow', authenticateToken, async (req, res) => {
 // --- ACCEPT FOLLOW REQUEST ---
 router.post('/api/users/:id/accept-follow-request', authenticateToken, async (req, res) => {
   if (!req.user) return res.status(401).json({ error: 'Authentication required.' });
-  const rawParam = req.params.id; // User who sent request
-  const currentUserId = req.user.id; // Receiver
+  const rawParam = req.params.id; // User who sent request (User A)
+  const currentUserId = req.user.id; // Receiver (User B)
 
   try {
     const senderProfile = await resolveProfileByIdOrUsername(rawParam);
     if (!senderProfile) return res.status(404).json({ error: 'Sender user not found.' });
     const senderId = senderProfile.id;
+
+    // Verify there is a pending request from sender to receiver
+    const { data: followReq, error: reqFindErr } = await supabase
+      .from('follow_requests')
+      .select('*')
+      .eq('sender_id', senderId)
+      .eq('receiver_id', currentUserId)
+      .eq('status', 'pending')
+      .maybeSingle();
+
+    if (reqFindErr || !followReq) {
+      return res.status(400).json({ error: 'No pending follow request found from this user.' });
+    }
 
     // 1. Update follow_requests status to accepted
     await supabase
@@ -425,24 +471,20 @@ router.post('/api/users/:id/accept-follow-request', authenticateToken, async (re
       .eq('sender_id', senderId)
       .eq('receiver_id', currentUserId);
 
-    // 2. Insert follower relationship
-    await supabase.from('followers').upsert([{
-      follower_id: senderId,
-      following_id: currentUserId
-    }], { onConflict: 'follower_id,following_id' });
+    // 2. Insert mutual follower relationships (A follows B AND B follows A)
+    await supabase.from('followers').upsert([
+      { follower_id: senderId, following_id: currentUserId },
+      { follower_id: currentUserId, following_id: senderId }
+    ], { onConflict: 'follower_id,following_id' });
 
-    // 3. Increment counters atomically
-    try {
-      await supabase.rpc('increment_follower_following_counts', { sender: senderId, receiver: currentUserId });
-    } catch (_) {
-      const { count: fCount } = await supabase.from('followers').select('*', { count: 'exact', head: true }).eq('following_id', currentUserId);
-      await supabase.from('profiles').update({ follower_count: fCount || 0 }).eq('id', currentUserId);
+    // Clean up any pending request from B to A if one exists
+    await supabase
+      .from('follow_requests')
+      .delete()
+      .eq('sender_id', currentUserId)
+      .eq('receiver_id', senderId);
 
-      const { count: fgCount } = await supabase.from('followers').select('*', { count: 'exact', head: true }).eq('follower_id', senderId);
-      await supabase.from('profiles').update({ following_count: fgCount || 0 }).eq('id', senderId);
-    }
-
-    // 4. Send notification to sender
+    // 3. Send notification to sender
     try {
       const { data: recProf } = await supabase.from('profiles').select('username').eq('id', currentUserId).maybeSingle();
       const recName = recProf?.username || 'Someone';
@@ -450,14 +492,28 @@ router.post('/api/users/:id/accept-follow-request', authenticateToken, async (re
         user_id: senderId,
         recipient_id: senderId,
         sender_id: currentUserId,
-        type: 'follow_accept',
+        type: 'accept_follow_request', // Matches the notifications.js mapping text
         message: `@${recName} accepted your follow request.`,
         is_read: false,
         created_at: new Date().toISOString()
       }]);
-    } catch (_) {}
+    } catch (nErr) {
+      console.warn("Notification insert notice:", nErr.message);
+    }
 
-    res.json({ success: true, message: `Accepted follow request from @${senderProfile.username}!` });
+    // 4. Update counts
+    await updateProfileCounts(senderId);
+    await updateProfileCounts(currentUserId);
+
+    // Clean up follow request notification
+    await supabase
+      .from('notifications')
+      .delete()
+      .eq('user_id', currentUserId)
+      .eq('sender_id', senderId)
+      .eq('type', 'follow_request');
+
+    res.json({ success: true, message: `Accepted follow request from @${senderProfile.username}! 🎉` });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -466,35 +522,45 @@ router.post('/api/users/:id/accept-follow-request', authenticateToken, async (re
 // --- REJECT FOLLOW REQUEST ---
 router.post('/api/users/:id/reject-follow-request', authenticateToken, async (req, res) => {
   if (!req.user) return res.status(401).json({ error: 'Authentication required.' });
-  const rawParam = req.params.id;
-  const currentUserId = req.user.id;
+  const rawParam = req.params.id; // User who sent request (User A)
+  const currentUserId = req.user.id; // Receiver (User B)
 
   try {
     const senderProfile = await resolveProfileByIdOrUsername(rawParam);
     if (!senderProfile) return res.status(404).json({ error: 'Sender user not found.' });
     const senderId = senderProfile.id;
 
-    // Update status to rejected
+    // Verify there is a pending request
+    const { data: followReq, error: reqFindErr } = await supabase
+      .from('follow_requests')
+      .select('*')
+      .eq('sender_id', senderId)
+      .eq('receiver_id', currentUserId)
+      .eq('status', 'pending')
+      .maybeSingle();
+
+    if (reqFindErr || !followReq) {
+      return res.status(400).json({ error: 'No pending follow request found from this user.' });
+    }
+
+    // Update status to rejected or remove request
     await supabase
       .from('follow_requests')
-      .update({ status: 'rejected' })
+      .delete()
       .eq('sender_id', senderId)
       .eq('receiver_id', currentUserId);
 
-    // Send notification to sender
-    try {
-      const { data: recProf } = await supabase.from('profiles').select('username').eq('id', currentUserId).maybeSingle();
-      const recName = recProf?.username || 'Someone';
-      await supabase.from('notifications').insert([{
-        user_id: senderId,
-        recipient_id: senderId,
-        sender_id: currentUserId,
-        type: 'follow_reject',
-        message: `@${recName} rejected your follow request.`,
-        is_read: false,
-        created_at: new Date().toISOString()
-      }]);
-    } catch (_) {}
+    // Update counts
+    await updateProfileCounts(senderId);
+    await updateProfileCounts(currentUserId);
+
+    // Clean up follow request notification
+    await supabase
+      .from('notifications')
+      .delete()
+      .eq('user_id', currentUserId)
+      .eq('sender_id', senderId)
+      .eq('type', 'follow_request');
 
     res.json({ success: true, message: 'Follow request rejected.' });
   } catch (err) {
@@ -516,15 +582,9 @@ router.post('/api/users/:id/unfollow', authenticateToken, async (req, res) => {
     await supabase.from('followers').delete().eq('follower_id', currentUserId).eq('following_id', targetUserId);
     await supabase.from('follow_requests').delete().eq('sender_id', currentUserId).eq('receiver_id', targetUserId);
 
-    try {
-      await supabase.rpc('decrement_follower_following_counts', { sender: currentUserId, receiver: targetUserId });
-    } catch (_) {
-      const { count: fCount } = await supabase.from('followers').select('*', { count: 'exact', head: true }).eq('following_id', targetUserId);
-      await supabase.from('profiles').update({ follower_count: Math.max(0, fCount || 0) }).eq('id', targetUserId);
-
-      const { count: fgCount } = await supabase.from('followers').select('*', { count: 'exact', head: true }).eq('follower_id', currentUserId);
-      await supabase.from('profiles').update({ following_count: Math.max(0, fgCount || 0) }).eq('id', currentUserId);
-    }
+    // Recalculate counts
+    await updateProfileCounts(currentUserId);
+    await updateProfileCounts(targetUserId);
 
     res.json({ success: true, message: 'Unfollowed user.' });
   } catch (err) {
@@ -532,13 +592,18 @@ router.post('/api/users/:id/unfollow', authenticateToken, async (req, res) => {
   }
 });
 
+// --- GET RELATIONS COUNT ---
 router.get('/api/users/:id/relations', async (req, res) => {
   const userId = req.params.id;
   try {
     const { count: followersCount } = await supabase.from('followers').select('*', { count: 'exact', head: true }).eq('following_id', userId);
     const { count: followingCount } = await supabase.from('followers').select('*', { count: 'exact', head: true }).eq('follower_id', userId);
+    const { count: pendingCount } = await supabase.from('follow_requests').select('*', { count: 'exact', head: true }).eq('sender_id', userId).eq('status', 'pending');
 
-    res.json({ followersCount: followersCount || 0, followingCount: followingCount || 0 });
+    res.json({
+      followersCount: followersCount || 0,
+      followingCount: (followingCount || 0) + (pendingCount || 0)
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -605,43 +670,32 @@ router.get('/api/users/:id/profile', authenticateToken, async (req, res) => {
 
     const resolvedUserId = userProfile.id;
 
-    const { count: followersCount } = await supabase.from('followers').select('*', { count: 'exact', head: true }).eq('following_id', resolvedUserId);
-    const { count: followingCount } = await supabase.from('followers').select('*', { count: 'exact', head: true }).eq('follower_id', resolvedUserId);
-    
-    // Fetch all posts authored by this user from public.posts
-    const { data: postsData } = await supabase
-      .from('posts')
-      .select(`
-        *,
-        author_profile:profiles!author_id(id, full_name, username, profile_image_url),
-        media:post_media(media_url, media_type)
-      `)
-      .eq('author_id', resolvedUserId)
-      .order('created_at', { ascending: false });
+    // Parallelize follower counts and posts lookup
+    const [
+      { count: followersCount },
+      { count: followingCount },
+      { count: pendingCount },
+      { data: postsData }
+    ] = await Promise.all([
+      supabase.from('followers').select('*', { count: 'exact', head: true }).eq('following_id', resolvedUserId),
+      supabase.from('followers').select('*', { count: 'exact', head: true }).eq('follower_id', resolvedUserId),
+      supabase.from('follow_requests').select('*', { count: 'exact', head: true }).eq('sender_id', resolvedUserId).eq('status', 'pending'),
+      supabase.from('posts').select('*, author_profile:profiles!author_id(id, full_name, username, profile_image_url), media:post_media(media_url, media_type)').eq('author_id', resolvedUserId).order('created_at', { ascending: false }).limit(20)
+    ]);
 
     const postsList = [];
-    if (postsData) {
-      for (const p of postsData) {
-        const authorObj = {
-          _id: userProfile.id,
-          fullName: userProfile.full_name || userProfile.username,
-          username: userProfile.username,
-          profileImage: userProfile.profile_image_url || ''
-        };
+    if (postsData && postsData.length > 0) {
+      const postIds = postsData.map(p => p.id);
 
-        const { data: commentsData } = await supabase
-          .from('comments')
-          .select('*, author_profile:profiles!author_id(id, full_name, username, profile_image_url)')
-          .eq('post_id', p.id)
-          .order('created_at', { ascending: true });
+      const [{ data: allComments }, { data: allLikes }] = await Promise.all([
+        supabase.from('comments').select('*, author_profile:profiles!author_id(id, full_name, username, profile_image_url)').in('post_id', postIds).order('created_at', { ascending: true }),
+        supabase.from('likes').select('post_id, user_id').in('post_id', postIds)
+      ]);
 
-        const { data: likesData } = await supabase
-          .from('likes')
-          .select('user_id')
-          .eq('post_id', p.id);
-
-        const mappedLikes = (likesData || []).map(l => l.user_id);
-        const mappedComments = (commentsData || []).map(c => ({
+      const commentsByPost = {};
+      (allComments || []).forEach(c => {
+        if (!commentsByPost[c.post_id]) commentsByPost[c.post_id] = [];
+        commentsByPost[c.post_id].push({
           _id: c.id,
           text: c.content,
           createdAt: c.created_at,
@@ -655,7 +709,25 @@ router.get('/api/users/:id/profile', authenticateToken, async (req, res) => {
             username: c.author_profile?.username || 'user',
             profileImage: c.author_profile?.profile_image_url || ''
           }
-        }));
+        });
+      });
+
+      const likesByPost = {};
+      (allLikes || []).forEach(l => {
+        if (!likesByPost[l.post_id]) likesByPost[l.post_id] = [];
+        likesByPost[l.post_id].push(l.user_id);
+      });
+
+      const authorObj = {
+        _id: userProfile.id,
+        fullName: userProfile.full_name || userProfile.username,
+        username: userProfile.username,
+        profileImage: userProfile.profile_image_url || ''
+      };
+
+      for (const p of postsData) {
+        const mappedComments = commentsByPost[p.id] || [];
+        const mappedLikes = likesByPost[p.id] || [];
 
         postsList.push({
           _id: p.id,
@@ -663,6 +735,7 @@ router.get('/api/users/:id/profile', authenticateToken, async (req, res) => {
           caption: p.caption || '',
           mediaUrl: p.media && p.media.length > 0 ? p.media[0].media_url : '',
           mediaType: p.media && p.media.length > 0 ? p.media[0].media_type : 'image',
+          mediaItems: (p.media || []).map(m => ({ url: m.media_url, type: m.media_type })),
           location: p.location || '',
           createdAt: p.created_at,
           likes: mappedLikes,
@@ -692,7 +765,7 @@ router.get('/api/users/:id/profile', authenticateToken, async (req, res) => {
         bio: userProfile.bio || '',
         isPrivate: userProfile.is_private || false,
         followersCount: followersCount || 0,
-        followingCount: followingCount || 0,
+        followingCount: (followingCount || 0) + (pendingCount || 0),
         postsCount: postsList.length,
         isFollowing,
         isPending
@@ -700,6 +773,368 @@ router.get('/api/users/:id/profile', authenticateToken, async (req, res) => {
       posts: postsList,
       reels: []
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- SEARCH INITIAL DATA (RECENT SEARCHES, SUGGESTED HUBBERS, TRENDING TAGS, ACTIVE HUBBERS) ---
+router.get('/api/search/initial', authenticateToken, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  if (!req.user) return res.status(401).json({ error: 'Authentication required.' });
+  const currentUserId = req.user.id;
+
+  try {
+    // 1. Fetch recent searches for authenticated user
+    const { data: recentData } = await supabase
+      .from('recent_searches')
+      .select('id, search_query, searched_user_id, created_at, searched_user:profiles!searched_user_id(id, full_name, username, profile_image_url)')
+      .eq('user_id', currentUserId)
+      .order('created_at', { ascending: false })
+      .limit(10);
+
+    const recentSearches = (recentData || []).map(item => ({
+      id: item.id,
+      query: item.search_query,
+      createdAt: item.created_at,
+      searchedUser: item.searched_user ? {
+        id: item.searched_user.id,
+        fullName: item.searched_user.full_name || item.searched_user.username,
+        username: item.searched_user.username,
+        profileImage: item.searched_user.profile_image_url || ''
+      } : null
+    }));
+
+    // 2. Fetch suggested hubbers (real profiles excluding self, followed, pending, blocked)
+    const { data: followedRecords } = await supabase.from('followers').select('following_id').eq('follower_id', currentUserId);
+    const followedIds = (followedRecords || []).map(f => f.following_id);
+
+    const { data: pendingRecords } = await supabase.from('follow_requests').select('receiver_id').eq('sender_id', currentUserId).eq('status', 'pending');
+    const pendingIds = (pendingRecords || []).map(r => r.receiver_id);
+
+    const { data: blockedRecords } = await supabase.from('blocked_users').select('blocked_id').eq('blocker_id', currentUserId);
+    const blockedIds = (blockedRecords || []).map(b => b.blocked_id);
+
+    const excludeIds = new Set([currentUserId, ...followedIds, ...pendingIds, ...blockedIds]);
+
+    const { data: profilesData } = await supabase
+      .from('profiles')
+      .select('id, full_name, username, profile_image_url, follower_count, following_count, created_at')
+      .order('created_at', { ascending: false })
+      .limit(50);
+
+    const suggestedHubbers = (profilesData || [])
+      .filter(p => !excludeIds.has(p.id) && !p.username?.toLowerCase().startsWith('test_runner_') && !p.username?.toLowerCase().startsWith('test_'))
+      .slice(0, 5)
+      .map(u => ({
+        _id: u.id,
+        fullName: u.full_name || u.username,
+        username: u.username,
+        profileImage: u.profile_image_url || '',
+        followersCount: u.follower_count || 0,
+        followingCount: u.following_count || 0,
+        isFollowing: false,
+        isRequested: false
+      }));
+
+    // 3. Fetch trending hashtags
+    const { data: hashtagsData } = await supabase
+      .from('hashtags')
+      .select('id, name, use_count')
+      .order('use_count', { ascending: false })
+      .limit(6);
+
+    const trendingTags = (hashtagsData || []).map(h => ({
+      id: h.id,
+      name: h.name.startsWith('#') ? h.name : `#${h.name}`,
+      useCount: h.use_count || 0
+    }));
+
+    // 4. Fetch active online hubbers
+    const ninetySecAgo = new Date(Date.now() - 90 * 1000).toISOString();
+    const { data: onlineRecords } = await supabase
+      .from('online_users')
+      .select('user_id, status, last_seen, profile:profiles!user_id(id, full_name, username, profile_image_url)')
+      .gte('last_seen', ninetySecAgo);
+
+    const activeUsers = (onlineRecords || [])
+      .filter(r => r.profile && r.user_id !== currentUserId && !r.profile.username?.toLowerCase().startsWith('test_runner_'))
+      .map(r => ({
+        _id: r.profile.id,
+        fullName: r.profile.full_name || r.profile.username,
+        username: r.profile.username,
+        profileImage: r.profile.profile_image_url || ''
+      }));
+
+    res.json({
+      recentSearches,
+      suggestedHubbers,
+      trendingTags,
+      activeCount: activeUsers.length,
+      activeHubbers: activeUsers.slice(0, 5)
+    });
+  } catch (err) {
+    console.error('[Search Initial Error]:', err);
+    res.status(500).json({ error: 'Failed to fetch search initial state.' });
+  }
+});
+
+// --- DYNAMIC SEARCH QUERY ENDPOINT (USERS, HASHTAGS, POSTS, HUBS) ---
+router.get('/api/search/query', authenticateToken, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  if (!req.user) return res.status(401).json({ error: 'Authentication required.' });
+  const rawQuery = String(req.query.q || '').trim();
+  if (!rawQuery) {
+    return res.json({ users: [], hashtags: [], posts: [], hubs: [] });
+  }
+
+  const currentUserId = req.user.id;
+  const cleanUserQuery = rawQuery.replace(/^@/, '').trim();
+  const cleanTagQuery = rawQuery.replace(/^#/, '').trim();
+
+  try {
+    // 1. Search Users
+    const { data: blockedData } = await supabase.from('blocked_users').select('blocked_id').eq('blocker_id', currentUserId);
+    const blockedSet = new Set((blockedData || []).map(b => b.blocked_id));
+
+    const { data: matchingUsers, error: userErr } = await supabase
+      .from('profiles')
+      .select('id, full_name, username, profile_image_url, bio, follower_count')
+      .neq('id', currentUserId)
+      .or(`username.ilike.%${cleanUserQuery}%,full_name.ilike.%${cleanUserQuery}%`)
+      .limit(10);
+
+    let users = [];
+    if (!userErr && matchingUsers) {
+      const { data: myFollowing } = await supabase.from('followers').select('following_id').eq('follower_id', currentUserId);
+      const followingSet = new Set((myFollowing || []).map(f => f.following_id));
+
+      const { data: myPending } = await supabase.from('follow_requests').select('receiver_id').eq('sender_id', currentUserId).eq('status', 'pending');
+      const pendingSet = new Set((myPending || []).map(p => p.receiver_id));
+
+      users = matchingUsers
+        .filter(u => !blockedSet.has(u.id) && !u.username?.toLowerCase().startsWith('test_runner_'))
+        .map(u => ({
+          _id: u.id,
+          fullName: u.full_name || u.username,
+          username: u.username,
+          profileImage: u.profile_image_url || '',
+          bio: u.bio || '',
+          followersCount: u.follower_count || 0,
+          isFollowing: followingSet.has(u.id),
+          isRequested: pendingSet.has(u.id)
+        }));
+    }
+
+    // 2. Search Hashtags
+    const { data: matchingTags } = await supabase
+      .from('hashtags')
+      .select('id, name, use_count')
+      .ilike('name', `%${cleanTagQuery}%`)
+      .order('use_count', { ascending: false })
+      .limit(10);
+
+    const hashtags = (matchingTags || []).map(h => ({
+      id: h.id,
+      name: h.name.startsWith('#') ? h.name : `#${h.name}`,
+      useCount: h.use_count || 0
+    }));
+
+    // 3. Search Posts
+    const { data: matchingPosts } = await supabase
+      .from('posts')
+      .select('id, caption, location, created_at, author:profiles!author_id(id, full_name, username, profile_image_url), media:post_media(media_url, media_type)')
+      .or(`caption.ilike.%${rawQuery}%,location.ilike.%${rawQuery}%`)
+      .order('created_at', { ascending: false })
+      .limit(10);
+
+    const posts = (matchingPosts || [])
+      .filter(p => p.author && !blockedSet.has(p.author.id))
+      .map(p => ({
+        id: p.id,
+        caption: p.caption || '',
+        location: p.location || '',
+        createdAt: p.created_at,
+        author: {
+          id: p.author.id,
+          fullName: p.author.full_name || p.author.username,
+          username: p.author.username,
+          profileImage: p.author.profile_image_url || ''
+        },
+        mediaUrl: p.media && p.media.length > 0 ? p.media[0].media_url : ''
+      }));
+
+    // 4. Hubs (No backend entity exists, so return empty array)
+    const hubs = [];
+
+    res.json({ users, hashtags, posts, hubs });
+  } catch (err) {
+    console.error('[Search Query Error]:', err);
+    res.status(500).json({ error: 'Unable to complete search. Please try again.' });
+  }
+});
+
+// --- SAVE RECENT SEARCH ---
+router.post('/api/search/recent', authenticateToken, async (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Authentication required.' });
+  const currentUserId = req.user.id;
+  const { query, searchedUserId } = req.body;
+  const cleanQuery = String(query || '').trim();
+
+  if (!cleanQuery) {
+    return res.status(400).json({ error: 'Search query is required.' });
+  }
+
+  try {
+    // Delete existing duplicate search query for this user to keep newest on top
+    await supabase
+      .from('recent_searches')
+      .delete()
+      .eq('user_id', currentUserId)
+      .eq('search_query', cleanQuery);
+
+    const { data: newSearch, error } = await supabase
+      .from('recent_searches')
+      .insert([{
+        user_id: currentUserId,
+        search_query: cleanQuery,
+        searched_user_id: searchedUserId || null,
+        created_at: new Date().toISOString()
+      }])
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.json(newSearch);
+  } catch (err) {
+    console.error('[Save Recent Search Error]:', err);
+    res.status(500).json({ error: 'Failed to save recent search.' });
+  }
+});
+
+// --- DELETE SINGLE RECENT SEARCH ---
+router.delete('/api/search/recent/:id', authenticateToken, async (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Authentication required.' });
+  const currentUserId = req.user.id;
+  const searchId = req.params.id;
+
+  try {
+    const { error } = await supabase
+      .from('recent_searches')
+      .delete()
+      .eq('id', searchId)
+      .eq('user_id', currentUserId);
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Delete Recent Search Error]:', err);
+    res.status(500).json({ error: 'Failed to delete recent search.' });
+  }
+});
+
+// --- CLEAR ALL RECENT SEARCHES FOR USER ---
+router.delete('/api/search/recent', authenticateToken, async (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Authentication required.' });
+  const currentUserId = req.user.id;
+
+  try {
+    const { error } = await supabase
+      .from('recent_searches')
+      .delete()
+      .eq('user_id', currentUserId);
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Clear Recent Searches Error]:', err);
+    res.status(500).json({ error: 'Failed to clear recent searches.' });
+  }
+});
+
+// --- GET FOLLOWERS LIST ---
+router.get('/api/users/:id/followers-list', authenticateToken, async (req, res) => {
+  const targetUserId = req.params.id;
+  const currentUserId = req.user.id;
+
+  try {
+    const targetProfile = await resolveProfileByIdOrUsername(targetUserId);
+    if (!targetProfile) return res.status(404).json({ error: 'User not found.' });
+
+    const { data: followerRecords, error: err } = await supabase
+      .from('followers')
+      .select(`
+        follower_id,
+        follower_profile:profiles!follower_id(id, username, full_name, profile_image_url)
+      `)
+      .eq('following_id', targetProfile.id);
+
+    if (err) throw err;
+
+    const { data: myFollowing } = await supabase
+      .from('followers')
+      .select('following_id')
+      .eq('follower_id', currentUserId);
+    
+    const myFollowingSet = new Set((myFollowing || []).map(f => f.following_id));
+
+    const list = (followerRecords || [])
+      .filter(r => r.follower_profile)
+      .map(r => ({
+        _id: r.follower_profile.id,
+        username: r.follower_profile.username,
+        fullName: r.follower_profile.full_name || r.follower_profile.username,
+        profileImage: r.follower_profile.profile_image_url || '',
+        isFollowing: myFollowingSet.has(r.follower_profile.id),
+        isMe: r.follower_profile.id === currentUserId
+      }));
+
+    res.json(list);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- GET FOLLOWING LIST ---
+router.get('/api/users/:id/following-list', authenticateToken, async (req, res) => {
+  const targetUserId = req.params.id;
+  const currentUserId = req.user.id;
+
+  try {
+    const targetProfile = await resolveProfileByIdOrUsername(targetUserId);
+    if (!targetProfile) return res.status(404).json({ error: 'User not found.' });
+
+    const { data: followingRecords, error: err } = await supabase
+      .from('followers')
+      .select(`
+        following_id,
+        following_profile:profiles!following_id(id, username, full_name, profile_image_url)
+      `)
+      .eq('follower_id', targetProfile.id);
+
+    if (err) throw err;
+
+    const { data: myFollowing } = await supabase
+      .from('followers')
+      .select('following_id')
+      .eq('follower_id', currentUserId);
+    
+    const myFollowingSet = new Set((myFollowing || []).map(f => f.following_id));
+
+    const list = (followingRecords || [])
+      .filter(r => r.following_profile)
+      .map(r => ({
+        _id: r.following_profile.id,
+        username: r.following_profile.username,
+        fullName: r.following_profile.full_name || r.following_profile.username,
+        profileImage: r.following_profile.profile_image_url || '',
+        isFollowing: myFollowingSet.has(r.following_profile.id),
+        isMe: r.following_profile.id === currentUserId
+      }));
+
+    res.json(list);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

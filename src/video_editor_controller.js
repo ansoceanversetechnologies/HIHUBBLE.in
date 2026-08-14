@@ -1,7 +1,30 @@
 // Hi-Hubble Video Editor Controller (Phase 1)
 // Implements client-side Canvas video rendering, trimming, splitting, rotation, speed, background music mixing, and exporting.
 
-export function initVideoEditor(API_URL, showToast, loadFeedReels) {
+export function initVideoEditor(API_URL, showToastParam, loadFeedReels) {
+  // --- SAFE TOAST HELPER ---
+  const safeShowToast = (msg) => {
+    try {
+      if (typeof showToastParam === 'function') {
+        showToastParam(msg);
+      } else if (typeof window.showToast === 'function') {
+        window.showToast(msg);
+      } else {
+        const toast = document.getElementById('toast-notif');
+        if (toast) {
+          toast.textContent = msg;
+          toast.classList.add('active');
+          setTimeout(() => toast.classList.remove('active'), 2500);
+        } else {
+          console.log('[TOAST NOTIFICATION]', msg);
+        }
+      }
+    } catch (e) {
+      console.warn('[TOAST NOTIFICATION EXCEPTION]', e, msg);
+    }
+  };
+  const showToast = safeShowToast;
+
   // --- UI Elements ---
   const exploreCreateModal = document.getElementById('explore-create-modal');
   const exploreCreateBtn = document.getElementById('explore-create-btn');
@@ -277,7 +300,7 @@ export function initVideoEditor(API_URL, showToast, loadFeedReels) {
       selectClip(clips.length - 1);
       updateTimelineUI();
       recalculateTotalDuration();
-      toScreen2Btn.disabled = clips.length === 0;
+      updatePostButtonsState();
     });
   }
 
@@ -929,7 +952,7 @@ export function initVideoEditor(API_URL, showToast, loadFeedReels) {
     selectClip(selectedClipIndex);
     updateTimelineUI();
     recalculateTotalDuration();
-    toScreen2Btn.disabled = clips.length === 0;
+    updatePostButtonsState();
   }
 
   function recalculateTotalDuration() {
@@ -2256,7 +2279,7 @@ export function initVideoEditor(API_URL, showToast, loadFeedReels) {
   if (backToScreen1Btn) {
     backToScreen1Btn.addEventListener('click', () => {
       screen2.style.display = 'none';
-      screen1.style.display = 'block';
+      screen1.style.display = 'flex';
     });
   }
 
@@ -2347,6 +2370,7 @@ export function initVideoEditor(API_URL, showToast, loadFeedReels) {
 
   // --- Real-time Video Compiler Engine (Canvas recorder) ---
   async function renderFinalExportPreview() {
+    console.log('[REEL AUDIO DEBUG] Beginning renderFinalExportPreview export compilation');
     // Generate a temporary compilation blob for the user review screen
     renderingOverlay.style.display = 'flex';
     renderPercentage.innerText = 'Processing Video: Preparing...';
@@ -2371,56 +2395,103 @@ export function initVideoEditor(API_URL, showToast, loadFeedReels) {
     const rctx = renderCanvas.getContext('2d');
     const stream = renderCanvas.captureStream(30); // 30 FPS export
 
-    // Audio node capture setup
+    // Audio node capture setup with WebAudio PCM Buffer Decoding
     let destNode = null;
-    let originalAudioNode = null;
-    let bgMusicNode = null;
 
     try {
-      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      } else if (audioCtx.state === 'suspended') {
+        await audioCtx.resume();
+      }
+      console.log('[REEL AUDIO DEBUG] AudioContext initialized. State:', audioCtx.state);
       destNode = audioCtx.createMediaStreamDestination();
 
-      if (bgAudio && bgAudio.element) {
-        bgAudio.element.pause();
-        bgAudio.element.currentTime = 0;
-        bgMusicNode = audioCtx.createMediaElementSource(bgAudio.element);
-        bgMusicNode.connect(destNode);
-        bgMusicNode.connect(audioCtx.destination);
+      // 1. Decode & schedule Background Audio track
+      if (bgAudio && bgAudio.file) {
+        try {
+          const bgArrayBuffer = await bgAudio.file.arrayBuffer();
+          const decodedBgBuffer = await audioCtx.decodeAudioData(bgArrayBuffer);
+          console.log('[REEL AUDIO DEBUG] Decoded background audio PCM buffer. Duration:', decodedBgBuffer.duration, 'Channels:', decodedBgBuffer.numberOfChannels);
+
+          const bgSource = audioCtx.createBufferSource();
+          bgSource.buffer = decodedBgBuffer;
+
+          const bgGain = audioCtx.createGain();
+          bgGain.gain.value = musicVolume; // Apply editor music volume mix
+
+          bgSource.connect(bgGain);
+          bgGain.connect(destNode);
+          bgGain.connect(audioCtx.destination);
+
+          bgSource.start(audioCtx.currentTime + 0.05, bgAudio.startTime || 0, totalDuration);
+          console.log('[REEL AUDIO DEBUG] Scheduled background audio source node with gain:', musicVolume);
+        } catch (bgErr) {
+          console.warn('[REEL AUDIO DEBUG] Background audio PCM decode fallback warning:', bgErr.message);
+        }
       }
 
-      // Mix in individual video and voice-over tracks
-      clips.forEach(c => {
-        if (c.type === 'video' && c.element) {
-          c.element.pause();
-          c.element.currentTime = c.startTrim;
-          const node = audioCtx.createMediaElementSource(c.element);
-          node.connect(destNode);
-          node.connect(audioCtx.destination);
-        }
-        if (c.voiceOverElement) {
-          c.voiceOverElement.pause();
-          c.voiceOverElement.currentTime = 0;
-          const voNode = audioCtx.createMediaElementSource(c.voiceOverElement);
-          voNode.connect(destNode);
-          voNode.connect(audioCtx.destination);
-        }
-      });
+      // 2. Decode & schedule Timeline Video Audio tracks
+      let timelineTimeOffset = 0;
+      for (const c of clips) {
+        const clipDur = (c.endTrim - c.startTrim) / c.speed;
+        if (c.type === 'video' && c.file) {
+          try {
+            const clipArrayBuffer = await c.file.arrayBuffer();
+            const decodedClipBuffer = await audioCtx.decodeAudioData(clipArrayBuffer);
+            console.log(`[REEL AUDIO DEBUG] Decoded clip ${c.id} audio PCM buffer. Duration:`, decodedClipBuffer.duration);
 
-      const audioTrack = destNode.stream.getAudioTracks()[0];
-      if (audioTrack) {
-        stream.addTrack(audioTrack);
+            const clipSource = audioCtx.createBufferSource();
+            clipSource.buffer = decodedClipBuffer;
+            clipSource.playbackRate.value = c.speed;
+
+            const clipGain = audioCtx.createGain();
+            clipGain.gain.value = videoVolume; // Apply editor video volume mix
+
+            clipSource.connect(clipGain);
+            clipGain.connect(destNode);
+            clipGain.connect(audioCtx.destination);
+
+            clipSource.start(
+              audioCtx.currentTime + 0.05 + timelineTimeOffset,
+              c.startTrim,
+              c.endTrim - c.startTrim
+            );
+            console.log(`[REEL AUDIO DEBUG] Scheduled video audio for clip ${c.id} at timeline offset ${timelineTimeOffset}s with gain:`, videoVolume);
+          } catch (clipAudioErr) {
+            console.warn(`[REEL AUDIO DEBUG] Clip ${c.id} PCM audio decode notice:`, clipAudioErr.message);
+          }
+        }
+        timelineTimeOffset += clipDur;
+      }
+
+      const audioTracks = destNode.stream.getAudioTracks();
+      if (audioTracks.length > 0) {
+        stream.addTrack(audioTracks[0]);
+        console.log('[REEL AUDIO DEBUG] Successfully attached combined audio track to canvas stream:', audioTracks[0].label || 'audio-track');
+      } else {
+        console.warn('[REEL AUDIO DEBUG] DestNode stream contains no audio tracks!');
       }
     } catch (ae) {
-      console.warn("Web Audio Routing bypass:", ae.message);
+      console.warn("[REEL AUDIO DEBUG] Web Audio Routing notice:", ae.message);
     }
 
     // Media Recorder initialization
-    const options = { mimeType: 'video/webm;codecs=vp8,opus' };
+    const mimeTypes = ['video/webm;codecs=vp8,opus', 'video/webm;codecs=vp9,opus', 'video/webm', 'video/mp4'];
+    let selectedMime = '';
+    for (const mime of mimeTypes) {
+      if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(mime)) {
+        selectedMime = mime;
+        break;
+      }
+    }
+    console.log('[REEL AUDIO DEBUG] MediaRecorder selected MIME type:', selectedMime || 'default');
+
     let recorder;
     try {
-      recorder = new MediaRecorder(stream, options);
+      recorder = selectedMime ? new MediaRecorder(stream, { mimeType: selectedMime }) : new MediaRecorder(stream);
     } catch (e) {
-      recorder = new MediaRecorder(stream); // Fallback standard format
+      recorder = new MediaRecorder(stream);
     }
 
     const chunks = [];
@@ -2428,26 +2499,17 @@ export function initVideoEditor(API_URL, showToast, loadFeedReels) {
       if (e.data && e.data.size > 0) chunks.push(e.data);
     };
 
-    let compileCompleted = false;
-
     recorder.onstop = () => {
-      const finalBlob = new Blob(chunks, { type: 'video/mp4' });
+      const finalBlob = new Blob(chunks, { type: recorder.mimeType || selectedMime || 'video/webm' });
+      console.log('[REEL AUDIO DEBUG] MediaRecorder export completed. Final Blob size:', finalBlob.size, 'bytes, MIME:', finalBlob.type);
       const finalUrl = URL.createObjectURL(finalBlob);
       finalVideo.src = finalUrl;
       renderingOverlay.style.display = 'none';
-      compileCompleted = true;
     };
 
     recorder.start();
 
-    // Start background music elements if defined
-    if (bgAudio && bgAudio.element) {
-      // Pause initially; interval loop will trigger playback at the offset
-      bgAudio.element.pause();
-      bgAudio.element.currentTime = 0;
-    }
-
-    // Play through the timeline frame-by-frame on the offscreen canvas
+    // Play through the timeline frame-by-frame on offscreen canvas for visual capture
     let exportPlayhead = 0;
     const interval = 1000 / 30; // 30 frames per second loop
 
@@ -2459,29 +2521,8 @@ export function initVideoEditor(API_URL, showToast, loadFeedReels) {
           clips.forEach(c => {
             if (c.type === 'video' && c.element) c.element.pause();
           });
-          if (bgAudio && bgAudio.element) bgAudio.element.pause();
           resolve();
           return;
-        }
-
-        if (bgAudio && bgAudio.element) {
-          const audio = bgAudio.element;
-          const start = bgAudio.startTime || 0;
-          const localTime = exportPlayhead - start;
-          const audioDur = audio.duration || 0;
-
-          if (localTime >= 0 && localTime < audioDur) {
-            if (audio.paused) {
-              audio.play().catch(() => { });
-            }
-            if (Math.abs(audio.currentTime - localTime) > 0.3) {
-              audio.currentTime = localTime;
-            }
-          } else {
-            if (!audio.paused) {
-              audio.pause();
-            }
-          }
         }
 
         const rstate = getPlaybackRenderState(exportPlayhead);
@@ -2491,26 +2532,9 @@ export function initVideoEditor(API_URL, showToast, loadFeedReels) {
 
             if (clipA.type === 'video' && clipA.element) {
               clipA.element.currentTime = localOffsetA;
-              if (clipA.element.paused) {
-                clipA.element.playbackRate = clipA.speed;
-                clipA.element.play().catch(() => { });
-              }
             }
             if (clipB.type === 'video' && clipB.element) {
               clipB.element.currentTime = localOffsetB;
-              if (clipB.element.paused) {
-                clipB.element.playbackRate = clipB.speed;
-                clipB.element.play().catch(() => { });
-              }
-            }
-
-            if (clipA.voiceOverElement) {
-              clipA.voiceOverElement.currentTime = (localOffsetA - clipA.startTrim) / clipA.speed;
-              if (clipA.voiceOverElement.paused) clipA.voiceOverElement.play().catch(() => { });
-            }
-            if (clipB.voiceOverElement) {
-              clipB.voiceOverElement.currentTime = (localOffsetB - clipB.startTrim) / clipB.speed;
-              if (clipB.voiceOverElement.paused) clipB.voiceOverElement.play().catch(() => { });
             }
 
             if (transitionType === 'fade') {
@@ -2529,27 +2553,11 @@ export function initVideoEditor(API_URL, showToast, loadFeedReels) {
             const { clip, localOffset } = rstate;
             if (clip.type === 'video' && clip.element) {
               clip.element.currentTime = localOffset;
-              if (clip.element.paused) {
-                clip.element.playbackRate = clip.speed;
-                clip.element.play().catch(() => { });
-              }
-            }
-
-            if (clip.voiceOverElement) {
-              clip.voiceOverElement.currentTime = (localOffset - clip.startTrim) / clip.speed;
-              if (clip.voiceOverElement.paused) clip.voiceOverElement.play().catch(() => { });
             }
 
             drawClipFrame(clip, localOffset, rctx, renderCanvas, 1.0, 0, 0, 1.0);
             drawOverlays(clip, localOffset - clip.startTrim, rctx, renderCanvas);
           }
-
-          clips.forEach((c, idx) => {
-            if (idx !== rstate.activeClipIndex && (!rstate.isTransitioning || idx !== rstate.activeClipIndex + 1)) {
-              if (c.voiceOverElement && !c.voiceOverElement.paused) c.voiceOverElement.pause();
-              if (c.type === 'video' && c.element && !c.element.paused) c.element.pause();
-            }
-          });
         }
 
         exportPlayhead += (interval / 1000);
@@ -2559,67 +2567,253 @@ export function initVideoEditor(API_URL, showToast, loadFeedReels) {
     });
   }
 
-  // --- Final Publish Post ---
-  if (postBtn) {
-    postBtn.addEventListener('click', async () => {
-      const token = localStorage.getItem('invibe_jwt_token');
-      if (!token) {
-        showToast('Please log in to publish a Reel! 🔐');
+  // --- Update Post Buttons State Helper ---
+  function updatePostButtonsState() {
+    const hasClips = clips.length > 0;
+    if (toScreen2Btn) toScreen2Btn.disabled = !hasClips;
+    document.querySelectorAll('.editor-post-action-btn').forEach(btn => {
+      btn.disabled = !hasClips;
+      btn.style.opacity = hasClips ? '1' : '0.5';
+    });
+  }
+
+  async function getExportBase64Data() {
+    // If compiled preview video is not ready yet, execute renderFinalExportPreview()
+    if (!finalVideo || !finalVideo.src || !finalVideo.src.startsWith('blob:')) {
+      console.log('[REEL AUDIO DEBUG] Export blob missing. Compiling final video with audio track...');
+      await renderFinalExportPreview();
+    }
+
+    if (finalVideo && finalVideo.src && finalVideo.src.startsWith('blob:')) {
+      try {
+        const res = await fetch(finalVideo.src);
+        const blob = await res.blob();
+        console.log('[REEL AUDIO DEBUG] Reading export blob for upload. Size:', blob.size, 'Type:', blob.type);
+        return await new Promise((resolve) => {
+          const r = new FileReader();
+          r.onloadend = () => resolve(r.result);
+          r.readAsDataURL(blob);
+        });
+      } catch (e) {
+        console.error('[REEL AUDIO DEBUG] Failed to fetch export blob:', e);
+      }
+    }
+
+    if (clips.length > 0 && clips[0].file) {
+      console.log('[REEL AUDIO DEBUG] Falling back to raw clip file base64 data');
+      return await new Promise((resolve) => {
+        const r = new FileReader();
+        r.onloadend = () => resolve(r.result);
+        r.readAsDataURL(clips[0].file);
+      });
+    }
+
+    return null;
+  }
+
+  // --- Quick Post Action (Screen 1 & Header buttons) ---
+  const postActionBtns = document.querySelectorAll('.editor-post-action-btn');
+  postActionBtns.forEach(btn => {
+    btn.addEventListener('click', async () => {
+      console.log('[REEL POST 1] Button clicked');
+      console.log('[REEL POST 2] Validation starting');
+
+      if (clips.length === 0) {
+        console.log('[REEL POST VALIDATION FAILED] No clips in timeline');
+        safeShowToast('Please import media clips first! 🎬');
         return;
       }
 
-      if (!finalVideo.src) {
-        showToast('Video not rendered correctly yet! ⚠️');
+      const selectedMedia = clips.map(c => ({
+        type: c.type,
+        hasFile: !!c.file,
+        fileName: c.file?.name || 'media',
+        fileSize: c.file?.size || 0,
+        duration: c.duration
+      }));
+      console.log('[REEL POST 3] Selected media:', selectedMedia);
+
+      const token = localStorage.getItem('invibe_jwt_token') || localStorage.getItem('invibe_token') || 'session_user';
+
+      btn.disabled = true;
+      btn.innerHTML = '<i data-lucide="loader" class="animate-spin" style="width:14px; height:14px;"></i> Posting...';
+      if (window.debouncedCreateIcons) window.debouncedCreateIcons();
+
+      try {
+        console.log('[REEL POST 4] Preparing upload');
+        safeShowToast('Publishing Reel... 🎥✨');
+        const base64Data = await getExportBase64Data();
+
+        if (!base64Data) {
+          throw new Error('Could not process video media data.');
+        }
+
+        const tagsText = hashtags.map(t => `#${t}`).join(' ');
+        const mentionsText = mentions.map(m => `@${m}`).join(' ');
+        const rawCaption = (captionInput ? captionInput.value.trim() : '') || 'Hubbing Reel';
+        const combinedCaption = `${rawCaption} ${tagsText} ${mentionsText}`.trim();
+
+        // Calculate total Reel duration from all active clips
+        const calculatedDur = clips.reduce((sum, clip) => {
+          const speed = clip.speed || 1;
+          const start = typeof clip.startTrim === 'number' ? clip.startTrim : 0;
+          const end = typeof clip.endTrim === 'number' ? clip.endTrim : (clip.duration || 3);
+          return sum + Math.max(0, (end - start) / speed);
+        }, 0);
+
+        const rawDur = (Number.isFinite(calculatedDur) && calculatedDur > 0) ? calculatedDur : totalDuration;
+        if (!Number.isFinite(rawDur) || rawDur <= 0) {
+          throw new Error('Unable to determine Reel duration. Please check your clips.');
+        }
+
+        const finalDurationSeconds = Math.round(rawDur);
+
+        // Debug logs
+        console.log('[REEL DEBUG] duration_seconds:', finalDurationSeconds);
+        console.log('[REEL DEBUG] duration type:', typeof finalDurationSeconds);
+        console.log('[REEL DEBUG] selected clips:', clips.map(c => ({ id: c.id, type: c.type, startTrim: c.startTrim, endTrim: c.endTrim, speed: c.speed })));
+
+        console.log('[REEL POST 5] About to send upload request');
+        const apiRes = await fetch(`${API_URL}/api/reels`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            caption: combinedCaption,
+            videoUrl: base64Data,
+            audioTrackName: bgAudio ? (bgAudio.file?.name || 'Background Music') : '',
+            durationSeconds: finalDurationSeconds,
+            duration_seconds: finalDurationSeconds
+          })
+        });
+
+        console.log('[REEL POST 6] Upload response:', apiRes.status);
+
+        if (apiRes.ok) {
+          safeShowToast('New Reel posted successfully! 🎥✨');
+          if (typeof window.loadFeedReels === 'function') window.loadFeedReels();
+          if (typeof window.loadFeedPosts === 'function') window.loadFeedPosts();
+
+          const modal = document.getElementById('explore-create-modal');
+          if (modal) modal.classList.remove('active');
+          resetFullEditor();
+        } else {
+          const errData = await apiRes.json().catch(() => ({}));
+          throw new Error(errData.error || `Failed to publish Reel (HTTP ${apiRes.status})`);
+        }
+      } catch (err) {
+        console.error('[REEL POST ERROR]', err);
+        safeShowToast('Publishing failed: ' + (err.message || err));
+        btn.disabled = false;
+        btn.innerHTML = '<i data-lucide="send" style="width:14px; height:14px;"></i> Post Reel';
+        if (window.debouncedCreateIcons) window.debouncedCreateIcons();
+      }
+    });
+  });
+
+  // --- Final Publish Post ---
+  if (postBtn) {
+    postBtn.addEventListener('click', async () => {
+      console.log('[REEL POST 1] Screen 3 Post button clicked');
+      console.log('[REEL POST 2] Validation starting');
+
+      if (clips.length === 0) {
+        console.log('[REEL POST VALIDATION FAILED] No clips in timeline');
+        safeShowToast('Please import media clips first! 🎬');
         return;
       }
+
+      const selectedMedia = clips.map(c => ({
+        type: c.type,
+        hasFile: !!c.file,
+        fileName: c.file?.name || 'media',
+        fileSize: c.file?.size || 0,
+        duration: c.duration
+      }));
+      console.log('[REEL POST 3] Selected media:', selectedMedia);
+
+      const token = localStorage.getItem('invibe_jwt_token') || localStorage.getItem('invibe_token') || 'session_user';
 
       postBtn.disabled = true;
       postBtn.innerHTML = '<i data-lucide="loader" class="animate-spin"></i> Posting...';
       if (window.debouncedCreateIcons) window.debouncedCreateIcons();
 
+      // Show rendering overlay as a posting signal
+      const renderOverlay = document.getElementById('editor-rendering-overlay');
+      const renderPercentage = document.getElementById('editor-render-percentage');
+      if (renderOverlay && renderPercentage) {
+        renderPercentage.innerText = 'Publishing Reel...';
+        renderOverlay.style.display = 'flex';
+      }
+
       try {
-        // Fetch compiled blob
-        const response = await fetch(finalVideo.src);
-        const blob = await response.blob();
+        console.log('[REEL POST 4] Preparing upload');
+        safeShowToast('Publishing Reel... 🎥✨');
+        const base64Data = await getExportBase64Data();
+        if (!base64Data) {
+          throw new Error('Video data conversion failed.');
+        }
 
-        // Convert blob to base64 for API delivery
-        const reader = new FileReader();
-        reader.onloadend = async () => {
-          const base64Data = reader.result;
+        const tagsText = hashtags.map(t => `#${t}`).join(' ');
+        const mentionsText = mentions.map(m => `@${m}`).join(' ');
+        const combinedCaption = `${captionInput.value.trim()} ${tagsText} ${mentionsText}`.trim();
 
-          const tagsText = hashtags.map(t => `#${t}`).join(' ');
-          const mentionsText = mentions.map(m => `@${m}`).join(' ');
-          const combinedCaption = `${captionInput.value.trim()} ${tagsText} ${mentionsText}`.trim();
+        // Calculate total Reel duration from all active clips
+        const calculatedDur = clips.reduce((sum, clip) => {
+          const speed = clip.speed || 1;
+          const start = typeof clip.startTrim === 'number' ? clip.startTrim : 0;
+          const end = typeof clip.endTrim === 'number' ? clip.endTrim : (clip.duration || 3);
+          return sum + Math.max(0, (end - start) / speed);
+        }, 0);
 
-          const apiRes = await fetch(`${API_URL}/api/reels`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify({
-              caption: combinedCaption,
-              videoUrl: base64Data
-            })
-          });
+        const rawDur = (Number.isFinite(calculatedDur) && calculatedDur > 0) ? calculatedDur : totalDuration;
+        if (!Number.isFinite(rawDur) || rawDur <= 0) {
+          throw new Error('Unable to determine Reel duration. Please check your clips.');
+        }
 
-          if (apiRes.ok) {
-            showToast('New Reel posted successfully! 🎥✨');
-            // Refresh reels feed
-            if (typeof loadFeedReels === 'function') loadFeedReels();
+        const finalDurationSeconds = Math.round(rawDur);
 
-            // Close modal & reset editor
-            exploreCreateModal.classList.remove('active');
-            resetFullEditor();
-          } else {
-            const err = await apiRes.json();
-            throw new Error(err.error || 'Failed to publish');
-          }
-        };
-        reader.readAsDataURL(blob);
+        // Debug logs
+        console.log('[REEL DEBUG] duration_seconds:', finalDurationSeconds);
+        console.log('[REEL DEBUG] duration type:', typeof finalDurationSeconds);
+        console.log('[REEL DEBUG] selected clips:', clips.map(c => ({ id: c.id, type: c.type, startTrim: c.startTrim, endTrim: c.endTrim, speed: c.speed })));
+
+        console.log('[REEL POST 5] About to send upload request');
+        const apiRes = await fetch(`${API_URL}/api/reels`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            caption: combinedCaption,
+            videoUrl: base64Data,
+            audioTrackName: bgAudio ? (bgAudio.file?.name || 'Background Music') : '',
+            durationSeconds: finalDurationSeconds,
+            duration_seconds: finalDurationSeconds
+          })
+        });
+
+        console.log('[REEL POST 6] Upload response:', apiRes.status);
+
+        if (apiRes.ok) {
+          if (renderOverlay) renderOverlay.style.display = 'none';
+          safeShowToast('New Reel posted successfully! 🎥✨');
+          if (typeof window.loadFeedReels === 'function') window.loadFeedReels();
+          if (typeof window.loadFeedPosts === 'function') window.loadFeedPosts();
+
+          exploreCreateModal.classList.remove('active');
+          resetFullEditor();
+        } else {
+          const err = await apiRes.json().catch(() => ({}));
+          throw new Error(err.error || `Failed to publish (HTTP ${apiRes.status})`);
+        }
       } catch (err) {
-        console.error(err);
-        showToast('Publishing failed: ' + err.message);
+        console.error('[REEL POST ERROR]', err);
+        if (renderOverlay) renderOverlay.style.display = 'none';
+        safeShowToast('Publishing failed: ' + (err.message || err));
         postBtn.disabled = false;
         postBtn.innerHTML = '<i data-lucide="upload-cloud"></i> Post a Reel';
         if (window.debouncedCreateIcons) window.debouncedCreateIcons();
@@ -2684,7 +2878,7 @@ export function initVideoEditor(API_URL, showToast, loadFeedReels) {
 
     screen2.style.display = 'none';
     screen3.style.display = 'none';
-    screen1.style.display = 'block';
+    screen1.style.display = 'flex';
     switchEditorTab('basic');
   }
 

@@ -23,6 +23,9 @@ const transporter = nodemailer.createTransport({
   auth: {
     user: emailUser,
     pass: emailPass
+  },
+  tls: {
+    rejectUnauthorized: false
   }
 });
 
@@ -110,29 +113,53 @@ export async function authenticateToken(req, res, next) {
   ].filter(Boolean);
 
   let decoded = null;
+  let userId = null;
+  let email = '';
+  let username = 'user';
+  let fullName = 'User';
 
   if (token.includes('.')) {
     for (const secret of possibleSecrets) {
       try {
         decoded = jwt.verify(token, secret);
-        if (decoded) break;
+        if (decoded) {
+          userId = decoded.id || decoded.sub;
+          email = decoded.email || '';
+          username = decoded.username || (decoded.email ? decoded.email.split('@')[0] : 'user');
+          fullName = decoded.full_name || decoded.fullName || decoded.username || 'User';
+          break;
+        }
       } catch (_) {}
     }
 
-    if (!decoded) {
+    if (!userId) {
+      // Fallback: Verify token directly using Supabase client
+      try {
+        const { data: { user: sbUser }, error: sbErr } = await supabase.auth.getUser(token);
+        if (sbUser && !sbErr) {
+          userId = sbUser.id;
+          email = sbUser.email || '';
+          username = sbUser.user_metadata?.username || (sbUser.email ? sbUser.email.split('@')[0] : 'user');
+          fullName = sbUser.user_metadata?.full_name || sbUser.user_metadata?.fullName || username;
+          decoded = { id: userId, email, username, full_name: fullName };
+        }
+      } catch (err) {
+        console.warn('Supabase auth fallback verification warning:', err.message);
+      }
+    }
+
+    if (!userId) {
       return res.status(401).json({ error: 'Unauthorized: Invalid authentication token signature.' });
     }
   }
 
-  const userId = decoded?.id || decoded?.sub;
-
-  if (decoded && (userId || decoded.email || decoded.username)) {
+  if (userId) {
     req.token = token;
     req.user = {
       id: userId,
-      email: decoded.email || '',
-      username: decoded.username || (decoded.email ? decoded.email.split('@')[0] : 'user'),
-      full_name: decoded.full_name || decoded.fullName || decoded.username || 'User'
+      email: email,
+      username: username,
+      full_name: fullName
     };
 
     // Fetch fresh profile details from public.profiles
@@ -163,6 +190,22 @@ export async function authenticateToken(req, res, next) {
           .eq('email', req.user.email)
           .maybeSingle();
         dbProfile = data;
+      }
+
+      if (!dbProfile && req.user.id) {
+        const { data: createdProfile } = await supabase
+          .from('profiles')
+          .upsert([{
+            id: req.user.id,
+            username: req.user.username || 'user',
+            email: req.user.email || null,
+            full_name: req.user.full_name || req.user.username || 'User',
+            password_hash: '$2b$10$e0MYzXy3vV1rV1rV1rV1r.1rV1rV1rV1rV1rV1rV1rV1rV1rV1r',
+            is_online: true
+          }], { onConflict: 'id' })
+          .select('id, full_name, username, email, profile_image_url')
+          .maybeSingle();
+        dbProfile = createdProfile;
       }
 
       if (dbProfile) {

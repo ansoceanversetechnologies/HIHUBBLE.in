@@ -91,6 +91,7 @@
   background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.9) 50%, transparent 100%);
   background-size: 200% 100%;
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
   animation: lightningBorder 4s linear infinite;
@@ -129,9 +130,9 @@
   width: 100%;
   height: 100%;
   display: block;
-  object-fit: cover;
-  object-position: center 15%;
-  transform: scale(1.15) translateZ(0) !important;
+  object-fit: contain;
+  object-position: center;
+  transform: scale(1.0) translateZ(0) !important;
   border-radius: 50%;
   border: 3px solid rgba(138,92,255,0.8);
   will-change: transform;
@@ -171,6 +172,7 @@
   margin: 0 0 10px 0;
   background: linear-gradient(90deg, #fff, #e0caff);
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
@@ -680,19 +682,22 @@
 
 .welcome-glass-container {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  width: 750px;
-  max-width: 90%;
+  justify-content: center;
+  width: 1140px;
+  max-width: 92vw;
+  min-height: 540px;
   background: rgba(20, 10, 40, 0.85);
 /* backdrop-filter removed for performance */
 /* backdrop-filter removed for performance */
   border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 32px;
+  border-radius: 36px;
   box-shadow: 
     0 30px 60px rgba(0, 0, 0, 0.4),
     inset 0 1px 0 rgba(255, 255, 255, 0.3);
-  padding: 50px 40px;
+  padding: 46px 52px;
+  gap: 48px;
   overflow: hidden;
   position: relative;
   animation: modalEnter 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
@@ -702,11 +707,12 @@
   content: '';
   position: absolute;
   inset: 0;
-  border-radius: 32px;
+  border-radius: 36px;
   padding: 2px;
   background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.8) 50%, transparent 100%);
   background-size: 200% 100%;
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
   animation: lightningBorder 5s linear infinite;
@@ -716,11 +722,14 @@
 
 .welcome-top {
   display: flex;
+  flex: 1.1;
   align-items: center;
   justify-content: center;
   gap: 40px;
-  width: 100%;
-  margin-bottom: 35px;
+  width: auto;
+  margin-bottom: 0;
+  border-right: 1px solid rgba(255, 255, 255, 0.12);
+  padding-right: 48px;
 }
 
 /* BRAND BUBBLE DESIGN */
@@ -734,8 +743,8 @@
 /* backdrop-filter removed for performance */
 /* backdrop-filter removed for performance */
   border: 1.5px solid rgba(255, 255, 255, 0.25);
-  border-radius: 60px;
-  padding: 26px 40px 30px 40px;
+  border-radius: 52px;
+  padding: 34px 44px 38px 44px;
   box-shadow: 
     0 20px 40px rgba(0, 0, 0, 0.25),
     inset 0 2px 2px rgba(255, 255, 255, 0.5),
@@ -743,9 +752,9 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 14px;
+  gap: 18px;
   position: relative;
-  min-width: 320px;
+  min-width: 360px;
   animation: bubblePulse 6s ease-in-out infinite;
 }
 
@@ -761,19 +770,19 @@
 }
 
 .brand-bubble-mascot-img {
-  width: 140px;
-  height: 140px;
+  width: 175px;
+  height: 175px;
   display: block;
-  object-fit: cover;
-  object-position: center 15%;
-  transform: scale(1.15) !important;
+  object-fit: contain;
+  object-position: center;
+  transform: scale(1.0) !important;
   border-radius: 50%;
-  filter: drop-shadow(0 8px 20px rgba(108, 59, 255, 0.4));
+  filter: drop-shadow(0 8px 20px rgba(108, 59, 255, 0.6));
 }
 
 .brand-bubble-text {
   font-family: 'Outfit', sans-serif;
-  font-size: 36px;
+  font-size: 42px;
   font-weight: 800;
   display: flex;
   align-items: center;
@@ -800,9 +809,9 @@
 
 .brand-heart {
   position: absolute;
-  font-size: 14px;
-  top: -2px;
-  left: 31px;
+  font-size: 16px;
+  top: -3px;
+  left: 36px;
   color: #ff4fa3;
   animation: heartbeat 1.5s ease-in-out infinite;
 }
@@ -817,12 +826,12 @@
 .brand-bubble-footer {
   background: rgba(20, 10, 40, 0.90);
   border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 20px;
-  padding: 7px 22px;
+  border-radius: 24px;
+  padding: 8px 24px;
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 11px;
+  gap: 10px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 1px;
 }
@@ -861,6 +870,10 @@
   text-align: center;
   z-index: 2;
   width: 100%;
+  flex: 1.2;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 
 .welcome-title {
@@ -870,6 +883,7 @@
   font-family: 'Outfit', sans-serif;
   background: linear-gradient(90deg, #ffffff 0%, #db2777 50%, #a855f7 100%);
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
   filter: drop-shadow(0 2px 10px rgba(0,0,0,0.1));
 }
@@ -974,13 +988,25 @@
   transform: translateX(-4px);
 }
 
-@media (max-width: 768px) {
-  .welcome-glass-container {
-    padding: 35px 24px;
+@media (max-width: 820px) {
+  .welcome-glass-container,
+  .quick-onboard-card {
+    flex-direction: column !important;
+    max-width: 440px !important;
+    width: 90% !important;
+    padding: 28px 20px !important;
+    gap: 20px !important;
   }
   .welcome-top {
-    flex-direction: column;
-    gap: 25px;
+    border-right: none !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12) !important;
+    padding-right: 0 !important;
+    padding-bottom: 20px !important;
+    width: 100% !important;
+    margin-bottom: 0 !important;
+  }
+  .welcome-bottom {
+    width: 100% !important;
   }
   .brand-bubble-glass {
     min-width: 280px;
@@ -995,6 +1021,17 @@
   }
   .welcome-btn {
     width: 100%;
+  }
+}
+
+@media (min-width: 1440px) {
+  .welcome-glass-container,
+  .quick-onboard-card {
+    max-width: 1240px;
+    width: 85vw;
+    min-height: 580px;
+    padding: 54px 64px;
+    gap: 56px;
   }
 }
 
@@ -1264,19 +1301,20 @@
 
 /* QUICK WEBCAM ONBOARDING STYLES */
 .quick-onboard-card {
-  max-width: 440px;
-  width: 90%;
+  max-width: 1140px;
+  width: 90vw;
+  min-height: 540px;
   margin: 0 auto;
-  padding: 24px;
+  padding: 46px 52px;
 }
 
 .onboard-step {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
+  gap: 14px;
   width: 100%;
-  margin-top: 16px;
+  margin-top: 14px;
 }
 
 .onboard-input-box {
@@ -1289,16 +1327,16 @@
 .onboard-input-box i,
 .onboard-input-box svg {
   position: absolute;
-  left: 16px;
+  left: 18px;
   color: rgba(255, 255, 255, 0.6);
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
 }
 
 .onboard-input-box input {
   width: 100%;
-  padding: 14px 16px 14px 48px;
-  border-radius: 14px;
+  padding: 15px 18px 15px 52px;
+  border-radius: 16px;
   border: 1px solid rgba(255, 255, 255, 0.2);
   background: rgba(255, 255, 255, 0.08);
   color: #fff;

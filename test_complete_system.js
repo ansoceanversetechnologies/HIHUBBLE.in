@@ -294,7 +294,8 @@ async function runTests() {
       username: userBUsername,
       email: `${userBUsername}@hihubble.local`,
       full_name: 'Test Runner B',
-      password_hash: '$2a$10$w8.1Wd91...fakehash'
+      password_hash: '$2a$10$w8.1Wd91...fakehash',
+      is_private: true
     }]).select().single();
 
     const tokenB = jwt.sign(
@@ -332,12 +333,25 @@ async function runTests() {
     }
     console.log("  ✓ User B accepted User A's follow request.");
 
-    // Verify follower relationship in DB
-    const { data: followerRel } = await supabase.from('followers').select('*').eq('follower_id', testUser.id).eq('following_id', userB.id).single();
-    if (!followerRel) {
-      throw new Error("Follower record not found in public.followers table!");
+    // Verify mutual follower relationship in DB
+    const { data: followerRel1 } = await supabase.from('followers').select('*').eq('follower_id', testUser.id).eq('following_id', userB.id).single();
+    const { data: followerRel2 } = await supabase.from('followers').select('*').eq('follower_id', userB.id).eq('following_id', testUser.id).single();
+    if (!followerRel1 || !followerRel2) {
+      throw new Error("Mutual follower records not found in public.followers table!");
     }
-    console.log("  ✓ Confirmed follower record stored in public.followers table.");
+    console.log("  ✓ Confirmed mutual follower records stored in public.followers table.");
+
+    // Verify profile counts
+    const { data: profA } = await supabase.from('profiles').select('follower_count, following_count').eq('id', testUser.id).single();
+    const { data: profB } = await supabase.from('profiles').select('follower_count, following_count').eq('id', userB.id).single();
+
+    if (profA.follower_count !== 1 || profA.following_count !== 1) {
+      throw new Error(`User A counts incorrect: ${JSON.stringify(profA)}`);
+    }
+    if (profB.follower_count !== 1 || profB.following_count !== 1) {
+      throw new Error(`User B counts incorrect: ${JSON.stringify(profB)}`);
+    }
+    console.log("  ✓ Confirmed mutual follow counts are correctly updated on both profiles.");
 
     // Clean up test post & test users
     if (createdPostId) await supabase.from('posts').delete().eq('id', createdPostId);

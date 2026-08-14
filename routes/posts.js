@@ -1,4 +1,5 @@
 import express from 'express';
+import fs from 'fs';
 import { supabase } from '../supabase.js';
 import { authenticateToken } from '../utils.js';
 
@@ -24,6 +25,10 @@ function mapPostToFrontend(post, media, author, comments, likes) {
     caption: post.caption || '',
     mediaUrl: media && media.length > 0 ? media[0].media_url : '',
     mediaType: media && media.length > 0 ? media[0].media_type : 'image',
+    mediaItems: (media || []).map(m => ({
+      url: m.media_url,
+      type: m.media_type
+    })),
     location: post.location || '',
     createdAt: post.created_at,
     likes: likes || [],
@@ -58,13 +63,149 @@ function mapCommentToFrontend(c, userLikes = new Set()) {
   };
 }
 
+// Helper to upload media item (base64 or URL)
+export async function uploadMediaItem(userId, mediaUrl, mediaType) {
+  if (!mediaUrl) return { url: '', type: 'image' };
+  let finalMediaUrl = mediaUrl;
+  let finalType = mediaType || 'image';
+
+  if (typeof mediaUrl === 'string' && mediaUrl.startsWith('data:')) {
+    try {
+      const matches = mediaUrl.match(/^data:([a-zA-Z0-9\/]+);base64,(.+)$/);
+      if (matches && matches.length === 3) {
+        const mimeType = matches[1];
+        const isVideo = mimeType.startsWith('video');
+        finalType = isVideo ? 'video' : 'image';
+        const base64Data = matches[2];
+        const buffer = Buffer.from(base64Data, 'base64');
+        const ext = mimeType.split('/')[1] || (isVideo ? 'mp4' : 'png');
+        const bucketName = isVideo ? 'post-videos' : 'post-images';
+        const filename = `${userId}/hubb_${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`;
+
+        const { error: uploadErr } = await supabase.storage
+          .from(bucketName)
+          .upload(filename, buffer, { contentType: mimeType, upsert: true });
+
+        if (!uploadErr) {
+          const { data: publicUrlData } = supabase.storage.from(bucketName).getPublicUrl(filename);
+          if (publicUrlData?.publicUrl) {
+            finalMediaUrl = publicUrlData.publicUrl;
+          }
+        }
+      }
+    } catch (uploadExc) {
+      console.warn("Storage upload exception:", uploadExc.message);
+    }
+  }
+
+  return { url: finalMediaUrl, type: finalType };
+}
+
+function parseScheduleTimeString(timeStr) {
+  if (!timeStr) return new Date();
+  
+  const now = new Date();
+  
+  // Case 1: "Later Today, 8:00 PM"
+  if (timeStr.toLowerCase().includes('later today')) {
+    const timeMatch = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
+    const date = new Date();
+    if (timeMatch) {
+      let hours = parseInt(timeMatch[1]);
+      const minutes = parseInt(timeMatch[2]);
+      const period = timeMatch[3].toUpperCase();
+      if (period === 'PM' && hours < 12) hours += 12;
+      if (period === 'AM' && hours === 12) hours = 0;
+      date.setHours(hours, minutes, 0, 0);
+    } else {
+      date.setHours(20, 0, 0, 0);
+    }
+    if (date <= now) {
+      return new Date(now.getTime() + 10 * 60 * 1000);
+    }
+    return date;
+  }
+  
+  // Case 2: "Tomorrow, 9:00 AM"
+  if (timeStr.toLowerCase().includes('tomorrow')) {
+    const timeMatch = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
+    const date = new Date();
+    date.setDate(date.getDate() + 1);
+    if (timeMatch) {
+      let hours = parseInt(timeMatch[1]);
+      const minutes = parseInt(timeMatch[2]);
+      const period = timeMatch[3].toUpperCase();
+      if (period === 'PM' && hours < 12) hours += 12;
+      if (period === 'AM' && hours === 12) hours = 0;
+      date.setHours(hours, minutes, 0, 0);
+    } else {
+      date.setHours(9, 0, 0, 0);
+    }
+    return date;
+  }
+  
+  // Case 3: "Aug 11, 8:00 PM" (or similar custom date)
+  try {
+    const currentYear = now.getFullYear();
+    const cleaned = timeStr.replace(/,/, ` ${currentYear},`);
+    const date = new Date(cleaned);
+    if (!isNaN(date.getTime())) {
+      if (date <= now) {
+        return new Date(now.getTime() + 10 * 60 * 1000);
+      }
+      return date;
+    }
+  } catch (_) {}
+
+  return new Date(now.getTime() + 10 * 60 * 1000);
+}
+
 // ------------------------------------------------------------------------------
-// 1. CREATE NEW POST
+// 1. CREATE NEW POST / HUBB
 // ------------------------------------------------------------------------------
 router.post('/api/posts', authenticateToken, async (req, res) => {
-  const { mediaUrl, mediaType, caption } = req.body;
-  if (!mediaUrl && !caption) {
-    return res.status(400).json({ error: 'Media URL or caption is required.' });
+  const { mediaUrl, mediaType, caption, location, scheduledAt, collaborators, mediaItems, editorState } = req.body;
+  
+  // Server-side diagnostics (safe output, no tokens or huge base64)
+  const firstItem = Array.isArray(mediaItems) && mediaItems.length > 0 ? mediaItems[0] : null;
+  const firstUrl = firstItem ? (firstItem.mediaUrl || firstItem.url || '') : (mediaUrl || '');
+
+  console.log('[HUBB POST DEBUG]', {
+    method: req.method,
+    url: req.originalUrl || req.url,
+    contentType: req.headers['content-type'],
+    captionLength: typeof caption === 'string' ? caption.length : 0,
+    mediaItemsCount: Array.isArray(mediaItems) ? mediaItems.length : 0,
+    firstItemType: firstItem ? (firstItem.mediaType || firstItem.type) : mediaType,
+    firstItemUrlPresence: !!firstUrl,
+    firstItemUrlPrefix: firstUrl ? firstUrl.substring(0, 50) : null
+  });
+
+  // Normalize media items array from both new HUBB payload and legacy post payload
+  let rawMediaItems = [];
+  if (Array.isArray(mediaItems) && mediaItems.length > 0) {
+    rawMediaItems = mediaItems;
+  } else if (mediaUrl) {
+    rawMediaItems = [{ mediaUrl, mediaType: mediaType || 'image' }];
+  }
+
+  // Filter valid media items that have a non-empty mediaUrl or url property
+  const itemsToProcess = rawMediaItems.filter(item => {
+    const url = item.mediaUrl || item.url;
+    return typeof url === 'string' && url.trim().length > 0;
+  });
+
+  const hasMedia = itemsToProcess.length > 0;
+  const hasCaption = typeof caption === 'string' && caption.trim().length > 0;
+
+  if (!hasMedia && !hasCaption) {
+    return res.status(400).json({ 
+      error: 'Media URL or caption is required.',
+      received: {
+        hasCaption,
+        mediaItemsCount: itemsToProcess.length
+      }
+    });
   }
 
   const userId = req.user.id;
@@ -81,73 +222,92 @@ router.post('/api/posts', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Author profile not found.' });
     }
 
-    // 2. Insert Post
-    const { data: newPost, error: postErr } = await supabase
-      .from('posts')
-      .insert([{
-        author_id: userId,
-        caption: caption || ''
-      }])
-      .select('id, author_id, caption, created_at')
-      .single();
+    let isScheduled = false;
+    let scheduledIso = null;
 
-    if (postErr) {
-      console.error("Supabase post insert error:", postErr);
-      return res.status(500).json({ error: postErr.message || 'Database error creating post.' });
+    if (scheduledAt) {
+      const scheduledTime = parseScheduleTimeString(scheduledAt);
+      if (scheduledTime > new Date()) {
+        isScheduled = true;
+        scheduledIso = scheduledTime.toISOString();
+      }
     }
 
-    // 3. Upload / Insert Post Media if provided
-    let newMediaArr = [];
-    if (mediaUrl) {
-      let finalMediaUrl = mediaUrl;
-
-      if (typeof mediaUrl === 'string' && mediaUrl.startsWith('data:')) {
-        try {
-          const matches = mediaUrl.match(/^data:([a-zA-Z0-9\/]+);base64,(.+)$/);
-          if (matches && matches.length === 3) {
-            const mimeType = matches[1];
-            const isVideo = mimeType.startsWith('video');
-            const base64Data = matches[2];
-            const buffer = Buffer.from(base64Data, 'base64');
-            const ext = mimeType.split('/')[1] || (isVideo ? 'mp4' : 'png');
-            const bucketName = isVideo ? 'post-videos' : 'post-images';
-            const filename = `${userId}/post_${Date.now()}.${ext}`;
-
-            const { error: uploadErr } = await supabase.storage
-              .from(bucketName)
-              .upload(filename, buffer, { contentType: mimeType, upsert: true });
-
-            if (!uploadErr) {
-              const { data: publicUrlData } = supabase.storage.from(bucketName).getPublicUrl(filename);
-              if (publicUrlData?.publicUrl) {
-                finalMediaUrl = publicUrlData.publicUrl;
-              }
-            }
-          }
-        } catch (uploadExc) {
-          console.warn("Storage upload exception:", uploadExc.message);
+    if (isScheduled) {
+      let scheduledPosts = [];
+      try {
+        if (fs.existsSync('scheduled_posts.json')) {
+          scheduledPosts = JSON.parse(fs.readFileSync('scheduled_posts.json', 'utf8'));
         }
+      } catch (e) {
+        console.warn('Read scheduled_posts.json warning:', e.message);
       }
+
+      const newScheduled = {
+        id: Math.random().toString(36).substring(2, 9),
+        userId,
+        caption: caption || '',
+        location: location || null,
+        scheduledAt: scheduledIso,
+        mediaItems: itemsToProcess
+      };
+
+      scheduledPosts.push(newScheduled);
+      fs.writeFileSync('scheduled_posts.json', JSON.stringify(scheduledPosts, null, 2), 'utf8');
+
+      return res.status(201).json({
+        success: true,
+        scheduled: true,
+        id: newScheduled.id,
+        scheduledAt: scheduledIso
+      });
+    }
+
+    // 2. Insert Post with base payload (guaranteed columns)
+    const basePayload = {
+      author_id: userId,
+      caption: caption || '',
+      location: location || null
+    };
+
+    let { data: newPost, error: postErr } = await supabase
+      .from('posts')
+      .insert([basePayload])
+      .select('id, author_id, caption, location, created_at')
+      .single();
+
+    if (postErr || !newPost) {
+      console.error("Supabase post insert error:", postErr);
+      return res.status(500).json({ error: postErr?.message || 'Database error creating post.' });
+    }
+
+    // 3. Upload & Insert all media items
+    let newMediaArr = [];
+    for (let i = 0; i < itemsToProcess.length; i++) {
+      const item = itemsToProcess[i];
+      const uploaded = await uploadMediaItem(userId, item.mediaUrl || item.url, item.mediaType || item.type);
 
       const { data: mediaData, error: mediaErr } = await supabase
         .from('post_media')
         .insert([{
           post_id: newPost.id,
-          media_url: finalMediaUrl,
-          media_type: mediaType || (mediaUrl.includes('video') || mediaUrl.includes('.mp4') || mediaUrl.includes('.webm') ? 'video' : 'image'),
-          display_order: 1
+          media_url: uploaded.url,
+          media_type: uploaded.type,
+          display_order: i + 1
         }])
         .select();
 
       if (mediaErr) console.warn("Media insert warning:", mediaErr.message);
-      newMediaArr = mediaData || [];
+      if (mediaData && mediaData.length > 0) {
+        newMediaArr.push(mediaData[0]);
+      }
     }
 
     // Update user post count if column exists
     try {
       const { count: currentPostCount } = await supabase.from('posts').select('*', { count: 'exact', head: true }).eq('author_id', userId);
       if (currentPostCount) {
-        await supabase.from('profiles').update({ post_count: currentPostCount }).eq('id', userId).catch(() => {});
+        await supabase.from('profiles').update({ post_count: currentPostCount }).eq('id', userId);
       }
     } catch (_) {}
 
@@ -174,7 +334,8 @@ router.get('/api/posts', async (req, res) => {
         author_profile:profiles!author_id(id, full_name, username, profile_image_url),
         media:post_media(media_url, media_type)
       `)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .limit(25);
 
     if (targetAuthor) {
       if (targetAuthor.includes('-')) {
@@ -195,7 +356,34 @@ router.get('/api/posts', async (req, res) => {
     }
 
     const posts = [];
-    if (postsData) {
+    if (postsData && postsData.length > 0) {
+      const postIds = postsData.map(p => p.id);
+
+      // Batch fetch comments & likes in 2 bulk queries instead of N+1 loop queries
+      const [{ data: allComments }, { data: allLikes }] = await Promise.all([
+        supabase
+          .from('comments')
+          .select('*, author_profile:profiles!author_id(id, full_name, username, profile_image_url)')
+          .in('post_id', postIds)
+          .order('created_at', { ascending: true }),
+        supabase
+          .from('likes')
+          .select('post_id, user_id')
+          .in('post_id', postIds)
+      ]);
+
+      const commentsByPost = {};
+      (allComments || []).forEach(c => {
+        if (!commentsByPost[c.post_id]) commentsByPost[c.post_id] = [];
+        commentsByPost[c.post_id].push(mapCommentToFrontend(c));
+      });
+
+      const likesByPost = {};
+      (allLikes || []).forEach(l => {
+        if (!likesByPost[l.post_id]) likesByPost[l.post_id] = [];
+        likesByPost[l.post_id].push(l.user_id);
+      });
+
       for (const p of postsData) {
         const authorObj = p.author_profile || {
           id: p.author_id,
@@ -208,22 +396,8 @@ router.get('/api/posts', async (req, res) => {
           continue;
         }
 
-        // Fetch comments for post
-        const { data: commentsData } = await supabase
-          .from('comments')
-          .select('*, author_profile:profiles!author_id(id, full_name, username, profile_image_url)')
-          .eq('post_id', p.id)
-          .order('created_at', { ascending: true });
-
-        const mappedComments = (commentsData || []).map(c => mapCommentToFrontend(c));
-
-        // Fetch post likes
-        const { data: likesData } = await supabase
-          .from('likes')
-          .select('user_id')
-          .eq('post_id', p.id);
-
-        const mappedLikes = (likesData || []).map(l => l.user_id);
+        const mappedComments = commentsByPost[p.id] || [];
+        const mappedLikes = likesByPost[p.id] || [];
 
         posts.push(mapPostToFrontend(p, p.media || [], authorObj, mappedComments, mappedLikes));
       }
@@ -601,4 +775,188 @@ router.delete('/api/comments/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// ------------------------------------------------------------------------------
+// 9. GET TRENDING POSTS / HUBBS
+// ------------------------------------------------------------------------------
+router.get('/api/posts/trending', async (req, res) => {
+  try {
+    const { data: postsData, error } = await supabase
+      .from('posts')
+      .select(`
+        id, caption, location, created_at, like_count, comment_count, author_id,
+        author_profile:profiles!author_id(id, full_name, username, profile_image_url),
+        media:post_media(media_url, media_type)
+      `)
+      .order('created_at', { ascending: false })
+      .limit(10);
+
+    if (error) {
+      console.warn("GET /api/posts/trending DB error:", error.message);
+      return res.json([]);
+    }
+
+    const trendingHubbs = (postsData || []).map(p => {
+      const mediaItem = p.media && p.media.length > 0 ? p.media[0] : null;
+      let rawCaption = (p.caption || '').replace(/<[^>]*>/g, '').trim();
+      
+      const hashtagMatch = rawCaption.match(/#[a-zA-Z0-9_]+/);
+      let title = rawCaption || (p.location ? `Hub in ${p.location.split(',')[0]}` : 'Trending Hubb');
+      if (title.length > 50) title = title.substring(0, 50) + '...';
+
+      return {
+        _id: p.id,
+        title: title,
+        hashtag: hashtagMatch ? hashtagMatch[0] : (p.location ? `#${p.location.split(',')[0].replace(/\s+/g, '')}` : '#trending'),
+        author: {
+          _id: p.author_profile?.id || p.author_id,
+          fullName: p.author_profile?.full_name || p.author_profile?.username || 'User',
+          username: p.author_profile?.username || 'user',
+          profileImage: p.author_profile?.profile_image_url || ''
+        },
+        mediaUrl: mediaItem ? mediaItem.media_url : '',
+        mediaType: mediaItem ? mediaItem.media_type : 'image',
+        likesCount: p.like_count || 0,
+        commentsCount: p.comment_count || 0,
+        createdAt: p.created_at
+      };
+    });
+
+    res.json(trendingHubbs);
+  } catch (err) {
+    console.error("[GET /api/posts/trending error]:", err);
+    res.json([]);
+  }
+});
+
+// ------------------------------------------------------------------------------
+// 10. GET SINGLE POST BY ID
+// ------------------------------------------------------------------------------
+router.get('/api/posts/:id', authenticateToken, async (req, res) => {
+  const postId = req.params.id;
+  try {
+    const { data: postData, error: postError } = await supabase
+      .from('posts')
+      .select(`
+        *,
+        author_profile:profiles!author_id(id, full_name, username, profile_image_url),
+        media:post_media(media_url, media_type)
+      `)
+      .eq('id', postId)
+      .maybeSingle();
+
+    if (postError) {
+      console.error("[GET /api/posts/:id error]:", postError.message);
+      return res.status(500).json({ error: 'Failed to fetch post.' });
+    }
+
+    if (!postData) {
+      return res.status(404).json({ error: 'Post not found.' });
+    }
+
+    // Fetch comments & likes for this post
+    const [{ data: commentsData }, { data: likesData }] = await Promise.all([
+      supabase
+        .from('comments')
+        .select('*, author_profile:profiles!author_id(id, full_name, username, profile_image_url)')
+        .eq('post_id', postId)
+        .order('created_at', { ascending: true }),
+      supabase
+        .from('likes')
+        .select('user_id')
+        .eq('post_id', postId)
+    ]);
+
+    const mappedComments = (commentsData || []).map(c => mapCommentToFrontend(c));
+    const mappedLikes = (likesData || []).map(l => l.user_id);
+    const authorObj = postData.author_profile || {
+      id: postData.author_id,
+      username: 'user',
+      full_name: 'User',
+      profile_image_url: ''
+    };
+
+    const post = mapPostToFrontend(postData, postData.media || [], authorObj, mappedComments, mappedLikes);
+    res.json(post);
+  } catch (err) {
+    console.error("[GET /api/posts/:id error]:", err);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// ------------------------------------------------------------------------------
+// 11. DELETE A POST
+// ------------------------------------------------------------------------------
+router.delete('/api/posts/:id', authenticateToken, async (req, res) => {
+  const postId = req.params.id;
+  const userId = req.user.id;
+
+  try {
+    // 1. Fetch post to verify existence and authorship
+    const { data: post, error: fetchErr } = await supabase
+      .from('posts')
+      .select('id, author_id')
+      .eq('id', postId)
+      .maybeSingle();
+
+    if (fetchErr) {
+      console.error('[DELETE /api/posts/:id] Fetch error:', fetchErr.message);
+      return res.status(500).json({ error: 'Failed to fetch post for deletion.' });
+    }
+
+    if (!post) {
+      return res.status(404).json({ error: 'Post not found or already deleted.' });
+    }
+
+    // Check authorization (allow author to delete)
+    if (post.author_id !== userId) {
+      return res.status(403).json({ error: 'Forbidden: You are not authorized to delete this post.' });
+    }
+
+    // 2. Delete child dependencies from related tables
+    await Promise.allSettled([
+      supabase.from('post_media').delete().eq('post_id', postId),
+      supabase.from('likes').delete().eq('post_id', postId),
+      supabase.from('comments').delete().eq('post_id', postId),
+      supabase.from('bookmarks').delete().eq('post_id', postId),
+      supabase.from('saved_posts').delete().eq('post_id', postId),
+      supabase.from('notifications').delete().eq('post_id', postId)
+    ]);
+
+    // 3. Delete the post row itself from DB table
+    const { error: deleteErr } = await supabase
+      .from('posts')
+      .delete()
+      .eq('id', postId);
+
+    if (deleteErr) {
+      console.error('[DELETE /api/posts/:id] Delete error:', deleteErr.message);
+      return res.status(500).json({ error: deleteErr.message });
+    }
+
+    // 4. Update post_count on profile
+    try {
+      const { count: remainingPostCount } = await supabase
+        .from('posts')
+        .select('*', { count: 'exact', head: true })
+        .eq('author_id', userId);
+
+      await supabase
+        .from('profiles')
+        .update({ post_count: remainingPostCount || 0 })
+        .eq('id', userId);
+    } catch (countErr) {
+      console.warn('[DELETE /api/posts/:id] Post count update warning:', countErr.message);
+    }
+
+    res.json({ success: true, message: 'Post deleted successfully.' });
+  } catch (err) {
+    console.error('[DELETE /api/posts/:id] Error:', err);
+    res.status(500).json({ error: 'Internal server error while deleting post.' });
+  }
+});
+
 export default router;
+
+
+
+

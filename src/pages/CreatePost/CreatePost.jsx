@@ -9,6 +9,56 @@ import {
 import Card from '../../components/Post/Card';
 import * as api from '../../services/api';
 
+// --- INDEXEDDB DRAFTS WRAPPER FOR CREATE POST ---
+const PostDraftsDB = {
+  dbName: 'CreatePostDraftsDB',
+  dbVersion: 1,
+  storeName: 'drafts',
+  init() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(this.dbName, this.dbVersion);
+      request.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains(this.storeName)) {
+          db.createObjectStore(this.storeName, { keyPath: 'id' });
+        }
+      };
+      request.onsuccess = (e) => resolve(e.target.result);
+      request.onerror = (e) => reject(e.target.error);
+    });
+  },
+  async saveDraft(draft) {
+    const db = await this.init();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(this.storeName, 'readwrite');
+      const store = tx.objectStore(this.storeName);
+      const request = store.put(draft);
+      request.onsuccess = () => resolve(draft);
+      request.onerror = () => reject(request.error);
+    });
+  },
+  async getDrafts() {
+    const db = await this.init();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(this.storeName, 'readonly');
+      const store = tx.objectStore(this.storeName);
+      const request = store.getAll();
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  },
+  async deleteDraft(id) {
+    const db = await this.init();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(this.storeName, 'readwrite');
+      const store = tx.objectStore(this.storeName);
+      const request = store.delete(id);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+};
+
 const CreatePost = ({ onNavigateBack }) => {
   // --- CORE STATE ---
   const [profile, setProfile] = useState({
@@ -20,6 +70,7 @@ const CreatePost = ({ onNavigateBack }) => {
   const [content, setContent] = useState('');
   const [mediaFiles, setMediaFiles] = useState([]);
   const [activeMediaIndex, setActiveMediaIndex] = useState(0);
+  const [previewMediaIndex, setPreviewMediaIndex] = useState(0);
 
   // Settings
   const [audience, setAudience] = useState('Public');
@@ -28,7 +79,7 @@ const CreatePost = ({ onNavigateBack }) => {
   const [audienceSearchQuery, setAudienceSearchQuery] = useState('');
   const [previewVisibility, setPreviewVisibility] = useState(true);
 
-  const [location, setLocation] = useState('Hyderabad, Telangana, India');
+  const [location, setLocation] = useState('');
   const [topics, setTopics] = useState(['#sunset', '#travel', '#photography']);
   const [taggedPeople, setTaggedPeople] = useState(['@friends']);
   
@@ -119,16 +170,43 @@ const CreatePost = ({ onNavigateBack }) => {
   const [isLoading, setIsLoading] = useState(false);
 
   // Drafts State
-  const [draftsList, setDraftsList] = useState(() => {
-    try {
-      const saved = localStorage.getItem('hubbleDrafts');
-      const list = saved ? JSON.parse(saved) : [];
-      return list.filter(d => d.id !== 101 && d.id !== 102 && d.id !== 999);
-    } catch (e) {
-      return [];
-    }
-  });
+  const [draftsList, setDraftsList] = useState([]);
   const [searchDraftsQuery, setSearchDraftsQuery] = useState('');
+
+  // Load drafts from IndexedDB on mount (with migration from localStorage)
+  useEffect(() => {
+    const loadDrafts = async () => {
+      try {
+        const oldSaved = localStorage.getItem('hubbleDrafts');
+        if (oldSaved) {
+          try {
+            const oldList = JSON.parse(oldSaved);
+            if (Array.isArray(oldList) && oldList.length > 0) {
+              for (const oldDraft of oldList) {
+                if (oldDraft.id !== 101 && oldDraft.id !== 102 && oldDraft.id !== 999) {
+                  await PostDraftsDB.saveDraft({
+                    id: oldDraft.id || Date.now() + Math.random(),
+                    title: oldDraft.title || 'Untitled Draft',
+                    text: oldDraft.text || '',
+                    media: oldDraft.media || []
+                  });
+                }
+              }
+            }
+          } catch (e) {
+            console.error('Failed to migrate old drafts:', e);
+          }
+          localStorage.removeItem('hubbleDrafts');
+        }
+
+        const list = await PostDraftsDB.getDrafts();
+        setDraftsList(list.sort((a, b) => b.id - a.id));
+      } catch (err) {
+        console.error('Failed to load drafts from IndexedDB:', err);
+      }
+    };
+    loadDrafts();
+  }, []);
 
   // Media Studio Specific Editor State
   const [editorTab, setEditorTab] = useState('crop'); 
@@ -137,6 +215,7 @@ const CreatePost = ({ onNavigateBack }) => {
   // History for active media file
   const [editorHistory, setEditorHistory] = useState([]);
   const [editorHistoryIndex, setEditorHistoryIndex] = useState(-1);
+  const [editorScreenSize, setEditorScreenSize] = useState({ w: 180, h: 180 });
 
   // Drag & drop state
   const [draggedIndex, setDraggedIndex] = useState(null);
@@ -177,12 +256,35 @@ const CreatePost = ({ onNavigateBack }) => {
     };
   }, []);
 
+  // Monitor Media Studio screen size dynamically to scale crops and overlays accurately
+  useEffect(() => {
+    if (workspaceMode !== 'mediastudio') return;
+    
+    const updateSize = () => {
+      if (mediaWrapperRef.current) {
+        const rect = mediaWrapperRef.current.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          setEditorScreenSize({ w: rect.width, h: rect.height });
+        }
+      }
+    };
+    
+    updateSize();
+    window.addEventListener('resize', updateSize);
+    return () => window.removeEventListener('resize', updateSize);
+  }, [workspaceMode, mediaFiles, activeMediaIndex]);
+
   // Sync initial content to contentEditable editor when it mounts/remounts
   useEffect(() => {
     if (textareaRef.current && textareaRef.current.innerHTML !== content) {
       textareaRef.current.innerHTML = content;
     }
   }, [workspaceMode]);
+
+  // Reset preview index when switching mode or when media length changes
+  useEffect(() => {
+    setPreviewMediaIndex(0);
+  }, [workspaceMode, mediaFiles.length]);
 
   // Pre-load default basic music tracks when music modal is opened
   useEffect(() => {
@@ -230,10 +332,289 @@ const CreatePost = ({ onNavigateBack }) => {
   };
 
   const removeMedia = (id) => {
-    setMediaFiles(prev => prev.filter(m => m.id !== id));
-    if (activeMediaIndex >= mediaFiles.length - 1 && activeMediaIndex > 0) {
-      setActiveMediaIndex(activeMediaIndex - 1);
-    }
+    setMediaFiles(prev => {
+      const next = prev.filter(m => m.id !== id);
+      setActiveMediaIndex(curr => {
+        if (curr >= next.length) {
+          return Math.max(0, next.length - 1);
+        }
+        return curr;
+      });
+      return next;
+    });
+  };
+
+  const bakeImageWithFilters = async (mediaObj) => {
+    if (mediaObj.type !== 'image') return mediaObj.previewUrl;
+
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.crossOrigin = "Anonymous";
+      img.onload = async () => {
+        try {
+          const W = img.naturalWidth || img.width;
+          const H = img.naturalHeight || img.height;
+          
+          const cropRatio = mediaObj.cropRatio || 'original';
+          
+          let wrapperW = W;
+          let wrapperH = H;
+          
+          if (cropRatio === '1:1') {
+            wrapperW = Math.min(W, H);
+            wrapperH = Math.min(W, H);
+          } else if (cropRatio === '4:5') {
+            if (W / H > 0.8) {
+              wrapperH = H;
+              wrapperW = H * 0.8;
+            } else {
+              wrapperW = W;
+              wrapperH = W / 0.8;
+            }
+          } else if (cropRatio === '16:9') {
+            if (W / H > 16 / 9) {
+              wrapperH = H;
+              wrapperW = H * 16 / 9;
+            } else {
+              wrapperW = W;
+              wrapperH = W / (16 / 9);
+            }
+          } else if (cropRatio === '9:16') {
+            if (W / H > 9 / 16) {
+              wrapperH = H;
+              wrapperW = H * 9 / 16;
+            } else {
+              wrapperW = W;
+              wrapperH = W / (9 / 16);
+            }
+          }
+          
+          let cw = wrapperW;
+          let ch = wrapperH;
+          
+          const isFreeOrCustom = cropRatio === 'Free' || cropRatio === 'Custom';
+          const hasCustomCrop = (mediaObj.cropTop > 0 || mediaObj.cropBottom > 0 || mediaObj.cropLeft > 0 || mediaObj.cropRight > 0);
+          
+          if (isFreeOrCustom && hasCustomCrop) {
+            cw = wrapperW * (1 - ((mediaObj.cropLeft || 0) + (mediaObj.cropRight || 0)) / 100);
+            ch = wrapperH * (1 - ((mediaObj.cropTop || 0) + (mediaObj.cropBottom || 0)) / 100);
+          }
+          
+          const canvas = document.createElement('canvas');
+          canvas.width = cw;
+          canvas.height = ch;
+          const ctx = canvas.getContext('2d');
+          
+          ctx.save();
+          
+          if (isFreeOrCustom && hasCustomCrop) {
+            ctx.translate(-wrapperW * (mediaObj.cropLeft || 0) / 100, -wrapperH * (mediaObj.cropTop || 0) / 100);
+          }
+          
+          const isCover = (cropRatio !== 'Free' && cropRatio !== 'Custom' && cropRatio !== 'original');
+          
+          let imgW, imgH, imgX, imgY;
+          if (isCover) {
+            const imgScale = Math.max(wrapperW / W, wrapperH / H);
+            imgW = W * imgScale;
+            imgH = H * imgScale;
+          } else {
+            const imgScale = Math.min(wrapperW / W, wrapperH / H);
+            imgW = W * imgScale;
+            imgH = H * imgScale;
+          }
+          imgX = (wrapperW - imgW) / 2;
+          imgY = (wrapperH - imgH) / 2;
+          
+          // Image translation/rotation/zoom relative to screen proportions (guarded against 0 or NaN)
+          const editorW = editorScreenSize?.w && editorScreenSize.w > 0 ? editorScreenSize.w : 180;
+          const editorH = editorScreenSize?.h && editorScreenSize.h > 0 ? editorScreenSize.h : 180;
+          const transX = (mediaObj.cropX || 0) * (wrapperW / editorW);
+          const transY = (mediaObj.cropY || 0) * (wrapperH / editorH);
+          
+          ctx.save();
+          
+          // Apply filter adjustments (brightness, contrast, filters)
+          const style = getMediaStyle(mediaObj);
+          if (style.filter && style.filter !== 'none') {
+            ctx.filter = style.filter;
+          }
+          
+          const centerX = imgX + imgW / 2;
+          const centerY = imgY + imgH / 2;
+          ctx.translate(centerX + transX, centerY + transY);
+          
+          ctx.scale(mediaObj.flipH ? -1 : 1, mediaObj.flipV ? -1 : 1);
+          
+          if (mediaObj.rotation) {
+            ctx.rotate((mediaObj.rotation * Math.PI) / 180);
+          }
+          
+          if (mediaObj.cropZoom && mediaObj.cropZoom !== 1) {
+            ctx.scale(mediaObj.cropZoom, mediaObj.cropZoom);
+          }
+          
+          ctx.translate(-imgW / 2, -imgH / 2);
+          ctx.drawImage(img, 0, 0, imgW, imgH);
+          
+          ctx.restore();
+          
+          // Vignette effect overlay
+          try {
+            if (mediaObj.effect === 'Vignette') {
+              const gradient = ctx.createRadialGradient(
+                wrapperW / 2, wrapperH / 2, Math.min(wrapperW, wrapperH) * 0.4,
+                wrapperW / 2, wrapperH / 2, Math.max(wrapperW, wrapperH) * 0.7
+              );
+              gradient.addColorStop(0, 'rgba(0,0,0,0)');
+              gradient.addColorStop(1, 'rgba(0,0,0,0.75)');
+              ctx.fillStyle = gradient;
+              ctx.fillRect(0, 0, wrapperW, wrapperH);
+            }
+          } catch (vErr) {
+            console.error('Vignette draw error:', vErr);
+          }
+          
+          // Drawings overlay
+          try {
+            if (mediaObj.drawings && mediaObj.drawings.length > 0) {
+              const drawingUrl = mediaObj.drawings[mediaObj.drawings.length - 1];
+              if (drawingUrl) {
+                const drawImg = new Image();
+                drawImg.src = drawingUrl;
+                await new Promise((resDraw) => {
+                  drawImg.onload = () => {
+                    ctx.drawImage(drawImg, 0, 0, wrapperW, wrapperH);
+                    resDraw();
+                  };
+                  drawImg.onerror = () => resDraw();
+                });
+              }
+            }
+          } catch (drErr) {
+            console.error('Drawings draw error:', drErr);
+          }
+          
+          // Stickers overlay
+          try {
+            if (mediaObj.stickers && mediaObj.stickers.length > 0) {
+              for (const stk of mediaObj.stickers) {
+                try {
+                  ctx.save();
+                  const stkX = (stk.x / 100) * wrapperW;
+                  const stkY = (stk.y / 100) * wrapperH;
+                  const stkSize = (stk.scale || 1) * 40 * (wrapperH / editorH);
+                  
+                  ctx.translate(stkX, stkY);
+                  if (stk.rotation) {
+                    ctx.rotate((stk.rotation * Math.PI) / 180);
+                  }
+                  ctx.font = `${stkSize}px sans-serif`;
+                  ctx.textAlign = 'center';
+                  ctx.textBaseline = 'middle';
+                  ctx.fillText(stk.emoji, 0, 0);
+                  ctx.restore();
+                } catch (stkErr) {
+                  console.error('Sticker draw item error:', stkErr);
+                }
+              }
+            }
+          } catch (stkGroupErr) {
+            console.error('Stickers group draw error:', stkGroupErr);
+          }
+          
+          // Texts overlay
+          try {
+            if (mediaObj.texts && mediaObj.texts.length > 0) {
+              for (const txt of mediaObj.texts) {
+                try {
+                  ctx.save();
+                  const txtX = (txt.x / 100) * wrapperW;
+                  const txtY = (txt.y / 100) * wrapperH;
+                  const txtSize = (txt.scale || 1) * 20 * (wrapperH / editorH);
+                  
+                  ctx.translate(txtX, txtY);
+                  if (txt.rotation) {
+                    ctx.rotate((txt.rotation * Math.PI) / 180);
+                  }
+                  
+                  let family = txt.fontFamily || 'Outfit';
+                  if (!family.includes(',') && family.includes(' ')) {
+                    family = `"${family}"`;
+                  }
+                  ctx.font = `${txt.fontWeight || 'normal'} ${txtSize}px ${family}`;
+                  ctx.fillStyle = txt.color || '#ffffff';
+                  ctx.textAlign = 'center';
+                  ctx.textBaseline = 'middle';
+                  
+                  ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+                  ctx.shadowBlur = 4 * (wrapperH / editorH);
+                  ctx.shadowOffsetX = 0;
+                  ctx.shadowOffsetY = 2 * (wrapperH / editorH);
+                  
+                  ctx.fillText(txt.text, 0, 0);
+                  ctx.restore();
+                } catch (txtErr) {
+                  console.error('Text draw item error:', txtErr);
+                }
+              }
+            }
+          } catch (txtGroupErr) {
+            console.error('Texts group draw error:', txtGroupErr);
+          }
+          
+          // Frame border overlay
+          try {
+            if (mediaObj.frame === 'White Classic') {
+              const borderW = 12 * (wrapperH / editorH);
+              ctx.strokeStyle = '#ffffff';
+              ctx.lineWidth = borderW;
+              ctx.strokeRect(borderW / 2, borderW / 2, wrapperW - borderW, wrapperH - borderW);
+            } else if (mediaObj.frame === 'Polaroid') {
+              const borderW = 10 * (wrapperH / editorH);
+              const bottomBorderW = 28 * (wrapperH / editorH);
+              ctx.fillStyle = '#fefefa';
+              ctx.fillRect(0, 0, wrapperW, borderW);
+              ctx.fillRect(0, wrapperH - bottomBorderW, wrapperW, bottomBorderW);
+              ctx.fillRect(0, borderW, borderW, wrapperH - borderW - bottomBorderW);
+              ctx.fillRect(wrapperW - borderW, borderW, borderW, wrapperH - borderW - bottomBorderW);
+            } else if (mediaObj.frame === 'Film') {
+              const borderW = 12 * (wrapperH / editorH);
+              ctx.strokeStyle = '#111111';
+              ctx.lineWidth = borderW;
+              ctx.strokeRect(borderW / 2, borderW / 2, wrapperW - borderW, wrapperH - borderW);
+              
+              // Draw film sprocket holes
+              const sprocketW = wrapperW * 0.02;
+              const sprocketH = wrapperH * 0.05;
+              ctx.fillStyle = '#ffffff';
+              for (let i = 0; i < 6; i++) {
+                const y = (wrapperH / 6) * i + (wrapperH / 6 - sprocketH) / 2;
+                ctx.fillRect(wrapperW * 0.005, y, sprocketW, sprocketH);
+              }
+            } else if (mediaObj.frame === 'Neon Glow') {
+              const borderW = 4 * (wrapperH / editorH);
+              ctx.strokeStyle = '#ff00ff';
+              ctx.lineWidth = borderW;
+              ctx.shadowColor = '#ff00ff';
+              ctx.shadowBlur = 15 * (wrapperH / editorH);
+              ctx.strokeRect(borderW / 2, borderW / 2, wrapperW - borderW, wrapperH - borderW);
+            }
+          } catch (frErr) {
+            console.error('Frame draw error:', frErr);
+          }
+          
+          ctx.restore();
+          
+          resolve(canvas.toDataURL('image/jpeg', 0.95));
+        } catch (err) {
+          console.error('[Bake Error]', err);
+          resolve(mediaObj.previewUrl);
+        }
+      };
+      img.onerror = () => resolve(mediaObj.previewUrl);
+      img.src = mediaObj.previewUrl;
+    });
   };
 
   const handlePostSubmit = async () => {
@@ -254,9 +635,18 @@ const CreatePost = ({ onNavigateBack }) => {
 </div>
       ` : '';
 
+      const processedMediaUrls = await Promise.all(
+        mediaFiles.map(async (m) => {
+          if (m.type === 'image') {
+            return await bakeImageWithFilters(m);
+          }
+          return m.previewUrl;
+        })
+      );
+
       const postData = {
         content: content + musicWidgetHtml,
-        media: mediaFiles.map(m => m.previewUrl),
+        media: processedMediaUrls,
         location,
         topics,
         audience,
@@ -826,29 +1216,114 @@ const CreatePost = ({ onNavigateBack }) => {
     setDraggedIndex(null);
   };
 
+  const getMediaStyle = (media, isBeforeActive = false) => {
+    if (!media || isBeforeActive) return { filter: '', transform: 'none', objectFit: 'contain' };
+
+    let filters = [];
+    if (media.brightness && media.brightness !== 100) filters.push(`brightness(${media.brightness}%)`);
+    if (media.contrast && media.contrast !== 100) filters.push(`contrast(${media.contrast}%)`);
+    if (media.saturation && media.saturation !== 100) filters.push(`saturate(${media.saturation}%)`);
+    if (media.exposure && media.exposure !== 100) filters.push(`opacity(${media.exposure}%)`);
+
+    if (media.filter === 'B&W') filters.push('grayscale(100%)');
+    else if (media.filter === 'Warm') filters.push('sepia(30%) hue-rotate(15deg)');
+    else if (media.filter === 'Cool') filters.push('saturate(110%) hue-rotate(-15deg)');
+    else if (media.filter === 'Sepia') filters.push('sepia(80%)');
+    else if (media.filter === 'Vintage') filters.push('sepia(50%) contrast(85%) brightness(95%)');
+    else if (media.filter === 'Cyberpunk') filters.push('hue-rotate(60deg) saturate(160%)');
+    else if (media.filter === 'Dreamy') filters.push('blur(0.5px) saturate(120%) brightness(105%)');
+
+    if (media.effect === 'VHS Blur') filters.push('blur(2px) contrast(120%)');
+    else if (media.effect === 'Warm Glow') filters.push('sepia(40%) saturate(150%) brightness(110%)');
+    else if (media.effect === 'Desaturate') filters.push('grayscale(80%) contrast(110%)');
+
+    const filterStyle = filters.length > 0 ? filters.join(' ') : 'none';
+
+    let transforms = [];
+    if (media.cropX || media.cropY) transforms.push(`translate(${media.cropX || 0}px, ${media.cropY || 0}px)`);
+    if (media.cropZoom && media.cropZoom !== 1) transforms.push(`scale(${media.cropZoom})`);
+    if (media.rotation) transforms.push(`rotate(${media.rotation}deg)`);
+    if (media.flipH) transforms.push(`scaleX(-1)`);
+    if (media.flipV) transforms.push(`scaleY(-1)`);
+    
+    const transformStyle = transforms.length > 0 ? transforms.join(' ') : 'none';
+    const objectFitStyle = (media.cropRatio && media.cropRatio !== 'Free' && media.cropRatio !== 'original') ? 'cover' : 'contain';
+
+    return { filter: filterStyle, transform: transformStyle, objectFit: objectFitStyle };
+  };
+
+  const getMediaWrapperStyle = (media, isBeforeActive = false) => {
+    if (!media || isBeforeActive) return {};
+    
+    let frameStyle = {};
+    if (media.frame === 'White Classic') {
+      frameStyle = { border: '12px solid #ffffff', boxSizing: 'border-box' };
+    } else if (media.frame === 'Polaroid') {
+      frameStyle = { border: '10px solid #fefefa', borderBottom: '28px solid #fefefa', boxSizing: 'border-box' };
+    } else if (media.frame === 'Film') {
+      frameStyle = { border: '12px solid #111111', boxSizing: 'border-box' };
+    } else if (media.frame === 'Neon Glow') {
+      frameStyle = { border: '4px solid #ff00ff', boxShadow: '0 0 15px #ff00ff, inset 0 0 15px #ff00ff', boxSizing: 'border-box' };
+    }
+
+    const hasCustomCrop = media.cropTop > 0 || media.cropBottom > 0 || media.cropLeft > 0 || media.cropRight > 0;
+    const clipPathStyle = (media.cropRatio === 'Custom' || media.cropRatio === 'Free') && hasCustomCrop 
+      ? { clipPath: `inset(${media.cropTop || 0}% ${media.cropRight || 0}% ${media.cropBottom || 0}% ${media.cropLeft || 0}%)` }
+      : {};
+
+    return {
+      ...frameStyle,
+      borderRadius: media.frame === 'None' || !media.frame ? '12px' : '0px',
+      ...clipPathStyle
+    };
+  };
+
+  // --- MOBILE HUB TOOLS MENU ---
+  const renderMobileHubTools = () => {
+    return (
+      <div className="hubble-mobile-hub-tools" style={{ display: 'none', flexDirection: 'column', gap: '8px', marginTop: '16px', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '12px', width: '100%', boxSizing: 'border-box', flexShrink: 0 }}>
+        <h5 style={{ fontSize: '11px', fontWeight: '700', color: 'rgba(255,255,255,0.6)', margin: '0 0 8px 0', textTransform: 'uppercase', letterSpacing: '0.5px', textAlign: 'left' }}>Hub Tools</h5>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', width: '100%', boxSizing: 'border-box' }}>
+          <button type="button" onClick={() => setWorkspaceMode('mediastudio')} style={{ background: workspaceMode === 'mediastudio' ? 'rgba(108, 59, 255, 0.25)' : 'rgba(108, 59, 255, 0.1)', border: workspaceMode === 'mediastudio' ? '1px solid #7C3BFF' : '1px solid rgba(108, 59, 255, 0.15)', borderRadius: '12px', padding: '10px 4px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', color: '#fff', cursor: 'pointer', outline: 'none' }}>
+            <ImageIcon size={14} color="#a855f7" style={{ opacity: workspaceMode === 'mediastudio' ? 1 : 0.8 }} />
+            <span style={{ fontSize: '9px', fontWeight: '600' }}>Media Studio</span>
+          </button>
+          <button type="button" onClick={() => setWorkspaceMode('audience')} style={{ background: workspaceMode === 'audience' ? 'rgba(236, 72, 153, 0.25)' : 'rgba(236, 72, 153, 0.1)', border: workspaceMode === 'audience' ? '1px solid #ec4899' : '1px solid rgba(236, 72, 153, 0.15)', borderRadius: '12px', padding: '10px 4px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', color: '#fff', cursor: 'pointer', outline: 'none' }}>
+            <Users size={14} color="#ec4899" style={{ opacity: workspaceMode === 'audience' ? 1 : 0.8 }} />
+            <span style={{ fontSize: '9px', fontWeight: '600' }}>Audience</span>
+          </button>
+          <button type="button" onClick={() => setWorkspaceMode('schedule')} style={{ background: workspaceMode === 'schedule' ? 'rgba(249, 115, 22, 0.25)' : 'rgba(249, 115, 22, 0.1)', border: workspaceMode === 'schedule' ? '1px solid #f97316' : '1px solid rgba(249, 115, 22, 0.15)', borderRadius: '12px', padding: '10px 4px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', color: '#fff', cursor: 'pointer', outline: 'none' }}>
+            <Calendar size={14} color="#f97316" style={{ opacity: workspaceMode === 'schedule' ? 1 : 0.8 }} />
+            <span style={{ fontSize: '9px', fontWeight: '600' }}>Schedule</span>
+          </button>
+          <button type="button" onClick={() => setWorkspaceMode('location')} style={{ background: workspaceMode === 'location' ? 'rgba(59, 130, 246, 0.25)' : 'rgba(59, 130, 246, 0.1)', border: workspaceMode === 'location' ? '1px solid #3b82f6' : '1px solid rgba(59, 130, 246, 0.15)', borderRadius: '12px', padding: '10px 4px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', color: '#fff', cursor: 'pointer', outline: 'none' }}>
+            <MapPin size={14} color="#3b82f6" style={{ opacity: workspaceMode === 'location' ? 1 : 0.8 }} />
+            <span style={{ fontSize: '9px', fontWeight: '600' }}>Location</span>
+          </button>
+          <button type="button" onClick={() => setWorkspaceMode('preview')} style={{ background: workspaceMode === 'preview' ? 'rgba(168, 85, 247, 0.25)' : 'rgba(168, 85, 247, 0.1)', border: workspaceMode === 'preview' ? '1px solid #a855f7' : '1px solid rgba(168, 85, 247, 0.15)', borderRadius: '12px', padding: '10px 4px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', color: '#fff', cursor: 'pointer', outline: 'none' }}>
+            <Sparkles size={14} color="#a855f7" style={{ opacity: workspaceMode === 'preview' ? 1 : 0.8 }} />
+            <span style={{ fontSize: '9px', fontWeight: '600' }}>Preview</span>
+          </button>
+          <button type="button" onClick={() => setWorkspaceMode('drafts')} style={{ background: workspaceMode === 'drafts' ? 'rgba(255, 255, 255, 0.15)' : 'rgba(255, 255, 255, 0.05)', border: workspaceMode === 'drafts' ? '1px solid rgba(255, 255, 255, 0.3)' : '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '12px', padding: '10px 4px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', color: '#fff', cursor: 'pointer', outline: 'none' }}>
+            <FileText size={14} color="#fff" style={{ opacity: workspaceMode === 'drafts' ? 1 : 0.8 }} />
+            <span style={{ fontSize: '9px', fontWeight: '600' }}>Drafts</span>
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   // --- RENDER DYNAMIC WORKSPACE ---
   const renderActiveWorkspace = () => {
     switch (workspaceMode) {
       case 'mediastudio': {
         const activeImage = mediaFiles[activeMediaIndex] || {};
         // Styles specific to the Media Studio elements
-        const effectFilter = activeImage.effect === 'VHS Blur' ? 'blur(2px) contrast(120%)' :
-                             activeImage.effect === 'Warm Glow' ? 'sepia(40%) saturate(150%) brightness(110%)' :
-                             activeImage.effect === 'Desaturate' ? 'grayscale(80%) contrast(110%)' : '';
-
-        const filterStyle = (isBeforeActive ? '' : `brightness(${activeImage.brightness || 100}%) contrast(${activeImage.contrast || 100}%) saturate(${activeImage.saturation || 100}%) opacity(${activeImage.exposure || 100}%) ${
-          activeImage.filter === 'B&W' ? 'grayscale(100%)' : 
-          activeImage.filter === 'Warm' ? 'sepia(30%) hue-rotate(15deg)' : 
-          activeImage.filter === 'Cool' ? 'saturate(110%) hue-rotate(-15deg)' : 
-          activeImage.filter === 'Sepia' ? 'sepia(80%)' :
-          activeImage.filter === 'Vintage' ? 'sepia(50%) contrast(85%) brightness(95%)' :
-          activeImage.filter === 'Cyberpunk' ? 'hue-rotate(60deg) saturate(160%)' :
-          activeImage.filter === 'Dreamy' ? 'blur(0.5px) saturate(120%) brightness(105%)' : ''
-        }`) + ' ' + effectFilter;
         
-        const transformStyle = isBeforeActive ? 'none' : `translate(${activeImage.cropX || 0}px, ${activeImage.cropY || 0}px) scale(${activeImage.cropZoom || 1}) rotate(${activeImage.rotation || 0}deg) scaleX(${activeImage.flipH ? -1 : (activeImage.scaleX || 1)}) scaleY(${activeImage.flipV ? -1 : (activeImage.scaleY || 1)})`;
-
-        const objectFitStyle = (activeImage.cropRatio && activeImage.cropRatio !== 'Free' && activeImage.cropRatio !== 'original') ? 'cover' : 'contain';
+        const mediaStyle = getMediaStyle(activeImage, isBeforeActive);
+        const filterStyle = mediaStyle.filter;
+        const transformStyle = mediaStyle.transform;
+        const objectFitStyle = mediaStyle.objectFit;
         
         let wrapperStyle = {};
         if (activeImage.cropRatio === '1:1') {
@@ -892,9 +1367,17 @@ const CreatePost = ({ onNavigateBack }) => {
         };
 
         return (
-          <div className="hubble-sub-workspace">
+          <div 
+            className="hubble-sub-workspace hubble-mediastudio-vertical-layout" 
+            style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: '16px 20px', boxSizing: 'border-box', overflow: 'hidden', width: '100%', maxWidth: '100%', minWidth: 0 }}
+            onMouseMove={handleCanvasMouseMove}
+            onMouseUp={handleCanvasMouseUp}
+            onMouseLeave={handleCanvasMouseUp}
+            onTouchMove={handleCanvasTouchMove}
+            onTouchEnd={handleCanvasMouseUp}
+          >
             {/* Top Bar */}
-            <div className="hubble-sub-header">
+            <div className="hubble-sub-header" style={{ marginBottom: '8px', paddingBottom: '8px', flexShrink: 0 }}>
               <div className="hubble-sub-title-group" style={{ flex: 1 }}>
                 <button onClick={() => setWorkspaceMode('editor')} className="hubble-circle-btn" style={{ background: 'rgba(255, 255, 255, 0.04)', border: '1px solid rgba(255, 255, 255, 0.08)', width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', cursor: 'pointer' }}>
                   <ArrowLeft size={14} />
@@ -920,339 +1403,350 @@ const CreatePost = ({ onNavigateBack }) => {
                 <button onClick={handleUndo} disabled={editorHistoryIndex <= 0} className="hubble-circle-btn-sm"><Undo2 size={11} /></button>
                 <button onClick={handleRedo} disabled={editorHistoryIndex >= editorHistory.length - 1} className="hubble-circle-btn-sm"><Redo2 size={11} /></button>
               </div>
-              <div className="hubble-header-actions" style={{ flex: 1, justifyContent: 'flex-end' }}>
+              <div className="hubble-header-actions" style={{ flex: 1, justifyContent: 'flex-end', display: 'flex' }}>
                 <button onClick={() => setWorkspaceMode('editor')} className="hubble-btn-primary" style={{ background: 'linear-gradient(135deg, #7C3BFF 0%, #5b2cd3 100%)', boxShadow: '0 4px 15px rgba(108, 59, 255, 0.4)', borderRadius: '24px', padding: '8px 24px', fontSize: '12px', fontWeight: '700', border: 'none', cursor: 'pointer' }}>
                   Apply
                 </button>
               </div>
             </div>
 
-            {/* Main Editing Area - 3 Columns */}
-            <div 
-              className="hubble-mediastudio-layout" 
-              style={{ display: "flex", flexDirection: "row", width: "100%", flex: 1, minHeight: 0, background: "#0a0a0a", borderRadius: "12px", border: "1px solid rgba(255,255,255,0.1)", overflow: "hidden" }}
-              onMouseMove={handleCanvasMouseMove}
-              onMouseUp={handleCanvasMouseUp}
-              onMouseLeave={handleCanvasMouseUp}
-              onTouchMove={handleCanvasTouchMove}
-              onTouchEnd={handleCanvasMouseUp}
-            >
-              {/* LEFT: TOOLS */}
-              <div className="hubble-mediastudio-tools-left" style={{ width: "80px", minWidth: "80px", background: "#121212", display: "flex", flexDirection: "column", alignItems: "center", padding: "16px 0", gap: "12px", borderRight: "1px solid rgba(255,255,255,0.1)", overflowY: "auto", zIndex: 10 }}>
-                <button onClick={() => setEditorTab('crop')} className={`hubble-tool-btn ${editorTab === 'crop' ? 'active' : ''}`}><Bold size={16} /><span>Crop</span></button>
-                <button onClick={() => setEditorTab('filters')} className={`hubble-tool-btn ${editorTab === 'filters' ? 'active' : ''}`}><Sparkles size={16} /><span>Filters</span></button>
-                <button onClick={() => setEditorTab('adjust')} className={`hubble-tool-btn ${editorTab === 'adjust' ? 'active' : ''}`}><Clock size={16} /><span>Adjust</span></button>
-                <button onClick={() => setEditorTab('rotate')} className={`hubble-tool-btn ${editorTab === 'rotate' ? 'active' : ''}`}><RotateCw size={16} /><span>Rotate</span></button>
-                <button onClick={() => setEditorTab('effects')} className={`hubble-tool-btn ${editorTab === 'effects' ? 'active' : ''}`}><ImageIcon size={16} /><span>Effects</span></button>
-                <button onClick={() => setEditorTab('stickers')} className={`hubble-tool-btn ${editorTab === 'stickers' ? 'active' : ''}`}><Heart size={16} /><span>Stickers</span></button>
-                <button onClick={() => setEditorTab('text')} className={`hubble-tool-btn ${editorTab === 'text' ? 'active' : ''}`}><Type size={16} /><span>Text</span></button>
-                <button onClick={() => setEditorTab('frames')} className={`hubble-tool-btn ${editorTab === 'frames' ? 'active' : ''}`}><Tablet size={16} /><span>Frames</span></button>
-              </div>
+            {/* CANVAS: Compact height 180px */}
+            <div className="hubble-mediastudio-canvas-wrapper" style={{ height: '180px', minHeight: '180px', width: '100%', display: "flex", alignItems: "center", justifyContent: "center", background: "#000000", position: "relative", overflow: "hidden", padding: "0px", borderRadius: '12px', marginBottom: '10px', flexShrink: 0 }}>
+              {mediaFiles.length > 0 ? (
+                <div 
+                  ref={mediaWrapperRef}
+                  style={wrapperCombinedStyle}
+                  onMouseDown={handleCanvasMouseDown}
+                  onTouchStart={handleCanvasTouchStart}
+                >
+                  {activeImage.type === 'video' ? (
+                    <video 
+                      src={activeImage.previewUrl} 
+                      className="hubble-editor-media"
+                      style={{ filter: filterStyle, transform: transformStyle, cursor: editorTab === 'crop' ? 'move' : 'default', width: '100%', height: '100%', objectFit: objectFitStyle }}
+                      controls autoPlay muted loop playsInline
+                    />
+                  ) : (
+                    <img 
+                      src={activeImage.previewUrl} 
+                      alt="Active Editor"
+                      className="hubble-editor-media"
+                      style={{ filter: filterStyle, transform: transformStyle, cursor: editorTab === 'crop' ? 'move' : 'default', width: '100%', height: '100%', objectFit: objectFitStyle }}
+                    />
+                  )}
+                  {/* Vignette Overlay for Vignette Effect */}
+                  {activeImage.effect === 'Vignette' && (
+                    <div style={{ position: 'absolute', inset: 0, boxShadow: 'inset 0 0 80px rgba(0,0,0,0.75)', pointerEvents: 'none', zIndex: 9 }} />
+                  )}
+                  {/* Film Frame Sprockets */}
+                  {activeImage.frame === 'Film' && (
+                    <div style={{ position: 'absolute', left: '2px', top: 0, bottom: 0, width: '8px', display: 'flex', flexDirection: 'column', justifyContent: 'space-around', zIndex: 8, pointerEvents: 'none' }}>
+                      {[1,2,3,4,5,6].map(i => <div key={i} style={{ width: '100%', height: '12px', background: 'white', borderRadius: '2px' }} />)}
+                    </div>
+                  )}
+                  {/* Stickers */}
+                  {(activeImage.stickers || []).map((stk) => (
+                    <div key={stk.id} 
+                      onMouseDown={(e) => { if (editorTab === 'stickers') handleStickerMouseDown(e, stk.id); }}
+                      onTouchStart={(e) => { if (editorTab === 'stickers') handleStickerTouchStart(e, stk.id); }}
+                      style={{ position: 'absolute', left: `${stk.x}%`, top: `${stk.y}%`, fontSize: `${stk.scale * 40}px`, transform: `translate(-50%, -50%) rotate(${stk.rotation || 0}deg)`, cursor: editorTab === 'stickers' ? 'move' : 'default', userSelect: 'none', zIndex: 10 }}>
+                      {stk.emoji}
+                      {editorTab === 'stickers' && (
+                        <div style={{ position: 'absolute', right: '-10px', top: '-10px', background: 'rgba(0,0,0,0.5)', borderRadius: '50%', padding: '2px', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); updateActiveMedia('stickers', (activeImage.stickers || []).filter(s => s.id !== stk.id)); }}>
+                          <X size={10} color="#fff" />
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {/* Texts */}
+                  {(activeImage.texts || []).map((txt) => (
+                    <div key={txt.id} 
+                      onMouseDown={(e) => { if (editorTab === 'text') handleTextMouseDown(e, txt.id); }}
+                      onTouchStart={(e) => { if (editorTab === 'text') handleTextTouchStart(e, txt.id); }}
+                      onClick={(e) => {
+                        if (editorTab === 'text') {
+                          e.stopPropagation();
+                          setSelectedTextId(txt.id);
+                          setFontText(txt.text);
+                          if (txt.fontFamily) setFontFamily(txt.fontFamily);
+                          if (txt.color) setFontColor(txt.color);
+                        }
+                      }}
+                      style={{ 
+                        position: 'absolute', 
+                        left: `${txt.x}%`, 
+                        top: `${txt.y}%`, 
+                        fontSize: `${txt.scale * 20}px`, 
+                        color: txt.color, 
+                        fontFamily: txt.fontFamily, 
+                        fontWeight: txt.fontWeight, 
+                        transform: `translate(-50%, -50%) rotate(${txt.rotation || 0}deg)`, 
+                        cursor: editorTab === 'text' ? 'pointer' : 'default', 
+                        userSelect: 'none', 
+                        whiteSpace: 'nowrap', 
+                        zIndex: 11, 
+                        textShadow: '0 2px 4px rgba(0,0,0,0.5)',
+                        border: editorTab === 'text' && selectedTextId === txt.id ? '1px dashed rgba(255,255,255,0.8)' : 'none',
+                        padding: '4px'
+                      }}
+                    >
+                      {txt.text}
+                      {editorTab === 'text' && (
+                        <div 
+                          style={{ 
+                            position: 'absolute', 
+                            right: '-15px', 
+                            top: '-15px', 
+                            background: 'rgba(255,59,48,0.9)', 
+                            borderRadius: '50%', 
+                            padding: '4px', 
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            zIndex: 12
+                          }} 
+                          onClick={(e) => { 
+                            e.stopPropagation(); 
+                            updateActiveMedia('texts', (activeImage.texts || []).filter(t => t.id !== txt.id), true); 
+                            if (selectedTextId === txt.id) setSelectedTextId(null);
+                          }}
+                        >
+                          <X size={12} color="#fff" />
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {/* Crop Overlay */}
+                  {editorTab === 'crop' && activeImage.cropRatio === 'Free' && (
+                    <div className="hubble-crop-overlay" style={{ position: 'absolute', top: `${activeImage.cropTop || 0}%`, bottom: `${activeImage.cropBottom || 0}%`, left: `${activeImage.cropLeft || 0}%`, right: `${activeImage.cropRight || 0}%`, border: '2px dashed white', zIndex: 20 }}>
+                      <div className="hubble-crop-handle hubble-crop-handle-tl" onMouseDown={(e) => handleCropHandleMouseDown(e, 'tl')} onTouchStart={(e) => handleCropHandleTouchStart(e, 'tl')} />
+                      <div className="hubble-crop-handle hubble-crop-handle-tc" onMouseDown={(e) => handleCropHandleMouseDown(e, 't')} onTouchStart={(e) => handleCropHandleTouchStart(e, 't')} />
+                      <div className="hubble-crop-handle hubble-crop-handle-tr" onMouseDown={(e) => handleCropHandleMouseDown(e, 'tr')} onTouchStart={(e) => handleCropHandleTouchStart(e, 'tr')} />
+                      <div className="hubble-crop-handle hubble-crop-handle-ml" onMouseDown={(e) => handleCropHandleMouseDown(e, 'l')} onTouchStart={(e) => handleCropHandleTouchStart(e, 'l')} />
+                      <div className="hubble-crop-handle hubble-crop-handle-mr" onMouseDown={(e) => handleCropHandleMouseDown(e, 'r')} onTouchStart={(e) => handleCropHandleTouchStart(e, 'r')} />
+                      <div className="hubble-crop-handle hubble-crop-handle-bl" onMouseDown={(e) => handleCropHandleMouseDown(e, 'bl')} onTouchStart={(e) => handleCropHandleTouchStart(e, 'bl')} />
+                      <div className="hubble-crop-handle hubble-crop-handle-bc" onMouseDown={(e) => handleCropHandleMouseDown(e, 'b')} onTouchStart={(e) => handleCropHandleTouchStart(e, 'b')} />
+                      <div className="hubble-crop-handle hubble-crop-handle-br" onMouseDown={(e) => handleCropHandleMouseDown(e, 'br')} onTouchStart={(e) => handleCropHandleTouchStart(e, 'br')} />
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div style={{ color: '#fff', fontSize: '14px', opacity: 0.5 }}>No media selected</div>
+              )}
+            </div>
 
-              {/* CENTER: CANVAS */}
-              <div className="hubble-mediastudio-canvas-wrapper" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", background: "#000000", position: "relative", overflow: "hidden", padding: "0px" }}>
-                {mediaFiles.length > 0 ? (
-                  <div 
-                    ref={mediaWrapperRef}
-                    style={wrapperCombinedStyle}
-                    onMouseDown={handleCanvasMouseDown}
-                    onTouchStart={handleCanvasTouchStart}
-                  >
-                    {activeImage.type === 'video' ? (
-                      <video 
-                        src={activeImage.previewUrl} 
-                        className="hubble-editor-media"
-                        style={{ filter: filterStyle, transform: transformStyle, cursor: editorTab === 'crop' ? 'move' : 'default', width: '100%', height: '100%', objectFit: objectFitStyle }}
-                        controls autoPlay muted loop playsInline
-                      />
-                    ) : (
-                      <img 
-                        src={activeImage.previewUrl} 
-                        alt="Active Editor"
-                        className="hubble-editor-media"
-                        style={{ filter: filterStyle, transform: transformStyle, cursor: editorTab === 'crop' ? 'move' : 'default', width: '100%', height: '100%', objectFit: objectFitStyle }}
-                      />
-                    )}
-                    {/* Vignette Overlay for Vignette Effect */}
-                    {activeImage.effect === 'Vignette' && (
-                      <div style={{ position: 'absolute', inset: 0, boxShadow: 'inset 0 0 80px rgba(0,0,0,0.75)', pointerEvents: 'none', zIndex: 9 }} />
-                    )}
-                    {/* Film Frame Sprockets */}
-                    {activeImage.frame === 'Film' && (
-                      <div style={{ position: 'absolute', left: '2px', top: 0, bottom: 0, width: '8px', display: 'flex', flexDirection: 'column', justifyContent: 'space-around', zIndex: 8, pointerEvents: 'none' }}>
-                        {[1,2,3,4,5,6].map(i => <div key={i} style={{ width: '100%', height: '12px', background: 'white', borderRadius: '2px' }} />)}
+            {/* PROPERTIES: Horizontal scrolling / compact */}
+            <div className="hubble-mediastudio-properties-bottom" style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#121212', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)', padding: '10px 14px', overflowY: 'auto', overflowX: 'hidden', minHeight: '90px', marginBottom: '8px', width: '100%', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box' }}>
+              {editorTab === 'crop' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px', width: '100%', maxWidth: '100%', minWidth: 0 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.5)', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Aspect Ratio</span>
+                      <div style={{ display: 'flex', gap: '6px' }}>
+                        {['1:1', '4:5', '16:9', '9:16', 'Free'].map((ratio) => {
+                          const isActive = activeImage.cropRatio === ratio || (ratio === 'Free' && activeImage.cropRatio === 'Custom');
+                          return (
+                            <button key={ratio} type="button" onClick={() => updateActiveMedia('cropRatio', ratio)} className={`hubble-aspect-pill ${isActive ? 'active' : ''}`} style={{ padding: '4px 10px', fontSize: '10px', background: isActive ? 'rgba(108, 59, 255, 0.25)' : 'rgba(255,255,255,0.03)' }}>
+                              {ratio}
+                            </button>
+                          );
+                        })}
                       </div>
-                    )}
-                    {/* Stickers */}
-                    {(activeImage.stickers || []).map((stk) => (
-                      <div key={stk.id} 
-                        onMouseDown={(e) => { if (editorTab === 'stickers') handleStickerMouseDown(e, stk.id); }}
-                        onTouchStart={(e) => { if (editorTab === 'stickers') handleStickerTouchStart(e, stk.id); }}
-                        style={{ position: 'absolute', left: `${stk.x}%`, top: `${stk.y}%`, fontSize: `${stk.scale * 40}px`, transform: `translate(-50%, -50%) rotate(${stk.rotation || 0}deg)`, cursor: editorTab === 'stickers' ? 'move' : 'default', userSelect: 'none', zIndex: 10 }}>
-                        {stk.emoji}
-                        {editorTab === 'stickers' && (
-                          <div style={{ position: 'absolute', right: '-10px', top: '-10px', background: 'rgba(0,0,0,0.5)', borderRadius: '50%', padding: '2px', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); updateActiveMedia('stickers', (activeImage.stickers || []).filter(s => s.id !== stk.id)); }}>
-                            <X size={10} color="#fff" />
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                    {/* Texts */}
-                    {(activeImage.texts || []).map((txt) => (
-                      <div key={txt.id} 
-                        onMouseDown={(e) => { if (editorTab === 'text') handleTextMouseDown(e, txt.id); }}
-                        onTouchStart={(e) => { if (editorTab === 'text') handleTextTouchStart(e, txt.id); }}
-                        onClick={(e) => {
-                          if (editorTab === 'text') {
-                            e.stopPropagation();
-                            setSelectedTextId(txt.id);
-                            setFontText(txt.text);
-                            if (txt.fontFamily) setFontFamily(txt.fontFamily);
-                            if (txt.color) setFontColor(txt.color);
-                          }
-                        }}
-                        style={{ 
-                          position: 'absolute', 
-                          left: `${txt.x}%`, 
-                          top: `${txt.y}%`, 
-                          fontSize: `${txt.scale * 20}px`, 
-                          color: txt.color, 
-                          fontFamily: txt.fontFamily, 
-                          fontWeight: txt.fontWeight, 
-                          transform: `translate(-50%, -50%) rotate(${txt.rotation || 0}deg)`, 
-                          cursor: editorTab === 'text' ? 'pointer' : 'default', 
-                          userSelect: 'none', 
-                          whiteSpace: 'nowrap', 
-                          zIndex: 11, 
-                          textShadow: '0 2px 4px rgba(0,0,0,0.5)',
-                          border: editorTab === 'text' && selectedTextId === txt.id ? '1px dashed rgba(255,255,255,0.8)' : 'none',
-                          padding: '4px'
-                        }}
-                      >
-                        {txt.text}
-                        {editorTab === 'text' && (
-                          <div 
-                            style={{ 
-                              position: 'absolute', 
-                              right: '-15px', 
-                              top: '-15px', 
-                              background: 'rgba(255,59,48,0.9)', 
-                              borderRadius: '50%', 
-                              padding: '4px', 
-                              cursor: 'pointer',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              zIndex: 12
-                            }} 
-                            onClick={(e) => { 
-                              e.stopPropagation(); 
-                              updateActiveMedia('texts', (activeImage.texts || []).filter(t => t.id !== txt.id), true); 
-                              if (selectedTextId === txt.id) setSelectedTextId(null);
-                            }}
-                          >
-                            <X size={12} color="#fff" />
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                    {/* Crop Overlay */}
-                    {editorTab === 'crop' && activeImage.cropRatio === 'Free' && (
-                      <div className="hubble-crop-overlay" style={{ position: 'absolute', top: `${activeImage.cropTop || 0}%`, bottom: `${activeImage.cropBottom || 0}%`, left: `${activeImage.cropLeft || 0}%`, right: `${activeImage.cropRight || 0}%`, border: '2px dashed white', zIndex: 20 }}>
-                        <div className="hubble-crop-handle hubble-crop-handle-tl" onMouseDown={(e) => handleCropHandleMouseDown(e, 'tl')} onTouchStart={(e) => handleCropHandleTouchStart(e, 'tl')} />
-                        <div className="hubble-crop-handle hubble-crop-handle-tc" onMouseDown={(e) => handleCropHandleMouseDown(e, 't')} onTouchStart={(e) => handleCropHandleTouchStart(e, 't')} />
-                        <div className="hubble-crop-handle hubble-crop-handle-tr" onMouseDown={(e) => handleCropHandleMouseDown(e, 'tr')} onTouchStart={(e) => handleCropHandleTouchStart(e, 'tr')} />
-                        <div className="hubble-crop-handle hubble-crop-handle-ml" onMouseDown={(e) => handleCropHandleMouseDown(e, 'l')} onTouchStart={(e) => handleCropHandleTouchStart(e, 'l')} />
-                        <div className="hubble-crop-handle hubble-crop-handle-mr" onMouseDown={(e) => handleCropHandleMouseDown(e, 'r')} onTouchStart={(e) => handleCropHandleTouchStart(e, 'r')} />
-                        <div className="hubble-crop-handle hubble-crop-handle-bl" onMouseDown={(e) => handleCropHandleMouseDown(e, 'bl')} onTouchStart={(e) => handleCropHandleTouchStart(e, 'bl')} />
-                        <div className="hubble-crop-handle hubble-crop-handle-bc" onMouseDown={(e) => handleCropHandleMouseDown(e, 'b')} onTouchStart={(e) => handleCropHandleTouchStart(e, 'b')} />
-                        <div className="hubble-crop-handle hubble-crop-handle-br" onMouseDown={(e) => handleCropHandleMouseDown(e, 'br')} onTouchStart={(e) => handleCropHandleTouchStart(e, 'br')} />
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div style={{ color: '#fff', fontSize: '14px', opacity: 0.5 }}>No media selected</div>
-                )}
-              </div>
-
-              {/* RIGHT: PROPERTIES */}
-              <div className="hubble-mediastudio-properties-right" style={{ width: "320px", minWidth: "320px", background: "#121212", borderLeft: "1px solid rgba(255,255,255,0.1)", display: "flex", flexDirection: "column", overflowY: "auto", zIndex: 10 }}>
-                {editorTab === 'crop' && (
-                  <div className="hubble-properties-panel">
-                    <h4>Aspect Ratio</h4>
-                    <div className="hubble-aspect-pills-row">
-                      {['1:1', '4:5', '16:9', '9:16', 'Free'].map((ratio) => {
-                        const isActive = activeImage.cropRatio === ratio || (ratio === 'Free' && activeImage.cropRatio === 'Custom');
-                        return (
-                          <button key={ratio} type="button" onClick={() => updateActiveMedia('cropRatio', ratio)} className={`hubble-aspect-pill ${isActive ? 'active' : ''}`} style={{ background: isActive ? 'rgba(108, 59, 255, 0.25)' : 'rgba(255,255,255,0.03)' }}>
-                            {ratio}
-                          </button>
-                        );
-                      })}
                     </div>
                     
-                    {activeImage.cropRatio === 'Free' && (
-                      <button 
-                        className="hubble-btn-primary" 
-                        style={{ width: '100%', marginBottom: '16px', padding: '10px' }}
-                        onClick={() => updateActiveMedia('cropRatio', 'Custom')}
-                      >
-                        Done Cropping
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.5)', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Flip</span>
+                      <div style={{ display: 'flex', gap: '6px' }}>
+                        <button type="button" onClick={() => updateActiveMedia('flipH', !activeImage.flipH)} className={`hubble-aspect-pill ${activeImage.flipH ? 'active' : ''}`} style={{ padding: '4px 10px', fontSize: '10px' }}>Flip H</button>
+                        <button type="button" onClick={() => updateActiveMedia('flipV', !activeImage.flipV)} className={`hubble-aspect-pill ${activeImage.flipV ? 'active' : ''}`} style={{ padding: '4px 10px', fontSize: '10px' }}>Flip V</button>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.5)', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Rotate</span>
+                      <button onClick={() => updateActiveMedia('rotation', ((activeImage.rotation || 0) + 90) % 360)} className="hubble-btn-secondary" style={{ padding: '4px 10px', fontSize: '10px', borderRadius: '20px' }}>
+                        <RotateCw size={12} style={{ marginRight: '4px' }} /> Rotate 90°
                       </button>
-                    )}
-
-                    <h4>Flip</h4>
-                      <div className="hubble-aspect-pills-row">
-                        <button type="button" onClick={() => updateActiveMedia('flipH', !activeImage.flipH)} className={`hubble-aspect-pill ${activeImage.flipH ? 'active' : ''}`}>Flip H</button>
-                        <button type="button" onClick={() => updateActiveMedia('flipV', !activeImage.flipV)} className={`hubble-aspect-pill ${activeImage.flipV ? 'active' : ''}`}>Flip V</button>
-                      </div>
-                    <h4 style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span>Zoom</span>
-                      <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.8)', fontWeight: '500', textTransform: 'none' }}>
-                        {Math.round(((activeImage.cropZoom || 1) - 1) / 2 * 100)}%
-                      </span>
-                    </h4>
-                    <div className="hubble-properties-slider">
-                      <input type="range" min="1" max="3" step="0.01" value={activeImage.cropZoom || 1} onChange={(e) => updateActiveMedia('cropZoom', parseFloat(e.target.value))} className="hubble-slider" />
                     </div>
                   </div>
-                )}
 
-                {editorTab === 'filters' && (
-                  <div className="hubble-properties-panel">
-                    <h4>Filters</h4>
-                    <div className="hubble-properties-grid">
-                      {['Original', 'Warm', 'Cool', 'B&W', 'Sepia', 'Vintage'].map((filt) => (
-                        <button key={filt} onClick={() => updateActiveMedia('filter', filt)} className={`hubble-filter-card-btn ${activeImage.filter === filt ? 'active' : ''}`}>
-                          <div className="filter-card-preview-circle" style={{ 
-                            backgroundImage: `url(${activeImage.previewUrl})`,
-                            filter: filt === 'B&W' ? 'grayscale(100%)' : filt === 'Warm' ? 'sepia(30%) hue-rotate(15deg)' : filt === 'Cool' ? 'saturate(110%) hue-rotate(-15deg)' : filt === 'Sepia' ? 'sepia(100%)' : filt === 'Vintage' ? 'sepia(50%) hue-rotate(-30deg) saturate(140%) contrast(120%)' : 'none'
-                          }} />
-                          <span>{filt}</span>
-                        </button>
-                      ))}
-                    </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '4px', width: '100%', maxWidth: '100%', minWidth: 0 }}>
+                    <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.6)', fontWeight: '600', whiteSpace: 'nowrap' }}>Zoom: {Math.round(((activeImage.cropZoom || 1) - 1) / 2 * 100)}%</span>
+                    <input type="range" min="1" max="3" step="0.01" value={activeImage.cropZoom || 1} onChange={(e) => updateActiveMedia('cropZoom', parseFloat(e.target.value))} className="hubble-slider" style={{ flex: 1 }} />
                   </div>
-                )}
 
-                {editorTab === 'adjust' && (
-                  <div className="hubble-properties-panel">
-                    <h4>Adjustments</h4>
-                    <div className="hubble-slider-col">
-                      <div className="hubble-slider-labels"><span>Brightness</span><span>{activeImage.brightness || 100}%</span></div>
-                      <input type="range" min="50" max="150" value={activeImage.brightness || 100} onChange={(e) => updateActiveMedia('brightness', parseInt(e.target.value))} className="hubble-slider" />
-                    </div>
-                    <div className="hubble-slider-col">
-                      <div className="hubble-slider-labels"><span>Contrast</span><span>{activeImage.contrast || 100}%</span></div>
-                      <input type="range" min="50" max="150" value={activeImage.contrast || 100} onChange={(e) => updateActiveMedia('contrast', parseInt(e.target.value))} className="hubble-slider" />
-                    </div>
-                    <div className="hubble-slider-col">
-                      <div className="hubble-slider-labels"><span>Saturation</span><span>{activeImage.saturation || 100}%</span></div>
-                      <input type="range" min="0" max="200" value={activeImage.saturation || 100} onChange={(e) => updateActiveMedia('saturation', parseInt(e.target.value))} className="hubble-slider" />
-                    </div>
-                    <div className="hubble-slider-col">
-                      <div className="hubble-slider-labels"><span>Exposure</span><span>{activeImage.exposure || 100}%</span></div>
-                      <input type="range" min="50" max="150" value={activeImage.exposure || 100} onChange={(e) => updateActiveMedia('exposure', parseInt(e.target.value))} className="hubble-slider" />
-                    </div>
-                  </div>
-                )}
-
-                {editorTab === 'rotate' && (
-                  <div className="hubble-properties-panel">
-                    <h4>Rotate</h4>
-                    <button onClick={() => updateActiveMedia('rotation', ((activeImage.rotation || 0) + 90) % 360)} className="hubble-btn-secondary" style={{ width: '100%', padding: '12px' }}>
-                      <RotateCw size={16} style={{ marginRight: '8px' }} /> Rotate 90°
+                  {activeImage.cropRatio === 'Free' && (
+                    <button 
+                      className="hubble-btn-primary" 
+                      style={{ width: '100%', padding: '6px', fontSize: '11px', marginTop: '4px' }}
+                      onClick={() => updateActiveMedia('cropRatio', 'Custom')}
+                    >
+                      Done Cropping
                     </button>
-                  </div>
-                )}
+                  )}
+                </div>
+              )}
 
-                {editorTab === 'effects' && (
-                  <div className="hubble-properties-panel">
-                    <h4>Effects</h4>
-                    <div className="hubble-properties-list">
-                      {['None', 'Vignette', 'VHS Blur', 'Warm Glow', 'Desaturate'].map((eff) => (
-                        <button key={eff} onClick={() => updateActiveMedia('effect', eff)} className={`hubble-aspect-pill ${activeImage.effect === eff ? 'active' : ''}`} style={{ width: '100%', padding: '10px' }}>
-                          {eff}
-                        </button>
-                      ))}
-                    </div>
+              {editorTab === 'filters' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '100%', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box' }}>
+                  <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.5)', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Filters</span>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', width: '100%', boxSizing: 'border-box' }}>
+                    {['Original', 'Warm', 'Cool', 'B&W', 'Sepia', 'Vintage'].map((filt) => (
+                      <button key={filt} onClick={() => updateActiveMedia('filter', filt)} className={`hubble-filter-card-btn ${activeImage.filter === filt ? 'active' : ''}`} style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '6px', padding: '6px 8px', justifyContent: 'center' }}>
+                        <div className="filter-card-preview-circle" style={{ 
+                          width: '20px',
+                          height: '20px',
+                          backgroundImage: `url(${activeImage.previewUrl})`,
+                          filter: filt === 'B&W' ? 'grayscale(100%)' : filt === 'Warm' ? 'sepia(30%) hue-rotate(15deg)' : filt === 'Cool' ? 'saturate(110%) hue-rotate(-15deg)' : filt === 'Sepia' ? 'sepia(100%)' : filt === 'Vintage' ? 'sepia(50%) hue-rotate(-30deg) saturate(140%) contrast(120%)' : 'none'
+                        }} />
+                        <span style={{ fontSize: '10px' }}>{filt}</span>
+                      </button>
+                    ))}
                   </div>
-                )}
+                </div>
+              )}
 
-                {editorTab === 'stickers' && (
-                  <div className="hubble-properties-panel">
-                    <h4>Stickers</h4>
-                    <div className="hubble-stickers-presets-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
-                      {['✨', '🔥', '💖', '🎉', '🌟', '👀', '💯', '🚀', '💡', '🏆', '⭐', '🎈'].map((emoji) => (
-                        <button key={emoji} onClick={() => {
-                            const list = [...(activeImage.stickers || [])];
-                            list.push({ id: Date.now(), emoji, x: 50, y: 50, scale: 1, rotation: 0 });
-                            updateActiveMedia('stickers', list);
-                          }} style={{ background: 'rgba(255,255,255,0.05)', border: 'none', borderRadius: '8px', fontSize: '24px', padding: '10px', cursor: 'pointer' }}>
-                          {emoji}
-                        </button>
-                      ))}
-                    </div>
+              {editorTab === 'adjust' && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px', width: '100%', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box' }}>
+                  <div className="hubble-slider-col" style={{ margin: 0, gap: '4px' }}>
+                    <div className="hubble-slider-labels" style={{ fontSize: '10px' }}><span>Brightness</span><span>{activeImage.brightness || 100}%</span></div>
+                    <input type="range" min="50" max="150" value={activeImage.brightness || 100} onChange={(e) => updateActiveMedia('brightness', parseInt(e.target.value))} className="hubble-slider" />
                   </div>
-                )}
+                  <div className="hubble-slider-col" style={{ margin: 0, gap: '4px' }}>
+                    <div className="hubble-slider-labels" style={{ fontSize: '10px' }}><span>Contrast</span><span>{activeImage.contrast || 100}%</span></div>
+                    <input type="range" min="50" max="150" value={activeImage.contrast || 100} onChange={(e) => updateActiveMedia('contrast', parseInt(e.target.value))} className="hubble-slider" />
+                  </div>
+                  <div className="hubble-slider-col" style={{ margin: 0, gap: '4px' }}>
+                    <div className="hubble-slider-labels" style={{ fontSize: '10px' }}><span>Saturation</span><span>{activeImage.saturation || 100}%</span></div>
+                    <input type="range" min="0" max="200" value={activeImage.saturation || 100} onChange={(e) => updateActiveMedia('saturation', parseInt(e.target.value))} className="hubble-slider" />
+                  </div>
+                  <div className="hubble-slider-col" style={{ margin: 0, gap: '4px' }}>
+                    <div className="hubble-slider-labels" style={{ fontSize: '10px' }}><span>Exposure</span><span>{activeImage.exposure || 100}%</span></div>
+                    <input type="range" min="50" max="150" value={activeImage.exposure || 100} onChange={(e) => updateActiveMedia('exposure', parseInt(e.target.value))} className="hubble-slider" />
+                  </div>
+                </div>
+              )}
 
-                {editorTab === 'text' && (
-                  <div className="hubble-properties-panel">
-                    <h4>Text Overlay</h4>
-                    <input type="text" value={fontText} onChange={(e) => { setFontText(e.target.value); updateSelectedText('text', e.target.value); }} placeholder="Type text overlay..." className="hubble-workspace-input" style={{ width: '100%', padding: '10px', marginBottom: '10px' }} />
-                    <button onClick={addText} className="hubble-btn-secondary" style={{ width: '100%', padding: '10px', marginBottom: '10px' }}><Plus size={12} /> Add Text</button>
+              {editorTab === 'effects' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '100%', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box' }}>
+                  <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.5)', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Effects</span>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px 8px', width: '100%', boxSizing: 'border-box' }}>
+                    {['None', 'Vignette', 'VHS Blur', 'Warm Glow', 'Desaturate'].map((eff) => (
+                      <button key={eff} onClick={() => updateActiveMedia('effect', eff)} className={`hubble-aspect-pill ${activeImage.effect === eff ? 'active' : ''}`} style={{ padding: '6px 8px', fontSize: '10px', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        {eff}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {editorTab === 'stickers' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '100%', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box' }}>
+                  <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.5)', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Stickers</span>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: '8px', width: '100%', boxSizing: 'border-box' }}>
+                    {['✨', '🔥', '💖', '🎉', '🌟', '👀', '💯', '🚀', '💡', '🏆', '⭐', '🎈', '😂', '😍', '👍', '❤️'].map((emoji) => (
+                      <button key={emoji} onClick={() => {
+                          const list = [...(activeImage.stickers || [])];
+                          list.push({ id: Date.now(), emoji, x: 50, y: 50, scale: 1, rotation: 0 });
+                          updateActiveMedia('stickers', list);
+                        }} style={{ background: 'rgba(255,255,255,0.05)', border: 'none', borderRadius: '8px', fontSize: '18px', padding: '6px 0', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {editorTab === 'text' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '100%', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box' }}>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', width: '100%', maxWidth: '100%', minWidth: 0 }}>
+                    <input type="text" value={fontText} onChange={(e) => { setFontText(e.target.value); updateSelectedText('text', e.target.value); }} placeholder="Type text overlay..." className="hubble-workspace-input" style={{ flex: 1, padding: '4px 8px', fontSize: '11px', minWidth: 0 }} />
+                    <button onClick={addText} className="hubble-btn-secondary" style={{ padding: '4px 10px', fontSize: '10px', borderRadius: '8px', whiteSpace: 'nowrap' }}><Plus size={10} style={{ marginRight: '4px' }} /> Add</button>
                     {selectedTextId && (
-                      <button onClick={() => removeText(selectedTextId)} className="hubble-btn-secondary" style={{ width: '100%', padding: '10px', marginBottom: '20px', background: 'rgba(255,59,48,0.1)', color: '#ff3b30', borderColor: 'rgba(255,59,48,0.2)' }}><X size={12} /> Delete Selected Text</button>
+                      <button onClick={() => removeText(selectedTextId)} className="hubble-btn-secondary" style={{ padding: '4px 10px', fontSize: '10px', borderRadius: '8px', background: 'rgba(255,59,48,0.1)', color: '#ff3b30', borderColor: 'rgba(255,59,48,0.2)', whiteSpace: 'nowrap' }}><X size={10} style={{ marginRight: '4px' }} /> Del</button>
                     )}
-                    
-                    <h4>Font</h4>
-                    <select value={fontFamily} onChange={(e) => { setFontFamily(e.target.value); updateSelectedText('fontFamily', e.target.value); }} className="hubble-workspace-input" style={{ width: '100%', padding: '10px', marginBottom: '10px', color: '#fff', background: '#1e1b30' }}>
-                      <option value="Inter, sans-serif">Inter</option>
-                      <option value="Roboto, sans-serif">Roboto</option>
-                      <option value="Playfair Display, serif">Playfair Display</option>
-                      <option value="Monaco, monospace">Monaco</option>
-                    </select>
+                  </div>
+                  
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px', marginTop: '2px', width: '100%', maxWidth: '100%', minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.5)', fontWeight: '600' }}>Font:</span>
+                      <select value={fontFamily} onChange={(e) => { setFontFamily(e.target.value); updateSelectedText('fontFamily', e.target.value); }} className="hubble-workspace-input" style={{ padding: '2px 6px', fontSize: '9px', color: '#fff', background: '#1e1b30', width: 'auto' }}>
+                        <option value="Inter, sans-serif">Inter</option>
+                        <option value="Roboto, sans-serif">Roboto</option>
+                        <option value="Playfair Display, serif">Playfair Display</option>
+                        <option value="Monaco, monospace">Monaco</option>
+                      </select>
+                    </div>
 
-                    <h4>Color</h4>
-                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                      {['#ffffff', '#000000', '#ff3b30', '#4cd964', '#007aff', '#ffcc00'].map(color => (
-                        <button key={color} onClick={() => { setFontColor(color); updateSelectedText('color', color); }} style={{ width: '24px', height: '24px', borderRadius: '50%', background: color, border: fontColor === color ? '2px solid #6C3BFF' : '2px solid transparent', cursor: 'pointer' }} />
-                      ))}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.5)', fontWeight: '600' }}>Color:</span>
+                      <div style={{ display: 'flex', gap: '4px' }}>
+                        {['#ffffff', '#000000', '#ff3b30', '#4cd964', '#007aff', '#ffcc00'].map(color => (
+                          <button key={color} onClick={() => { setFontColor(color); updateSelectedText('color', color); }} style={{ width: '14px', height: '14px', borderRadius: '50%', background: color, border: fontColor === color ? '1.5px solid #6C3BFF' : '1.5px solid transparent', cursor: 'pointer', padding: 0 }} />
+                        ))}
+                      </div>
                     </div>
                   </div>
-                )}
+                </div>
+              )}
 
-                {editorTab === 'frames' && (
-                  <div className="hubble-properties-panel">
-                    <h4>Frames</h4>
-                    <div className="hubble-properties-list">
-                      {['None', 'White Classic', 'Polaroid', 'Film', 'Neon Glow'].map((frm) => (
-                        <button key={frm} onClick={() => updateActiveMedia('frame', frm)} className={`hubble-aspect-pill ${activeImage.frame === frm ? 'active' : ''}`} style={{ width: '100%', padding: '10px' }}>
-                          {frm}
-                        </button>
-                      ))}
-                    </div>
+              {editorTab === 'frames' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '100%', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box' }}>
+                  <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.5)', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Frames</span>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px 8px', width: '100%', boxSizing: 'border-box' }}>
+                    {['None', 'White Classic', 'Polaroid', 'Film', 'Neon Glow'].map((frm) => (
+                      <button key={frm} onClick={() => updateActiveMedia('frame', frm)} className={`hubble-aspect-pill ${activeImage.frame === frm ? 'active' : ''}`} style={{ padding: '6px 8px', fontSize: '10px', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        {frm}
+                      </button>
+                    ))}
                   </div>
-                )}
-              </div>
+                </div>
+              )}
+            </div>
+
+            {/* TOOLS: Horizontal bar */}
+            <div className="hubble-mediastudio-tools-bottom" style={{ display: 'flex', flexDirection: 'row', background: '#161616', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)', padding: '4px 6px', gap: '6px', overflowX: 'auto', marginBottom: '8px', scrollbarWidth: 'none', flexShrink: 0, width: '100%', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box' }}>
+              <button type="button" onClick={() => setEditorTab('crop')} className={`hubble-tool-btn-horizontal ${editorTab === 'crop' ? 'active' : ''}`} style={{ display: 'flex', alignItems: 'center', gap: '4px', background: editorTab === 'crop' ? 'rgba(108, 59, 255, 0.15)' : 'transparent', border: editorTab === 'crop' ? '1px solid rgba(108, 59, 255, 0.3)' : 'none', color: '#fff', padding: '5px 10px', borderRadius: '8px', cursor: 'pointer', flexShrink: 0 }}>
+                <Bold size={12} /> <span style={{ fontSize: '9.5px', fontWeight: '600' }}>Crop</span>
+              </button>
+              <button type="button" onClick={() => setEditorTab('filters')} className={`hubble-tool-btn-horizontal ${editorTab === 'filters' ? 'active' : ''}`} style={{ display: 'flex', alignItems: 'center', gap: '4px', background: editorTab === 'filters' ? 'rgba(108, 59, 255, 0.15)' : 'transparent', border: editorTab === 'filters' ? '1px solid rgba(108, 59, 255, 0.3)' : 'none', color: '#fff', padding: '5px 10px', borderRadius: '8px', cursor: 'pointer', flexShrink: 0 }}>
+                <Sparkles size={12} /> <span style={{ fontSize: '9.5px', fontWeight: '600' }}>Filters</span>
+              </button>
+              <button type="button" onClick={() => setEditorTab('adjust')} className={`hubble-tool-btn-horizontal ${editorTab === 'adjust' ? 'active' : ''}`} style={{ display: 'flex', alignItems: 'center', gap: '4px', background: editorTab === 'adjust' ? 'rgba(108, 59, 255, 0.15)' : 'transparent', border: editorTab === 'adjust' ? '1px solid rgba(108, 59, 255, 0.3)' : 'none', color: '#fff', padding: '5px 10px', borderRadius: '8px', cursor: 'pointer', flexShrink: 0 }}>
+                <Clock size={12} /> <span style={{ fontSize: '9.5px', fontWeight: '600' }}>Adjust</span>
+              </button>
+              <button type="button" onClick={() => setEditorTab('effects')} className={`hubble-tool-btn-horizontal ${editorTab === 'effects' ? 'active' : ''}`} style={{ display: 'flex', alignItems: 'center', gap: '4px', background: editorTab === 'effects' ? 'rgba(108, 59, 255, 0.15)' : 'transparent', border: editorTab === 'effects' ? '1px solid rgba(108, 59, 255, 0.3)' : 'none', color: '#fff', padding: '5px 10px', borderRadius: '8px', cursor: 'pointer', flexShrink: 0 }}>
+                <ImageIcon size={12} /> <span style={{ fontSize: '9.5px', fontWeight: '600' }}>Effects</span>
+              </button>
+              <button type="button" onClick={() => setEditorTab('stickers')} className={`hubble-tool-btn-horizontal ${editorTab === 'stickers' ? 'active' : ''}`} style={{ display: 'flex', alignItems: 'center', gap: '4px', background: editorTab === 'stickers' ? 'rgba(108, 59, 255, 0.15)' : 'transparent', border: editorTab === 'stickers' ? '1px solid rgba(108, 59, 255, 0.3)' : 'none', color: '#fff', padding: '5px 10px', borderRadius: '8px', cursor: 'pointer', flexShrink: 0 }}>
+                <Heart size={12} /> <span style={{ fontSize: '9.5px', fontWeight: '600' }}>Stickers</span>
+              </button>
+              <button type="button" onClick={() => setEditorTab('text')} className={`hubble-tool-btn-horizontal ${editorTab === 'text' ? 'active' : ''}`} style={{ display: 'flex', alignItems: 'center', gap: '4px', background: editorTab === 'text' ? 'rgba(108, 59, 255, 0.15)' : 'transparent', border: editorTab === 'text' ? '1px solid rgba(108, 59, 255, 0.3)' : 'none', color: '#fff', padding: '5px 10px', borderRadius: '8px', cursor: 'pointer', flexShrink: 0 }}>
+                <Type size={12} /> <span style={{ fontSize: '9.5px', fontWeight: '600' }}>Text</span>
+              </button>
+              <button type="button" onClick={() => setEditorTab('frames')} className={`hubble-tool-btn-horizontal ${editorTab === 'frames' ? 'active' : ''}`} style={{ display: 'flex', alignItems: 'center', gap: '4px', background: editorTab === 'frames' ? 'rgba(108, 59, 255, 0.15)' : 'transparent', border: editorTab === 'frames' ? '1px solid rgba(108, 59, 255, 0.3)' : 'none', color: '#fff', padding: '5px 10px', borderRadius: '8px', cursor: 'pointer', flexShrink: 0 }}>
+                <Tablet size={12} /> <span style={{ fontSize: '9.5px', fontWeight: '600' }}>Frames</span>
+              </button>
             </div>
 
             {/* Bottom Thumbnails Strip */}
-            <div className="hubble-mediastudio-bottom-strip">
-              <button onClick={() => fileInputRef.current?.click()} className="hubble-add-thumbnail-btn">
-                <Plus size={16} />
+            <div className="hubble-mediastudio-bottom-strip" style={{ height: '64px', minHeight: '64px', margin: 0, padding: '0 8px', gap: '8px', border: '1px solid rgba(255,255,255,0.04)', background: 'rgba(0,0,0,0.1)' }}>
+              <button onClick={() => fileInputRef.current?.click()} className="hubble-add-thumbnail-btn" style={{ width: '48px', height: '48px' }}>
+                <Plus size={14} />
               </button>
               {mediaFiles.map((media, idx) => (
-                <div key={media.id} onClick={() => setActiveMediaIndex(idx)} className={`hubble-thumbnail-item ${idx === activeMediaIndex ? 'active' : ''}`}>
+                <div key={media.id} onClick={() => setActiveMediaIndex(idx)} className={`hubble-thumbnail-item ${idx === activeMediaIndex ? 'active' : ''}`} style={{ width: '48px', height: '48px' }}>
                   {media.type === 'video' ? (
                     <video src={media.previewUrl} muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                   ) : (
                     <img src={media.previewUrl} alt="Thumb" />
                   )}
-                  <button onClick={(e) => { e.stopPropagation(); removeMedia(media.id); }} className="hubble-thumb-delete"><X size={10} /></button>
+                  <button onClick={(e) => { e.stopPropagation(); removeMedia(media.id); }} className="hubble-thumb-delete" style={{ width: '16px', height: '16px', fontSize: '8px' }}><X size={8} /></button>
                 </div>
               ))}
             </div>
+            {renderMobileHubTools()}
           </div>
         );
       }
@@ -1260,17 +1754,20 @@ const CreatePost = ({ onNavigateBack }) => {
       case 'audience':
         return (
           <div className="hubble-sub-workspace">
-            <div className="hubble-sub-header hubble-audience-header">
-              <div className="hubble-sub-title-group" style={{ alignItems: 'flex-start' }}>
-                <button onClick={() => setWorkspaceMode('editor')} className="hubble-circle-btn" style={{ marginTop: '2px' }}>
-                  <ArrowLeft size={16} />
+            <div className="hubble-sub-header">
+              <div className="hubble-sub-title-group" style={{ flex: 1 }}>
+                <button onClick={() => setWorkspaceMode('editor')} className="hubble-circle-btn" style={{ background: 'rgba(255, 255, 255, 0.04)', border: '1px solid rgba(255, 255, 255, 0.08)', width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', cursor: 'pointer' }}>
+                  <ArrowLeft size={14} />
                 </button>
-                <div>
-                  <h3>Audience</h3>
-                  <p>Choose who can see this</p>
-                </div>
+                <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '700', color: '#fff' }}>Audience</h3>
               </div>
-              <button onClick={() => setWorkspaceMode('editor')} className="hubble-btn-primary">Done</button>
+              <div className="hubble-header-center" style={{ flex: 1, display: 'flex', justifyContent: 'center', gap: '12px' }}>
+              </div>
+              <div className="hubble-header-actions" style={{ flex: 1, justifyContent: 'flex-end', display: 'flex' }}>
+                <button onClick={() => setWorkspaceMode('editor')} className="hubble-btn-primary" style={{ background: 'linear-gradient(135deg, #7C3BFF 0%, #5b2cd3 100%)', boxShadow: '0 4px 15px rgba(108, 59, 255, 0.4)', borderRadius: '24px', padding: '8px 24px', fontSize: '12px', fontWeight: '700', border: 'none', cursor: 'pointer' }}>
+                  Done
+                </button>
+              </div>
             </div>
 
             <div className="hubble-audience-layout">
@@ -1309,33 +1806,36 @@ const CreatePost = ({ onNavigateBack }) => {
                 </div>
               </div>
             </div>
+            {renderMobileHubTools()}
           </div>
         );
 
       case 'schedule':
         return (
-          <div className="hubble-sub-workspace" style={{ height: '100%', display: 'flex', flexDirection: 'column', padding: 0 }}>
-            <div className="hubble-schedule-header">
-              <div className="hubble-sub-title-group">
-                <button onClick={() => setWorkspaceMode('editor')} className="hubble-circle-btn">
-                  <ArrowLeft size={16} />
+          <div className="hubble-sub-workspace">
+            <div className="hubble-sub-header">
+              <div className="hubble-sub-title-group" style={{ flex: 1 }}>
+                <button onClick={() => setWorkspaceMode('editor')} className="hubble-circle-btn" style={{ background: 'rgba(255, 255, 255, 0.04)', border: '1px solid rgba(255, 255, 255, 0.08)', width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', cursor: 'pointer' }}>
+                  <ArrowLeft size={14} />
                 </button>
-                <div>
-                  <h3>Schedule Post</h3>
-                  <p>Pick date & time to post</p>
-                </div>
+                <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '700', color: '#fff' }}>Schedule Post</h3>
               </div>
-              <button 
-                onClick={() => {
-                  if (isScheduled && !scheduleTime.includes('Today') && !scheduleTime.includes('Tomorrow')) {
-                    setScheduleTime(`Aug ${scheduleDate}, ${scheduleHour}:${scheduleMinute} ${schedulePeriod}`);
-                  }
-                  setWorkspaceMode('editor');
-                }} 
-                className="hubble-btn-primary"
-              >
-                Done
-              </button>
+              <div className="hubble-header-center" style={{ flex: 1, display: 'flex', justifyContent: 'center', gap: '12px' }}>
+              </div>
+              <div className="hubble-header-actions" style={{ flex: 1, justifyContent: 'flex-end', display: 'flex' }}>
+                <button 
+                  onClick={() => {
+                    if (isScheduled && !scheduleTime.includes('Today') && !scheduleTime.includes('Tomorrow')) {
+                      setScheduleTime(`Aug ${scheduleDate}, ${scheduleHour}:${scheduleMinute} ${schedulePeriod}`);
+                    }
+                    setWorkspaceMode('editor');
+                  }} 
+                  className="hubble-btn-primary" 
+                  style={{ background: 'linear-gradient(135deg, #7C3BFF 0%, #5b2cd3 100%)', boxShadow: '0 4px 15px rgba(108, 59, 255, 0.4)', borderRadius: '24px', padding: '8px 24px', fontSize: '12px', fontWeight: '700', border: 'none', cursor: 'pointer' }}
+                >
+                  Done
+                </button>
+              </div>
             </div>
 
             <div className="hubble-schedule-layout">
@@ -1426,6 +1926,7 @@ const CreatePost = ({ onNavigateBack }) => {
                 </div>
               </div>
             </div>
+            {renderMobileHubTools()}
           </div>
         );
 
@@ -1433,19 +1934,22 @@ const CreatePost = ({ onNavigateBack }) => {
         return (
           <div className="hubble-sub-workspace" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
             <div className="hubble-sub-header">
-              <div className="hubble-sub-title-group">
-                <button onClick={() => setWorkspaceMode('editor')} className="hubble-circle-btn">
-                  <ArrowLeft size={16} />
+              <div className="hubble-sub-title-group" style={{ flex: 1 }}>
+                <button onClick={() => setWorkspaceMode('editor')} className="hubble-circle-btn" style={{ background: 'rgba(255, 255, 255, 0.04)', border: '1px solid rgba(255, 255, 255, 0.08)', width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', cursor: 'pointer' }}>
+                  <ArrowLeft size={14} />
                 </button>
-                <div>
-                  <h3>Location</h3>
-                  <p>Add location to your vibe</p>
-                </div>
+                <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '700', color: '#fff' }}>Location</h3>
               </div>
-              <button onClick={() => setWorkspaceMode('editor')} className="hubble-btn-primary">Done</button>
+              <div className="hubble-header-center" style={{ flex: 1, display: 'flex', justifyContent: 'center', gap: '12px' }}>
+              </div>
+              <div className="hubble-header-actions" style={{ flex: 1, justifyContent: 'flex-end', display: 'flex' }}>
+                <button onClick={() => setWorkspaceMode('editor')} className="hubble-btn-primary" style={{ background: 'linear-gradient(135deg, #7C3BFF 0%, #5b2cd3 100%)', boxShadow: '0 4px 15px rgba(108, 59, 255, 0.4)', borderRadius: '24px', padding: '8px 24px', fontSize: '12px', fontWeight: '700', border: 'none', cursor: 'pointer' }}>
+                  Done
+                </button>
+              </div>
             </div>
 
-            <div className="hubble-location-content" style={{ overflowY: 'auto', flex: 1, paddingRight: '4px' }}>
+            <div className="hubble-location-content hubble-inner-workspace-box">
               {/* Search Input with Spinner */}
               <div style={{ position: 'relative', width: '100%' }}>
                 <input 
@@ -1499,10 +2003,18 @@ const CreatePost = ({ onNavigateBack }) => {
                 />
                 <div style={{ position: 'absolute', bottom: '0', left: '0', right: '0', background: 'rgba(0, 0, 0, 0.65)', backdropFilter: 'blur(8px)', padding: '10px 14px', borderTop: '1px solid rgba(255, 255, 255, 0.05)', display: 'flex', alignItems: 'center', gap: '10px', boxSizing: 'border-box' }}>
                   <MapPin size={16} style={{ color: '#7C3BFF', flexShrink: 0 }} />
-                  <div style={{ overflow: 'hidden' }}>
-                    <strong style={{ display: 'block', fontSize: '11px', color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{location}</strong>
+                  <div style={{ overflow: 'hidden', flexGrow: 1 }}>
+                    <strong style={{ display: 'block', fontSize: '11px', color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{location || "No location selected"}</strong>
                     <p style={{ margin: 0, fontSize: '9px', color: 'rgba(255,255,255,0.4)' }}>{parseFloat(mapCoords.lat).toFixed(4)}° N, {parseFloat(mapCoords.lon).toFixed(4)}° E</p>
                   </div>
+                  {location && (
+                    <button 
+                      onClick={() => setLocation('')}
+                      style={{ background: 'rgba(255, 255, 255, 0.1)', border: 'none', borderRadius: '12px', padding: '4px 10px', color: '#ff4b4b', fontSize: '10px', fontWeight: '600', cursor: 'pointer', flexShrink: 0 }}
+                    >
+                      Clear
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -1531,6 +2043,7 @@ const CreatePost = ({ onNavigateBack }) => {
                 </div>
               </div>
             </div>
+            {renderMobileHubTools()}
           </div>
         );
 
@@ -1539,19 +2052,22 @@ const CreatePost = ({ onNavigateBack }) => {
         return (
           <div className="hubble-sub-workspace">
             <div className="hubble-sub-header">
-              <div className="hubble-sub-title-group">
-                <button onClick={() => setWorkspaceMode('editor')} className="hubble-circle-btn">
-                  <ArrowLeft size={16} />
+              <div className="hubble-sub-title-group" style={{ flex: 1 }}>
+                <button onClick={() => setWorkspaceMode('editor')} className="hubble-circle-btn" style={{ background: 'rgba(255, 255, 255, 0.04)', border: '1px solid rgba(255, 255, 255, 0.08)', width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', cursor: 'pointer' }}>
+                  <ArrowLeft size={14} />
                 </button>
-                <div>
-                  <h3>Topics</h3>
-                  <p>Add topics or hashtags</p>
-                </div>
+                <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '700', color: '#fff' }}>Topics</h3>
               </div>
-              <button onClick={() => setWorkspaceMode('editor')} className="hubble-btn-primary">Done</button>
+              <div className="hubble-header-center" style={{ flex: 1, display: 'flex', justifyContent: 'center', gap: '12px' }}>
+              </div>
+              <div className="hubble-header-actions" style={{ flex: 1, justifyContent: 'flex-end', display: 'flex' }}>
+                <button onClick={() => setWorkspaceMode('editor')} className="hubble-btn-primary" style={{ background: 'linear-gradient(135deg, #7C3BFF 0%, #5b2cd3 100%)', boxShadow: '0 4px 15px rgba(108, 59, 255, 0.4)', borderRadius: '24px', padding: '8px 24px', fontSize: '12px', fontWeight: '700', border: 'none', cursor: 'pointer' }}>
+                  Done
+                </button>
+              </div>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', flex: 1, minHeight: 0, overflowY: 'auto' }}>
+            <div className="hubble-inner-workspace-box" style={{ gap: '16px' }}>
               {/* Post Preview */}
               {(mediaFiles.length > 0 || content) && (
                 <div style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '14px', padding: '14px', display: 'flex', gap: '12px', alignItems: 'flex-start', flexShrink: 0 }}>
@@ -1620,6 +2136,7 @@ const CreatePost = ({ onNavigateBack }) => {
                 ))}
               </div>
             </div>
+            {renderMobileHubTools()}
           </div>
         );
 
@@ -1627,21 +2144,22 @@ const CreatePost = ({ onNavigateBack }) => {
         return (
           <div className="hubble-sub-workspace hubble-preview-workspace">
             <div className="hubble-sub-header">
-              <div className="hubble-sub-title-group">
-                <button onClick={() => setWorkspaceMode('editor')} className="hubble-circle-btn">
-                  <ArrowLeft size={16} />
+              <div className="hubble-sub-title-group" style={{ flex: 1 }}>
+                <button onClick={() => setWorkspaceMode('editor')} className="hubble-circle-btn" style={{ background: 'rgba(255, 255, 255, 0.04)', border: '1px solid rgba(255, 255, 255, 0.08)', width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', cursor: 'pointer' }}>
+                  <ArrowLeft size={14} />
                 </button>
-                <div>
-                  <h3>Preview</h3>
-                  <p>See how it looks</p>
+                <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '700', color: '#fff' }}>Preview</h3>
+              </div>
+              <div className="hubble-header-center" style={{ flex: 1, display: 'flex', justifyContent: 'center', gap: '12px' }}>
+                <div className="hubble-device-selector-tabs">
+                  {['Mobile', 'Desktop', 'Tablet'].map(d => (
+                    <button key={d} onClick={() => setPreviewDevice(d)} className={`hubble-device-tab ${previewDevice === d ? 'active' : ''}`}>
+                      {d}
+                    </button>
+                  ))}
                 </div>
               </div>
-              <div className="hubble-device-selector-tabs">
-                {['Mobile', 'Desktop', 'Tablet'].map(d => (
-                  <button key={d} onClick={() => setPreviewDevice(d)} className={`hubble-device-tab ${previewDevice === d ? 'active' : ''}`}>
-                    {d}
-                  </button>
-                ))}
+              <div className="hubble-header-actions" style={{ flex: 1, justifyContent: 'flex-end', display: 'flex' }}>
               </div>
             </div>
 
@@ -1659,14 +2177,222 @@ const CreatePost = ({ onNavigateBack }) => {
                   {/* User requested to remove selected captions in preview */}
                   {/* <p className="hubble-sim-caption" dangerouslySetInnerHTML={{ __html: content }} /> */}
                   {mediaFiles.length > 0 && (
-                    <div className="hubble-sim-media" style={{ display: 'grid', gridTemplateColumns: mediaFiles.length > 1 ? '1fr 1fr' : '1fr', gap: '4px' }}>
-                      {mediaFiles.map((media) => (
-                        media.type === 'video' ? (
-                          <video key={media.id} src={media.previewUrl} muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                        ) : (
-                          <img key={media.id} src={media.previewUrl} alt="Media" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '4px' }} />
-                        )
-                      ))}
+                    <div 
+                      className="hubble-sim-media" 
+                      style={{ 
+                        position: 'relative', 
+                        width: '100%', 
+                        height: '160px', 
+                        overflow: 'hidden', 
+                        borderRadius: '12px',
+                        display: 'block',
+                        background: '#000'
+                      }}
+                    >
+                      {mediaFiles.length === 1 ? (
+                        <div style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden', ...getMediaWrapperStyle(mediaFiles[0]) }}>
+                          {mediaFiles[0].type === 'video' ? (
+                            <video src={mediaFiles[0].previewUrl} muted playsInline autoPlay loop style={{ width: '100%', height: '100%', objectFit: 'contain', ...getMediaStyle(mediaFiles[0]) }} />
+                          ) : (
+                            <img src={mediaFiles[0].previewUrl} alt="Media" style={{ width: '100%', height: '100%', objectFit: 'contain', ...getMediaStyle(mediaFiles[0]) }} />
+                          )}
+                          
+                          {/* Stickers Overlay */}
+                          {(mediaFiles[0].stickers || []).map((stk) => (
+                            <div key={stk.id} 
+                              style={{ position: 'absolute', left: `${stk.x}%`, top: `${stk.y}%`, fontSize: `${(stk.scale || 1) * 40}px`, transform: `translate(-50%, -50%) rotate(${stk.rotation || 0}deg)`, pointerEvents: 'none', userSelect: 'none', zIndex: 10 }}>
+                              {stk.emoji}
+                            </div>
+                          ))}
+
+                          {/* Texts Overlay */}
+                          {(mediaFiles[0].texts || []).map((txt) => (
+                            <div key={txt.id} 
+                              style={{ 
+                                position: 'absolute', 
+                                left: `${txt.x}%`, 
+                                top: `${txt.y}%`, 
+                                fontSize: `${(txt.scale || 1) * 20}px`, 
+                                color: txt.color, 
+                                fontFamily: txt.fontFamily, 
+                                fontWeight: txt.fontWeight, 
+                                transform: `translate(-50%, -50%) rotate(${txt.rotation || 0}deg)`, 
+                                pointerEvents: 'none',
+                                userSelect: 'none', 
+                                whiteSpace: 'nowrap', 
+                                zIndex: 11, 
+                                textShadow: '0 2px 4px rgba(0,0,0,0.5)',
+                                padding: '4px'
+                              }}
+                            >
+                              {txt.text}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <>
+                          <div style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden', ...getMediaWrapperStyle(mediaFiles[previewMediaIndex]) }}>
+                            {mediaFiles[previewMediaIndex].type === 'video' ? (
+                              <video key={mediaFiles[previewMediaIndex].id} src={mediaFiles[previewMediaIndex].previewUrl} muted playsInline autoPlay loop style={{ width: '100%', height: '100%', objectFit: 'contain', ...getMediaStyle(mediaFiles[previewMediaIndex]) }} />
+                            ) : (
+                              <img key={mediaFiles[previewMediaIndex].id} src={mediaFiles[previewMediaIndex].previewUrl} alt="Media" style={{ width: '100%', height: '100%', objectFit: 'contain', ...getMediaStyle(mediaFiles[previewMediaIndex]) }} />
+                            )}
+                            
+                            {/* Stickers Overlay */}
+                            {(mediaFiles[previewMediaIndex].stickers || []).map((stk) => (
+                              <div key={stk.id} 
+                                style={{ position: 'absolute', left: `${stk.x}%`, top: `${stk.y}%`, fontSize: `${(stk.scale || 1) * 40}px`, transform: `translate(-50%, -50%) rotate(${stk.rotation || 0}deg)`, pointerEvents: 'none', userSelect: 'none', zIndex: 10 }}>
+                                {stk.emoji}
+                              </div>
+                            ))}
+
+                            {/* Texts Overlay */}
+                            {(mediaFiles[previewMediaIndex].texts || []).map((txt) => (
+                              <div key={txt.id} 
+                                style={{ 
+                                  position: 'absolute', 
+                                  left: `${txt.x}%`, 
+                                  top: `${txt.y}%`, 
+                                  fontSize: `${(txt.scale || 1) * 20}px`, 
+                                  color: txt.color, 
+                                  fontFamily: txt.fontFamily, 
+                                  fontWeight: txt.fontWeight, 
+                                  transform: `translate(-50%, -50%) rotate(${txt.rotation || 0}deg)`, 
+                                  pointerEvents: 'none',
+                                  userSelect: 'none', 
+                                  whiteSpace: 'nowrap', 
+                                  zIndex: 11, 
+                                  textShadow: '0 2px 4px rgba(0,0,0,0.5)',
+                                  padding: '4px'
+                                }}
+                              >
+                                {txt.text}
+                              </div>
+                            ))}
+                          </div>
+                          
+                          {/* Pagination Badge (e.g. 1/3) */}
+                          <div 
+                            style={{
+                              position: 'absolute',
+                              top: '8px',
+                              right: '8px',
+                              background: 'rgba(0, 0, 0, 0.6)',
+                              color: '#fff',
+                              fontSize: '9px',
+                              fontWeight: '600',
+                              padding: '3px 6px',
+                              borderRadius: '10px',
+                              zIndex: 10,
+                              pointerEvents: 'none',
+                              userSelect: 'none'
+                            }}
+                          >
+                            {previewMediaIndex + 1}/{mediaFiles.length}
+                          </div>
+
+                          {/* Left Navigation Chevron */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setPreviewMediaIndex(prev => (prev === 0 ? mediaFiles.length - 1 : prev - 1));
+                            }}
+                            style={{
+                              position: 'absolute',
+                              left: '6px',
+                              top: '50%',
+                              transform: 'translateY(-50%)',
+                              background: 'rgba(0, 0, 0, 0.5)',
+                              border: 'none',
+                              color: '#fff',
+                              borderRadius: '50%',
+                              width: '20px',
+                              height: '20px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              cursor: 'pointer',
+                              zIndex: 10,
+                              outline: 'none',
+                              fontSize: '11px',
+                              fontWeight: 'bold',
+                              padding: 0
+                            }}
+                          >
+                            ‹
+                          </button>
+
+                          {/* Right Navigation Chevron */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setPreviewMediaIndex(prev => (prev === mediaFiles.length - 1 ? 0 : prev + 1));
+                            }}
+                            style={{
+                              position: 'absolute',
+                              right: '6px',
+                              top: '50%',
+                              transform: 'translateY(-50%)',
+                              background: 'rgba(0, 0, 0, 0.5)',
+                              border: 'none',
+                              color: '#fff',
+                              borderRadius: '50%',
+                              width: '20px',
+                              height: '20px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              cursor: 'pointer',
+                              zIndex: 10,
+                              outline: 'none',
+                              fontSize: '11px',
+                              fontWeight: 'bold',
+                              padding: 0
+                            }}
+                          >
+                            ›
+                          </button>
+
+                          {/* Dots Indicators at the Bottom */}
+                          <div 
+                            style={{
+                              position: 'absolute',
+                              bottom: '8px',
+                              left: '0',
+                              right: '0',
+                              display: 'flex',
+                              justifyContent: 'center',
+                              gap: '5px',
+                              zIndex: 10
+                            }}
+                          >
+                            {mediaFiles.map((_, idx) => (
+                              <button
+                                key={idx}
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setPreviewMediaIndex(idx);
+                                }}
+                                style={{
+                                  width: '5px',
+                                  height: '5px',
+                                  borderRadius: '50%',
+                                  background: idx === previewMediaIndex ? '#6C3BFF' : 'rgba(255, 255, 255, 0.5)',
+                                  border: 'none',
+                                  padding: 0,
+                                  cursor: 'pointer',
+                                  outline: 'none',
+                                  transition: 'all 0.2s ease',
+                                  transform: idx === previewMediaIndex ? 'scale(1.2)' : 'scale(1)'
+                                }}
+                              />
+                            ))}
+                          </div>
+                        </>
+                      )}
                     </div>
                   )}
                   <div className="hubble-sim-footer">
@@ -1681,13 +2407,13 @@ const CreatePost = ({ onNavigateBack }) => {
                 <h4>Post Summary</h4>
                 <div className="hubble-summary-rows">
                   <div className="hubble-sum-row"><span>Media</span><strong>{mediaFiles.length} items</strong></div>
-                  <div className="hubble-sum-row"><span>Topics</span><strong>{topics.length} topics</strong></div>
                   <div className="hubble-sum-row"><span>Audience</span><strong>{audience}</strong></div>
                   <div className="hubble-sum-row"><span>Schedule</span><strong>{isScheduled ? 'Scheduled' : 'Post Now'}</strong></div>
                   <div className="hubble-sum-row"><span>Location</span><strong>{location}</strong></div>
                 </div>
               </div>
             </div>
+            {renderMobileHubTools()}
           </div>
         );
 
@@ -1695,14 +2421,15 @@ const CreatePost = ({ onNavigateBack }) => {
         return (
           <div className="hubble-sub-workspace hubble-drafts-workspace">
             <div className="hubble-sub-header">
-              <div className="hubble-sub-title-group">
-                <button onClick={() => setWorkspaceMode('editor')} className="hubble-circle-btn">
-                  <ArrowLeft size={16} />
+              <div className="hubble-sub-title-group" style={{ flex: 1 }}>
+                <button onClick={() => setWorkspaceMode('editor')} className="hubble-circle-btn" style={{ background: 'rgba(255, 255, 255, 0.04)', border: '1px solid rgba(255, 255, 255, 0.08)', width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', cursor: 'pointer' }}>
+                  <ArrowLeft size={14} />
                 </button>
-                <div>
-                  <h3>Drafts</h3>
-                  <p>View your saved drafts</p>
-                </div>
+                <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '700', color: '#fff' }}>Drafts</h3>
+              </div>
+              <div className="hubble-header-center" style={{ flex: 1, display: 'flex', justifyContent: 'center', gap: '12px' }}>
+              </div>
+              <div className="hubble-header-actions" style={{ flex: 1, justifyContent: 'flex-end', display: 'flex' }}>
               </div>
             </div>
             {draftsList.length === 0 ? (
@@ -1720,47 +2447,85 @@ const CreatePost = ({ onNavigateBack }) => {
                         <strong className="hubble-draft-title">{d.title}</strong>
                         <p className="hubble-draft-text">{cleanText || 'No content'}</p>
                       </div>
-                      <button 
-                        onClick={() => { 
-                          setContent(d.text); 
-                          if (d.media) {
-                            setMediaFiles(d.media.map((url, idx) => ({
-                              id: Date.now() + idx,
-                              type: url.includes('video') || url.endsWith('.mp4') || url.startsWith('blob:video') ? 'video' : 'image',
-                              previewUrl: url,
-                              filter: 'Original',
-                              brightness: 100,
-                              contrast: 100,
-                              saturation: 100,
-                              exposure: 100,
-                              sharpness: 0,
-                              rotation: 0,
-                              scaleX: 1,
-                              scaleY: 1,
-                              cropRatio: 'original',
-                              cropX: 0,
-                              cropY: 0,
-                              cropZoom: 1,
-                              effect: 'None',
-                              frame: 'None',
-                              stickers: [],
-                              texts: [],
-                              drawings: []
-                            })));
-                          } else {
-                            setMediaFiles([]);
-                          }
-                          setWorkspaceMode('editor'); 
-                        }} 
-                        className="hubble-btn-restore"
-                      >
-                        Restore
-                      </button>
+                      <div className="hubble-draft-actions" style={{ display: 'flex', gap: '8px' }}>
+                        <button 
+                          onClick={() => { 
+                            setContent(d.text); 
+                            if (d.mediaItems) {
+                              setMediaFiles(d.mediaItems.map(m => {
+                                if (m.blob) {
+                                  return {
+                                    ...m,
+                                    previewUrl: URL.createObjectURL(m.blob)
+                                  };
+                                }
+                                return m;
+                              }));
+                            } else if (d.media) {
+                              setMediaFiles(d.media.map((url, idx) => ({
+                                id: Date.now() + idx,
+                                type: url.includes('video') || url.endsWith('.mp4') || url.startsWith('blob:video') ? 'video' : 'image',
+                                previewUrl: url,
+                                filter: 'Original',
+                                brightness: 100,
+                                contrast: 100,
+                                saturation: 100,
+                                exposure: 100,
+                                sharpness: 0,
+                                rotation: 0,
+                                scaleX: 1,
+                                scaleY: 1,
+                                cropRatio: 'original',
+                                cropX: 0,
+                                cropY: 0,
+                                cropZoom: 1,
+                                effect: 'None',
+                                frame: 'None',
+                                stickers: [],
+                                texts: [],
+                                drawings: []
+                              })));
+                            } else {
+                              setMediaFiles([]);
+                            }
+                            setWorkspaceMode('editor'); 
+                          }} 
+                          className="hubble-btn-restore"
+                        >
+                          Restore
+                        </button>
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            if (confirm('Are you sure you want to delete this draft?')) {
+                              await PostDraftsDB.deleteDraft(d.id);
+                              const updatedList = await PostDraftsDB.getDrafts();
+                              setDraftsList(updatedList.sort((a, b) => b.id - a.id));
+                              showToastNotification('Draft deleted successfully! 🗑️');
+                            }
+                          }}
+                          className="hubble-btn-delete"
+                          style={{
+                            background: 'rgba(239, 68, 68, 0.1)',
+                            border: '1px solid rgba(239, 68, 68, 0.2)',
+                            color: '#ef4444',
+                            borderRadius: '12px',
+                            padding: '6px 12px',
+                            cursor: 'pointer',
+                            fontWeight: '600',
+                            fontSize: '11px',
+                            transition: 'all 0.2s'
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
               </div>
             )}
+            {renderMobileHubTools()}
           </div>
         );
 
@@ -1787,18 +2552,41 @@ const CreatePost = ({ onNavigateBack }) => {
               <div className="hubble-header-right-buttons">
                 <button 
                   onClick={async () => {
-                    showToastNotification('Draft saved successfully! 💾');
-                    const newDraft = {
-                      id: Date.now(),
-                      title: `Draft: ${content.substring(0, 15)}...`,
-                      text: content,
-                      media: mediaFiles.map(m => m.previewUrl)
-                    };
-                    setDraftsList(prev => {
-                      const updated = [newDraft, ...prev];
-                      localStorage.setItem('hubbleDrafts', JSON.stringify(updated));
-                      return updated;
-                    });
+                    try {
+                      const savedMedia = await Promise.all(mediaFiles.map(async (m) => {
+                        try {
+                          const res = await fetch(m.previewUrl);
+                          const blob = await res.blob();
+                          return {
+                            ...m,
+                            blob: blob,
+                            previewUrl: ''
+                          };
+                        } catch (err) {
+                          console.error('Failed to convert media to blob:', err);
+                          return m;
+                        }
+                      }));
+
+                      const textContent = content.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ');
+                      const titleText = textContent.trim().substring(0, 15) || 'Untitled Draft';
+
+                      const newDraft = {
+                        id: Date.now(),
+                        title: `Draft: ${titleText}...`,
+                        text: content,
+                        mediaItems: savedMedia
+                      };
+
+                      await PostDraftsDB.saveDraft(newDraft);
+                      
+                      const updatedList = await PostDraftsDB.getDrafts();
+                      setDraftsList(updatedList.sort((a, b) => b.id - a.id));
+                      showToastNotification('Draft saved successfully! 💾');
+                    } catch (err) {
+                      console.error('Error saving draft:', err);
+                      showToastNotification('Failed to save draft ❌');
+                    }
                   }} 
                   className="hubble-btn-secondary-sm"
                   style={{ borderRadius: '12px' }}
@@ -1811,107 +2599,320 @@ const CreatePost = ({ onNavigateBack }) => {
               </div>
             </div>
 
-            {/* Input area */}
-            <div
-              ref={textareaRef}
-              contentEditable
-              onInput={() => setContent(textareaRef.current.innerHTML)}
-              placeholder="What's on your mind today?"
-              className="hubble-composer-textarea"
-              style={{ minHeight: '120px', marginTop: '12px', outline: 'none', overflowY: 'auto', textAlign: 'left', whiteSpace: 'pre-wrap' }}
-            />
+            {/* Scrollable Editor Content */}
+            <div className="hubble-composer-scroll-content">
+              {/* Input area */}
+              <div
+                ref={textareaRef}
+                contentEditable
+                onInput={() => setContent(textareaRef.current.innerHTML)}
+                placeholder="What's on your mind today?"
+                className="hubble-composer-textarea"
+                style={{ minHeight: '120px', outline: 'none', textAlign: 'left', whiteSpace: 'pre-wrap' }}
+              />
 
-            {/* Large Media Previews inside Composer */}
-            {mediaFiles.length > 0 && (
-              <div 
-                className="hubble-composer-large-previews" 
-                style={{ 
-                  marginTop: '12px', 
-                  marginBottom: '16px',
-                  display: 'grid', 
-                  gap: '8px', 
-                  gridTemplateColumns: mediaFiles.length === 1 ? '1fr' : mediaFiles.length === 2 ? '1fr 1fr' : 'repeat(auto-fill, minmax(200px, 1fr))', 
-                  borderRadius: '16px', 
-                  overflow: 'hidden' 
-                }}
-              >
-                {mediaFiles.map((media, idx) => (
-                  <div 
-                    key={media.id} 
-                    draggable
-                    onDragStart={() => handleDragStart(idx)}
-                    onDragOver={(e) => handleDragOver(e, idx)}
-                    onDrop={() => handleDrop(idx)}
-                    onClick={() => { setActiveMediaIndex(idx); setWorkspaceMode('mediastudio'); }}
-                    style={{ position: 'relative', width: '100%', aspectRatio: mediaFiles.length > 1 ? '1' : '16/9', cursor: 'pointer', overflow: 'hidden', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)' }}
-                  >
-                    {media.type === 'video' ? (
-                      <video src={media.previewUrl} muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                    ) : (
-                      <img src={media.previewUrl} alt="Preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                    )}
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); removeMedia(media.id); }} 
-                      style={{ position: 'absolute', top: '10px', right: '10px', background: 'rgba(0,0,0,0.6)', border: 'none', borderRadius: '50%', width: '28px', height: '28px', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', zIndex: 10 }}
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Attached Music Track Badge */}
-            {selectedTrack && (
-              <div 
-                className="hubble-composer-music-badge" 
-                style={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  gap: '10px', 
-                  background: 'rgba(168, 85, 247, 0.12)', 
-                  border: '1px solid rgba(168, 85, 247, 0.25)', 
-                  borderRadius: '12px', 
-                  padding: '6px 12px', 
-                  margin: '8px 0', 
-                  width: 'fit-content', 
-                  animation: 'fadeIn 0.2s ease-out' 
-                }}
-              >
-                <div style={{ position: 'relative', width: '24px', height: '24px', borderRadius: '50%', overflow: 'hidden', background: '#000', flexShrink: 0 }}>
-                  <img 
-                    src={selectedTrack.artwork} 
-                    style={{ 
-                      width: '100%', 
-                      height: '100%', 
-                      objectFit: 'cover', 
-                      borderRadius: '50%', 
-                      animation: 'spin 4s linear infinite'
-                    }} 
-                    alt="vinyl"
-                  />
-                </div>
-                <div>
-                  <div style={{ fontSize: '10px', fontWeight: '700', color: '#fff', textAlign: 'left' }}>{selectedTrack.title}</div>
-                  <div style={{ fontSize: '8px', color: 'rgba(255,255,255,0.6)', textAlign: 'left', marginTop: '1px' }}>{selectedTrack.artist}</div>
-                </div>
-                <button 
-                  type="button"
-                  onClick={() => setSelectedTrack(null)} 
+              {/* Large Media Previews inside Composer */}
+              {mediaFiles.length > 0 && (
+                <div 
+                  className="hubble-composer-large-previews" 
                   style={{ 
-                    background: 'none', 
-                    border: 'none', 
-                    color: 'rgba(255,255,255,0.5)', 
-                    cursor: 'pointer', 
-                    fontSize: '11px', 
-                    padding: '0 4px', 
-                    marginLeft: '8px' 
+                    marginTop: '12px', 
+                    marginBottom: '16px',
+                    position: 'relative',
+                    width: '100%',
+                    height: '180px',
+                    borderRadius: '16px', 
+                    overflow: 'hidden',
+                    background: '#000',
+                    border: '1px solid rgba(255,255,255,0.1)'
                   }}
                 >
-                  ×
-                </button>
-              </div>
-            )}
+                  {mediaFiles.length === 1 ? (
+                    <div 
+                      onClick={() => { setActiveMediaIndex(0); setWorkspaceMode('mediastudio'); }}
+                      style={{ position: 'relative', width: '100%', height: '100%', cursor: 'pointer', overflow: 'hidden', ...getMediaWrapperStyle(mediaFiles[0]) }}
+                    >
+                      {mediaFiles[0].type === 'video' ? (
+                        <video src={mediaFiles[0].previewUrl} muted playsInline autoPlay loop style={{ width: '100%', height: '100%', ...getMediaStyle(mediaFiles[0]), objectFit: 'contain' }} />
+                      ) : (
+                        <img src={mediaFiles[0].previewUrl} alt="Preview" style={{ width: '100%', height: '100%', ...getMediaStyle(mediaFiles[0]), objectFit: 'contain' }} />
+                      )}
+                      
+                      {/* Stickers Overlay */}
+                      {(mediaFiles[0].stickers || []).map((stk) => (
+                        <div key={stk.id} 
+                          style={{ position: 'absolute', left: `${stk.x}%`, top: `${stk.y}%`, fontSize: `${(stk.scale || 1) * 40}px`, transform: `translate(-50%, -50%) rotate(${stk.rotation || 0}deg)`, pointerEvents: 'none', userSelect: 'none', zIndex: 10 }}>
+                          {stk.emoji}
+                        </div>
+                      ))}
+
+                      {/* Texts Overlay */}
+                      {(mediaFiles[0].texts || []).map((txt) => (
+                        <div key={txt.id} 
+                          style={{ 
+                            position: 'absolute', 
+                            left: `${txt.x}%`, 
+                            top: `${txt.y}%`, 
+                            fontSize: `${(txt.scale || 1) * 20}px`, 
+                            color: txt.color, 
+                            fontFamily: txt.fontFamily, 
+                            fontWeight: txt.fontWeight, 
+                            transform: `translate(-50%, -50%) rotate(${txt.rotation || 0}deg)`, 
+                            pointerEvents: 'none',
+                            userSelect: 'none', 
+                            whiteSpace: 'nowrap', 
+                            zIndex: 11, 
+                            textShadow: '0 2px 4px rgba(0,0,0,0.5)',
+                            padding: '4px'
+                          }}
+                        >
+                          {txt.text}
+                        </div>
+                      ))}
+
+                      <button 
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); removeMedia(mediaFiles[0].id); }} 
+                        style={{ position: 'absolute', top: '10px', right: '10px', background: 'rgba(0,0,0,0.6)', border: 'none', borderRadius: '50%', width: '28px', height: '28px', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', zIndex: 20 }}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Active Media Container */}
+                      <div 
+                        onClick={() => { setWorkspaceMode('mediastudio'); }}
+                        style={{ position: 'relative', width: '100%', height: '100%', cursor: 'pointer', overflow: 'hidden', ...getMediaWrapperStyle(mediaFiles[activeMediaIndex]) }}
+                      >
+                        {mediaFiles[activeMediaIndex].type === 'video' ? (
+                          <video key={mediaFiles[activeMediaIndex].id} src={mediaFiles[activeMediaIndex].previewUrl} muted playsInline autoPlay loop style={{ width: '100%', height: '100%', ...getMediaStyle(mediaFiles[activeMediaIndex]), objectFit: 'contain' }} />
+                        ) : (
+                          <img key={mediaFiles[activeMediaIndex].id} src={mediaFiles[activeMediaIndex].previewUrl} alt="Preview" style={{ width: '100%', height: '100%', ...getMediaStyle(mediaFiles[activeMediaIndex]), objectFit: 'contain' }} />
+                        )}
+                        
+                        {/* Stickers Overlay */}
+                        {(mediaFiles[activeMediaIndex].stickers || []).map((stk) => (
+                          <div key={stk.id} 
+                            style={{ position: 'absolute', left: `${stk.x}%`, top: `${stk.y}%`, fontSize: `${(stk.scale || 1) * 40}px`, transform: `translate(-50%, -50%) rotate(${stk.rotation || 0}deg)`, pointerEvents: 'none', userSelect: 'none', zIndex: 10 }}>
+                            {stk.emoji}
+                          </div>
+                        ))}
+
+                        {/* Texts Overlay */}
+                        {(mediaFiles[activeMediaIndex].texts || []).map((txt) => (
+                          <div key={txt.id} 
+                            style={{ 
+                              position: 'absolute', 
+                              left: `${txt.x}%`, 
+                              top: `${txt.y}%`, 
+                              fontSize: `${(txt.scale || 1) * 20}px`, 
+                              color: txt.color, 
+                              fontFamily: txt.fontFamily, 
+                              fontWeight: txt.fontWeight, 
+                              transform: `translate(-50%, -50%) rotate(${txt.rotation || 0}deg)`, 
+                              pointerEvents: 'none',
+                              userSelect: 'none', 
+                              whiteSpace: 'nowrap', 
+                              zIndex: 11, 
+                              textShadow: '0 2px 4px rgba(0,0,0,0.5)',
+                              padding: '4px'
+                            }}
+                          >
+                            {txt.text}
+                          </div>
+                        ))}
+
+                        {/* Remove button for active media */}
+                        <button 
+                          type="button"
+                          onClick={(e) => { 
+                            e.stopPropagation(); 
+                            removeMedia(mediaFiles[activeMediaIndex].id); 
+                          }} 
+                          style={{ position: 'absolute', top: '10px', right: '10px', background: 'rgba(0,0,0,0.6)', border: 'none', borderRadius: '50%', width: '28px', height: '28px', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', zIndex: 20 }}
+                        >
+                          ×
+                        </button>
+                      </div>
+
+                      {/* Pagination Indicator */}
+                      <div 
+                        style={{
+                          position: 'absolute',
+                          top: '10px',
+                          left: '10px',
+                          background: 'rgba(0, 0, 0, 0.6)',
+                          color: '#fff',
+                          fontSize: '10px',
+                          fontWeight: '600',
+                          padding: '4px 8px',
+                          borderRadius: '12px',
+                          zIndex: 10,
+                          pointerEvents: 'none',
+                          userSelect: 'none'
+                        }}
+                      >
+                        {activeMediaIndex + 1}/{mediaFiles.length}
+                      </div>
+
+                      {/* Left navigation chevron */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveMediaIndex(prev => (prev === 0 ? mediaFiles.length - 1 : prev - 1));
+                        }}
+                        style={{
+                          position: 'absolute',
+                          left: '10px',
+                          top: '50%',
+                          transform: 'translateY(-50%)',
+                          background: 'rgba(0, 0, 0, 0.5)',
+                          border: 'none',
+                          color: '#fff',
+                          borderRadius: '50%',
+                          width: '28px',
+                          height: '28px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          cursor: 'pointer',
+                          zIndex: 10,
+                          outline: 'none',
+                          fontSize: '14px',
+                          fontWeight: 'bold',
+                          padding: 0
+                        }}
+                      >
+                        ‹
+                      </button>
+
+                      {/* Right navigation chevron */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveMediaIndex(prev => (prev === mediaFiles.length - 1 ? 0 : prev + 1));
+                        }}
+                        style={{
+                          position: 'absolute',
+                          right: '10px',
+                          top: '50%',
+                          transform: 'translateY(-50%)',
+                          background: 'rgba(0, 0, 0, 0.5)',
+                          border: 'none',
+                          color: '#fff',
+                          borderRadius: '50%',
+                          width: '28px',
+                          height: '28px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          cursor: 'pointer',
+                          zIndex: 10,
+                          outline: 'none',
+                          fontSize: '14px',
+                          fontWeight: 'bold',
+                          padding: 0
+                        }}
+                      >
+                        ›
+                      </button>
+
+                      {/* Navigation Dots at the bottom */}
+                      <div 
+                        style={{
+                          position: 'absolute',
+                          bottom: '12px',
+                          left: '0',
+                          right: '0',
+                          display: 'flex',
+                          justifyContent: 'center',
+                          gap: '6px',
+                          zIndex: 10
+                        }}
+                      >
+                        {mediaFiles.map((_, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActiveMediaIndex(idx);
+                            }}
+                            style={{
+                              width: '6px',
+                              height: '6px',
+                              borderRadius: '50%',
+                              background: idx === activeMediaIndex ? '#6C3BFF' : 'rgba(255, 255, 255, 0.5)',
+                              border: 'none',
+                              padding: 0,
+                              cursor: 'pointer',
+                              outline: 'none',
+                              transition: 'all 0.2s ease',
+                              transform: idx === activeMediaIndex ? 'scale(1.2)' : 'scale(1)'
+                            }}
+                          />
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* Attached Music Track Badge */}
+              {selectedTrack && (
+                <div 
+                  className="hubble-composer-music-badge" 
+                  style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    gap: '10px', 
+                    background: 'rgba(168, 85, 247, 0.12)', 
+                    border: '1px solid rgba(168, 85, 247, 0.25)', 
+                    borderRadius: '12px', 
+                    padding: '6px 12px', 
+                    margin: '8px 0', 
+                    width: 'fit-content', 
+                    animation: 'fadeIn 0.2s ease-out' 
+                  }}
+                >
+                  <div style={{ position: 'relative', width: '24px', height: '24px', borderRadius: '50%', overflow: 'hidden', background: '#000', flexShrink: 0 }}>
+                    <img 
+                      src={selectedTrack.artwork} 
+                      style={{ 
+                        width: '100%', 
+                        height: '100%', 
+                        objectFit: 'cover', 
+                        borderRadius: '50%', 
+                        animation: 'spin 4s linear infinite'
+                      }} 
+                      alt="vinyl"
+                    />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '10px', fontWeight: '700', color: '#fff', textAlign: 'left' }}>{selectedTrack.title}</div>
+                    <div style={{ fontSize: '8px', color: 'rgba(255,255,255,0.6)', textAlign: 'left', marginTop: '1px' }}>{selectedTrack.artist}</div>
+                  </div>
+                  <button 
+                    type="button"
+                    onClick={() => setSelectedTrack(null)} 
+                    style={{ 
+                      background: 'none', 
+                      border: 'none', 
+                      color: 'rgba(255,255,255,0.5)', 
+                      cursor: 'pointer', 
+                      fontSize: '11px', 
+                      padding: '0 4px', 
+                      marginLeft: '8px' 
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
+            </div>
 
             {/* Music Picker Modal Popup */}
             {musicModalOpen && (
@@ -2065,14 +3066,14 @@ const CreatePost = ({ onNavigateBack }) => {
               </div>
             )}
 
-            {/* Quick Actions selector toolbar */}
             <div className="hubble-quick-toolbar" style={{ border: 'none', background: 'rgba(0,0,0,0.15)', padding: '4px', borderRadius: '12px' }}>
               <button onClick={() => fileInputRef.current?.click()} className="hubble-quick-btn"><ImageIcon size={11} /> Photo</button>
               <button onClick={() => fileInputRef.current?.click()} className="hubble-quick-btn"><Video size={11} /> Video</button>
               <button type="button" onClick={() => setMusicModalOpen(true)} className="hubble-quick-btn"><Music size={11} /> Music</button>
               <button onClick={() => setWorkspaceMode('location')} className="hubble-quick-btn"><MapPin size={11} /> Location</button>
-              <button onClick={() => setWorkspaceMode('topics')} className="hubble-quick-btn"><Hash size={11} /> Topic</button>
             </div>
+
+            {renderMobileHubTools()}
 
             {/* Formatting & Bottom controls row */}
             <div className="hubble-composer-footer" style={{ borderTop: '1px solid rgba(255, 255, 255, 0.05)', paddingTop: '10px', marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '6px', width: '100%' }}>
@@ -2146,8 +3147,50 @@ const CreatePost = ({ onNavigateBack }) => {
         body.create-post-view-active #app-sidebar-right {
           display: none !important;
         }
-        body.create-post-view-active #app-main-layout {
-          grid-template-columns: 280px 1fr !important;
+        @media (min-width: 769px) {
+          body.create-post-view-active #app-main-layout {
+            grid-template-columns: 280px 1fr !important;
+          }
+        }
+        @media (max-width: 768px) {
+          body.create-post-view-active {
+            overflow-y: auto !important;
+            overflow-x: hidden !important;
+          }
+          body.create-post-view-active #app-main-layout {
+            height: auto !important;
+            min-height: 100vh !important;
+            overflow-y: visible !important;
+          }
+          .hubble-workspace-card:has(.hubble-audience-layout),
+          .hubble-workspace-card:has(.hubble-schedule-layout),
+          .hubble-workspace-card:has(.hubble-drafts-workspace) {
+            width: calc(100vw - 24px) !important;
+            max-width: none !important;
+            position: relative !important;
+            left: 50% !important;
+            transform: translateX(-50%) !important;
+          }
+          .hubble-workspace-card {
+            height: auto !important;
+            min-height: auto !important;
+            max-height: none !important;
+          }
+          .hubble-sub-workspace,
+          .hubble-workspace-card > div {
+            height: auto !important;
+            overflow-y: visible !important;
+            overflow-x: hidden !important;
+          }
+          .hubble-schedule-layout {
+            height: auto !important;
+            overflow-y: visible !important;
+            overflow-x: hidden !important;
+            min-height: auto !important;
+          }
+          .hubble-tools-column {
+            display: none !important;
+          }
         }
 
         .hubble-crop-overlay {
@@ -2200,28 +3243,33 @@ const CreatePost = ({ onNavigateBack }) => {
         .hubble-crop-handle-mr::after { top: 10px; right: 10px; width: 4px; height: 20px; border-radius: 2px; }
 
         .hubble-creative-page-container {
-          display: flex;
+          display: grid;
+          grid-template-columns: calc(68% - 16.32px) calc(32% - 7.68px);
           gap: 24px;
           width: 100%;
+          max-width: 1050px;
+          margin: 0 auto;
+          padding: 0 16px;
           font-family: 'Inter', sans-serif;
           color: #fff;
           box-sizing: border-box;
+          align-items: start;
         }
 
         .hubble-workspace-column {
-          width: 68%;
-          flex-shrink: 0;
+          width: 100%;
           display: flex;
           flex-direction: column;
           gap: 24px;
+          min-width: 0;
         }
 
         .hubble-tools-column {
-          width: 32%;
-          flex-shrink: 0;
+          width: 100%;
           display: flex;
           flex-direction: column;
           gap: 24px;
+          min-width: 0;
         }
 
         /* CARD WORKSPACE GLASSMORPHISM */
@@ -2236,6 +3284,8 @@ const CreatePost = ({ onNavigateBack }) => {
           transition: box-shadow 0.3s ease, border-color 0.3s ease;
           display: flex;
           flex-direction: column;
+          width: 100%;
+          align-self: stretch;
         }
 
         .hubble-workspace-card {
@@ -2255,9 +3305,23 @@ const CreatePost = ({ onNavigateBack }) => {
           animation: hubble-fade-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
           height: 100%;
           justify-content: flex-start;
-          overflow-y: auto;
+          overflow: hidden;
           padding: 24px;
           box-sizing: border-box;
+          width: 100%;
+        }
+
+        /* Unified Inner Container Box */
+        .hubble-inner-workspace-box {
+          display: flex;
+          flex-direction: column;
+          width: 100%;
+          flex: 1;
+          min-height: 0;
+          box-sizing: border-box;
+          padding: 12px 0 0 0;
+          overflow-y: auto;
+          overflow-x: hidden;
         }
 
         .hubble-sub-workspace::-webkit-scrollbar { display: none; }
@@ -2396,6 +3460,29 @@ const CreatePost = ({ onNavigateBack }) => {
           justify-content: space-between;
           padding: 24px;
           box-sizing: border-box;
+        }
+
+        .hubble-composer-scroll-content {
+          flex: 1;
+          overflow-y: auto;
+          display: flex;
+          flex-direction: column;
+          margin: 12px 0;
+          padding-right: 4px;
+        }
+        .hubble-composer-scroll-content::-webkit-scrollbar {
+          width: 6px;
+        }
+        .hubble-composer-scroll-content::-webkit-scrollbar-track {
+          background: rgba(255, 255, 255, 0.01);
+          border-radius: 3px;
+        }
+        .hubble-composer-scroll-content::-webkit-scrollbar-thumb {
+          background: rgba(255, 255, 255, 0.1);
+          border-radius: 3px;
+        }
+        .hubble-composer-scroll-content::-webkit-scrollbar-thumb:hover {
+          background: rgba(255, 255, 255, 0.2);
         }
 
         .hubble-composer-header {
@@ -2599,9 +3686,6 @@ const CreatePost = ({ onNavigateBack }) => {
           width: 100%;
           flex: 1;
           min-height: 0;
-          background: #000;
-          border-radius: 8px;
-          border: 1px solid rgba(255, 255, 255, 0.05);
           overflow: hidden;
         }
 
@@ -2971,10 +4055,11 @@ const CreatePost = ({ onNavigateBack }) => {
           display: grid;
           grid-template-columns: 35% 65%;
           gap: 32px;
-          padding: 24px 32px;
           flex: 1;
           min-height: 0;
           overflow-y: auto;
+          box-sizing: border-box;
+          padding: 12px 0 0 0;
         }
 
         .hubble-schedule-layout::-webkit-scrollbar { display: none; }
@@ -3015,6 +4100,8 @@ const CreatePost = ({ onNavigateBack }) => {
           flex: 1;
           min-height: 0;
           overflow-y: auto;
+          box-sizing: border-box;
+          padding: 12px 0 0 0;
         }
         .hubble-audience-layout::-webkit-scrollbar { display: none; }
         .hubble-audience-layout { scrollbar-width: none; }
@@ -3397,6 +4484,8 @@ const CreatePost = ({ onNavigateBack }) => {
           height: 100%;
           display: flex;
           flex-direction: column;
+          padding: 24px;
+          box-sizing: border-box;
         }
 
         .hubble-preview-content-layout {
@@ -3438,9 +4527,7 @@ const CreatePost = ({ onNavigateBack }) => {
         }
 
         .hubble-preview-workspace .hubble-preview-summary-card {
-          width: 100%;
-          max-width: 320px;
-          margin: 0;
+          margin: 0 auto;
           box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
           box-sizing: border-box;
           flex-shrink: 0;
@@ -3583,6 +4670,8 @@ const CreatePost = ({ onNavigateBack }) => {
           height: 100%;
           display: flex;
           flex-direction: column;
+          padding: 24px;
+          box-sizing: border-box;
         }
 
         .hubble-drafts-list {
@@ -3592,6 +4681,9 @@ const CreatePost = ({ onNavigateBack }) => {
           flex: 1;
           overflow-y: auto;
           padding-right: 4px;
+          max-width: 450px;
+          margin: 0 auto;
+          width: 100%;
         }
 
         .hubble-drafts-list::-webkit-scrollbar {
@@ -3689,6 +4781,17 @@ const CreatePost = ({ onNavigateBack }) => {
           transform: scale(0.98);
         }
 
+        .hubble-btn-delete:hover {
+          background: #ef4444 !important;
+          border-color: transparent !important;
+          color: #ffffff !important;
+          transform: scale(1.05);
+        }
+
+        .hubble-btn-delete:active {
+          transform: scale(0.98);
+        }
+
         .hubble-drafts-empty {
           display: flex;
           flex-direction: column;
@@ -3700,6 +4803,9 @@ const CreatePost = ({ onNavigateBack }) => {
           height: 100%;
           min-height: 200px;
           text-align: center;
+          max-width: 450px;
+          margin: 0 auto;
+          width: 100%;
         }
 
         .hubble-empty-icon {
@@ -3827,6 +4933,468 @@ const CreatePost = ({ onNavigateBack }) => {
         .hubble-spin {
           animation: hubble-spin 1.5s linear infinite;
         }
+
+        .hubble-mobile-hub-tools {
+          display: none !important;
+        }
+
+        /* TABLET BREAKPOINT */
+        @media (max-width: 1024px) {
+          .hubble-creative-page-container {
+            grid-template-columns: calc(65% - 10.4px) calc(35% - 5.6px);
+            gap: 16px;
+          }
+        }
+
+        /* MOBILE BREAKPOINT */
+        @media (max-width: 768px) {
+          .hubble-creative-page-container {
+            grid-template-columns: 1fr;
+            gap: 12px;
+            height: auto !important;
+          }
+          .hubble-workspace-column {
+            height: auto !important;
+          }
+          .hubble-workspace-card {
+            height: auto !important;
+            min-height: calc(100vh - 120px);
+            max-height: none !important;
+            border-radius: 16px;
+          }
+          .hubble-sub-workspace, .hubble-composer-workspace {
+            padding: 16px;
+            overflow-y: auto;
+          }
+          .hubble-composer-scroll-content {
+            min-height: 0 !important;
+          }
+          .hubble-mobile-hub-tools {
+            display: flex !important;
+          }
+        }
+
+        /* LIGHT THEME OVERRIDES FOR POST COMPOSER */
+        body.light-theme .hubble-glass-card {
+          background: #ffffff !important;
+          border: 1px solid rgba(108, 59, 255, 0.12) !important;
+          box-shadow: 0 10px 30px rgba(108, 59, 255, 0.05), 0 1px 3px rgba(108, 59, 255, 0.05) !important;
+          color: #1a153b !important;
+        }
+
+        body.light-theme .hubble-composer-header {
+          border-bottom-color: rgba(108, 59, 255, 0.1) !important;
+        }
+
+        body.light-theme .hubble-composer-header h3 {
+          color: #1a153b !important;
+        }
+
+        body.light-theme .hubble-composer-header p {
+          color: #6b7280 !important;
+        }
+
+        body.light-theme .hubble-composer-textarea {
+          color: #1a153b !important;
+        }
+        
+        body.light-theme .hubble-composer-textarea::placeholder {
+          color: #9ca3af !important;
+        }
+
+        body.light-theme .hubble-circle-btn {
+          background: rgba(108, 59, 255, 0.08) !important;
+          border: 1px solid rgba(108, 59, 255, 0.15) !important;
+          color: #6C3BFF !important;
+        }
+
+        body.light-theme .hubble-circle-btn:hover {
+          background: #6C3BFF !important;
+          color: #ffffff !important;
+        }
+
+        body.light-theme .hubble-btn-secondary-sm {
+          background: rgba(108, 59, 255, 0.05) !important;
+          border: 1px solid rgba(108, 59, 255, 0.2) !important;
+          color: #6C3BFF !important;
+        }
+
+        body.light-theme .hubble-btn-secondary-sm:hover {
+          background: rgba(108, 59, 255, 0.1) !important;
+        }
+
+        body.light-theme .hubble-tools-column h4 {
+          color: #1a153b !important;
+        }
+
+        body.light-theme .hubble-tool-row-btn {
+          background: rgba(108, 59, 255, 0.02) !important;
+          border: 1px solid rgba(108, 59, 255, 0.08) !important;
+        }
+
+        body.light-theme .hubble-tool-row-btn:hover {
+          background: rgba(108, 59, 255, 0.06) !important;
+          box-shadow: 0 4px 12px rgba(108, 59, 255, 0.05) !important;
+        }
+
+        body.light-theme .hubble-tool-row-btn.active {
+          background: rgba(108, 59, 255, 0.08) !important;
+          border-color: rgba(108, 59, 255, 0.3) !important;
+        }
+
+        body.light-theme .hubble-tool-text strong {
+          color: #1a153b !important;
+        }
+
+        body.light-theme .hubble-tool-text p {
+          color: #6b7280 !important;
+        }
+
+        body.light-theme .hubble-tool-row-btn .chevron {
+          color: rgba(108, 59, 255, 0.4) !important;
+        }
+
+        body.light-theme .hubble-tool-row-btn.active .chevron {
+          color: #6C3BFF !important;
+        }
+
+        body.light-theme .hubble-composer-footer {
+          border-top-color: rgba(108, 59, 255, 0.1) !important;
+        }
+
+        body.light-theme .hubble-composer-footer span {
+          color: #555555 !important;
+        }
+        
+        body.light-theme .hubble-composer-emoji-bar {
+          background: rgba(108, 59, 255, 0.05) !important;
+          border: 1px solid rgba(108, 59, 255, 0.1) !important;
+        }
+
+        body.light-theme .hubble-divider-v {
+          background: rgba(108, 59, 255, 0.15) !important;
+        }
+
+        body.light-theme .hubble-sub-header h3 {
+          color: #1a153b !important;
+        }
+
+        body.light-theme .hubble-sub-header {
+          border-bottom-color: rgba(108, 59, 255, 0.1) !important;
+        }
+
+        body.light-theme .hubble-btn-primary {
+          background: #6c3bff !important;
+          color: #ffffff !important;
+        }
+
+        body.light-theme .hubble-btn-secondary {
+          background: rgba(108, 59, 255, 0.06) !important;
+          border: 1px solid rgba(108, 59, 255, 0.15) !important;
+          color: #6C3BFF !important;
+        }
+
+        body.light-theme .hubble-btn-secondary:hover {
+          background: rgba(108, 59, 255, 0.1) !important;
+        }
+
+        body.light-theme .hubble-draft-row {
+          background: rgba(108, 59, 255, 0.02) !important;
+          border: 1px solid rgba(108, 59, 255, 0.1) !important;
+          box-shadow: 0 4px 12px rgba(108, 59, 255, 0.03) !important;
+        }
+
+        body.light-theme .hubble-draft-row:hover {
+          background: rgba(108, 59, 255, 0.05) !important;
+          border-color: rgba(108, 59, 255, 0.3) !important;
+        }
+
+        body.light-theme .hubble-draft-title {
+          color: #1a153b !important;
+        }
+
+        body.light-theme .hubble-draft-text {
+          color: #6b7280 !important;
+        }
+
+        body.light-theme .hubble-option-row {
+          background: rgba(108, 59, 255, 0.02) !important;
+          border: 1px solid rgba(108, 59, 255, 0.08) !important;
+          color: #1a153b !important;
+        }
+
+        body.light-theme .hubble-option-row:hover {
+          background: rgba(108, 59, 255, 0.05) !important;
+          border-color: rgba(108, 59, 255, 0.25) !important;
+        }
+
+        body.light-theme .hubble-option-row strong {
+          color: #1a153b !important;
+        }
+
+        body.light-theme .hubble-option-row p {
+          color: #6b7280 !important;
+        }
+
+        body.light-theme .hubble-workspace-input {
+          background: #ffffff !important;
+          border: 1px solid rgba(108, 59, 255, 0.2) !important;
+          color: #1a153b !important;
+        }
+
+        body.light-theme .hubble-workspace-input:focus {
+          border-color: #6C3BFF !important;
+          box-shadow: 0 0 0 2px rgba(108, 59, 255, 0.1) !important;
+        }
+
+        body.light-theme .hubble-workspace-input option {
+          background: #ffffff !important;
+          color: #1a153b !important;
+        }
+
+        body.light-theme .hubble-location-item {
+          background: rgba(108, 59, 255, 0.02) !important;
+          border: 1px solid rgba(108, 59, 255, 0.08) !important;
+          color: #1a153b !important;
+        }
+
+        body.light-theme .hubble-location-item:hover {
+          background: rgba(108, 59, 255, 0.06) !important;
+          border-color: rgba(108, 59, 255, 0.3) !important;
+        }
+
+        body.light-theme .hubble-location-item strong {
+          color: #1a153b !important;
+        }
+
+        body.light-theme .hubble-location-item p {
+          color: #6b7280 !important;
+        }
+
+        body.light-theme .hubble-schedule-presets button {
+          background: rgba(108, 59, 255, 0.04) !important;
+          border: 1px solid rgba(108, 59, 255, 0.12) !important;
+          color: #6C3BFF !important;
+        }
+
+        body.light-theme .hubble-schedule-presets button:hover {
+          background: rgba(108, 59, 255, 0.08) !important;
+        }
+
+        body.light-theme .hubble-schedule-presets button.active {
+          background: #6C3BFF !important;
+          color: #ffffff !important;
+          border-color: transparent !important;
+        }
+
+        body.light-theme .hubble-calendar-mock {
+          background: rgba(108, 59, 255, 0.02) !important;
+          border: 1px solid rgba(108, 59, 255, 0.08) !important;
+        }
+
+        body.light-theme .hubble-cal-header {
+          border-bottom-color: rgba(108, 59, 255, 0.08) !important;
+          color: #1a153b !important;
+        }
+
+        body.light-theme .hubble-cal-days span {
+          color: #1a153b !important;
+        }
+
+        body.light-theme .hubble-cal-days span.muted {
+          color: rgba(0, 0, 0, 0.25) !important;
+        }
+
+        body.light-theme .hubble-cal-days span.active {
+          background: #6C3BFF !important;
+          color: #ffffff !important;
+        }
+
+        body.light-theme .hubble-mediastudio-tools-left,
+        body.light-theme .hubble-mediastudio-properties-right {
+          background: rgba(108, 59, 255, 0.02) !important;
+          border: 1px solid rgba(108, 59, 255, 0.08) !important;
+        }
+
+        body.light-theme .hubble-mediastudio-bottom-strip {
+          border-top-color: rgba(108, 59, 255, 0.08) !important;
+          background: #ffffff !important;
+        }
+
+        body.light-theme .hubble-aspect-pill {
+          background: rgba(108, 59, 255, 0.05) !important;
+          border: 1px solid rgba(108, 59, 255, 0.12) !important;
+          color: #6C3BFF !important;
+        }
+
+        body.light-theme .hubble-aspect-pill:hover {
+          background: rgba(108, 59, 255, 0.1) !important;
+        }
+
+        body.light-theme .hubble-aspect-pill.active {
+          background: #6C3BFF !important;
+          color: #ffffff !important;
+          border-color: transparent !important;
+        }
+
+        body.light-theme .hubble-filter-card-btn {
+          background: rgba(108, 59, 255, 0.02) !important;
+          border: 1px solid rgba(108, 59, 255, 0.08) !important;
+          color: #1a153b !important;
+        }
+
+        body.light-theme .hubble-filter-card-btn:hover {
+          border-color: rgba(108, 59, 255, 0.3) !important;
+          background: rgba(108, 59, 255, 0.05) !important;
+        }
+
+        body.light-theme .hubble-filter-card-btn.active {
+          border-color: #6C3BFF !important;
+          background: rgba(108, 59, 255, 0.08) !important;
+          box-shadow: 0 0 10px rgba(108, 59, 255, 0.1) !important;
+        }
+
+        body.light-theme .hubble-filter-card-btn span {
+          color: #1a153b !important;
+        }
+
+        body.light-theme .hubble-properties-panel h5 {
+          color: #1a153b !important;
+        }
+
+        body.light-theme .hubble-slider-labels {
+          color: #6b7280 !important;
+        }
+
+        body.light-theme .hubble-slider-labels span:last-child {
+          color: #1a153b !important;
+        }
+
+        body.light-theme .hubble-mediastudio-canvas-wrapper {
+          background: #f3f4f6 !important;
+          border: 1px dashed rgba(108, 59, 255, 0.2) !important;
+        }
+
+        body.light-theme .hubble-preview-summary-card {
+          background: rgba(108, 59, 255, 0.02) !important;
+          border: 1px solid rgba(108, 59, 255, 0.08) !important;
+        }
+
+        body.light-theme .hubble-preview-summary-card h4 {
+          color: #1a153b !important;
+          border-bottom-color: rgba(108, 59, 255, 0.08) !important;
+        }
+
+        body.light-theme .hubble-sum-row {
+          border-bottom-color: rgba(108, 59, 255, 0.05) !important;
+        }
+
+        body.light-theme .hubble-sum-row span {
+          color: #6b7280 !important;
+        }
+
+        body.light-theme .hubble-sum-row strong {
+          color: #1a153b !important;
+        }
+
+        body.light-theme .hubble-sim-phone {
+          background: #ffffff !important;
+          border: 12px solid #1a153b !important;
+          box-shadow: 0 25px 60px rgba(0, 0, 0, 0.15) !important;
+        }
+
+        body.light-theme .hubble-sim-header {
+          border-bottom-color: rgba(100, 100, 100, 0.08) !important;
+        }
+
+        body.light-theme .hubble-sim-header strong {
+          color: #1a153b !important;
+        }
+
+        body.light-theme .hubble-sim-header span {
+          color: #6b7280 !important;
+        }
+
+        body.light-theme .hubble-sim-caption {
+          color: #1a153b !important;
+        }
+
+        body.light-theme .hubble-sim-footer {
+          border-top-color: rgba(100, 100, 100, 0.08) !important;
+          color: #6b7280 !important;
+        }
+
+        body.light-theme .hubble-format-bar button {
+          color: #6b7280 !important;
+        }
+
+        body.light-theme .hubble-format-bar button:hover {
+          color: #6C3BFF !important;
+          background: rgba(108, 59, 255, 0.08) !important;
+        }
+
+        body.light-theme .hubble-composer-footer .hubble-quick-btn {
+          color: #6b7280 !important;
+          background: rgba(108, 59, 255, 0.03) !important;
+          border: 1px solid rgba(108, 59, 255, 0.08) !important;
+        }
+
+        body.light-theme .hubble-composer-footer .hubble-quick-btn:hover {
+          color: #6C3BFF !important;
+          background: rgba(108, 59, 255, 0.08) !important;
+          border-color: rgba(108, 59, 255, 0.2) !important;
+        }
+
+        body.light-theme .hubble-drafts-empty {
+          color: rgba(0, 0, 0, 0.35) !important;
+        }
+
+        body.light-theme .hubble-mediastudio-properties-bottom {
+          background: #ffffff !important;
+          border: 1px solid rgba(108, 59, 255, 0.12) !important;
+          box-shadow: 0 4px 15px rgba(108, 59, 255, 0.03) !important;
+        }
+
+        body.light-theme .hubble-mediastudio-properties-bottom span,
+        body.light-theme .hubble-mediastudio-properties-bottom div {
+          color: #1a153b !important;
+        }
+
+        body.light-theme .hubble-mediastudio-tools-bottom {
+          background: rgba(108, 59, 255, 0.03) !important;
+          border: 1px solid rgba(108, 59, 255, 0.08) !important;
+        }
+
+        body.light-theme .hubble-mediastudio-tools-bottom button {
+          color: #1a153b !important;
+          background: transparent !important;
+          border: none !important;
+        }
+
+        body.light-theme .hubble-mediastudio-tools-bottom button.active {
+          background: rgba(108, 59, 255, 0.08) !important;
+          border: 1px solid rgba(108, 59, 255, 0.25) !important;
+          color: #6C3BFF !important;
+        }
+
+        body.light-theme .hubble-slider {
+          background: rgba(108, 59, 255, 0.15) !important;
+        }
+
+        body.light-theme .hubble-mediastudio-bottom-strip {
+          background: rgba(108, 59, 255, 0.02) !important;
+          border: 1px solid rgba(108, 59, 255, 0.08) !important;
+        }
+
+        body.light-theme .hubble-add-thumbnail-btn {
+          background: rgba(108, 59, 255, 0.04) !important;
+          border: 1px dashed rgba(108, 59, 255, 0.25) !important;
+          color: #6C3BFF !important;
+        }
+
+        body.light-theme .hubble-add-thumbnail-btn:hover {
+          background: rgba(108, 59, 255, 0.08) !important;
+        }
       `}</style>
 
       {/* CENTER WORKSPACE COLUMN - 68% Wide */}
@@ -3905,19 +5473,7 @@ const CreatePost = ({ onNavigateBack }) => {
               <ChevronRight size={12} className="chevron" />
             </button>
 
-            <button 
-              onClick={() => setWorkspaceMode(workspaceMode === 'topics' ? 'editor' : 'topics')}
-              className={`hubble-tool-row-btn ${workspaceMode === 'topics' ? 'active' : ''}`}
-            >
-              <div className="hubble-tool-content-group">
-                <div className="hubble-tool-icon-box green"><Hash size={12} /></div>
-                <div className="hubble-tool-text">
-                  <strong>Topics</strong>
-                  <p>Add topics or hashtags</p>
-                </div>
-              </div>
-              <ChevronRight size={12} className="chevron" />
-            </button>
+
 
 
 

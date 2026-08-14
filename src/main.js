@@ -4,149 +4,211 @@ import CreatePost from './pages/CreatePost/CreatePost.jsx';
 import { initVideoEditor } from './video_editor_controller.js';
 import './style.css'
 
+// --- POST MUSIC PLAYBACK CONTROLLER ---
+const getPostMusicUrl = (post) => {
+  if (!post || !post.caption) return null;
+  const match = post.caption.match(/data-music-url="([^"]+)"/);
+  return match ? match[1] : null;
+};
+
+window.togglePostMusic = (btn, musicUrl, postId) => {
+  const card = document.getElementById('post-' + postId);
+  if (!card) return;
+
+  if (!card._audio) {
+    card._audio = new Audio(musicUrl);
+    card._audio.loop = true;
+    card._audio.volume = 0.5;
+  }
+
+  const audio = card._audio;
+  const vinyl = card.querySelector('.music-vinyl-disc');
+
+  if (audio.paused) {
+    // Stop all other playing audios
+    document.querySelectorAll('.feed-card').forEach(otherCard => {
+      if (otherCard !== card && otherCard._audio && !otherCard._audio.paused) {
+        otherCard._audio.pause();
+        const otherVinyl = otherCard.querySelector('.music-vinyl-disc');
+        if (otherVinyl) otherVinyl.style.animationPlayState = 'paused';
+        const otherBtn = otherCard.querySelector('.post-music-speaker-btn');
+        if (otherBtn) {
+          otherBtn.innerHTML = `
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block;"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="22" x2="16" y1="9" y2="15"/><line x1="16" x2="22" y1="9" y2="15"/></svg>
+          `;
+        }
+      }
+    });
+
+    audio.play().catch(err => console.warn('Audio play error:', err.message));
+    if (vinyl) {
+      vinyl.style.animationPlayState = 'running';
+      vinyl.style.animation = 'spin 4s linear infinite';
+    }
+    btn.innerHTML = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block;"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+    `;
+  } else {
+    audio.pause();
+    if (vinyl) vinyl.style.animationPlayState = 'paused';
+    btn.innerHTML = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block;"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="22" x2="16" y1="9" y2="15"/><line x1="16" x2="22" y1="9" y2="15"/></svg>
+    `;
+  }
+};
+
+window.stopAllPostMusic = () => {
+  document.querySelectorAll('.feed-card').forEach(card => {
+    if (card._audio) {
+      card._audio.pause();
+      card._audio = null;
+    }
+  });
+};
+
 // --- INDEXEDDB DRAFTS WRAPPER ---
-  const DraftsDB = {
-    dbName: 'HiHubbleDrafts',
-    dbVersion: 1,
-    storeName: 'drafts',
-    init() {
-      return new Promise((resolve, reject) => {
-        const request = indexedDB.open(this.dbName, this.dbVersion);
-        request.onupgradeneeded = (e) => {
-          const db = e.target.result;
-          if (!db.objectStoreNames.contains(this.storeName)) {
-            db.createObjectStore(this.storeName, { keyPath: 'id' });
-          }
-        };
-        request.onsuccess = (e) => resolve(e.target.result);
-        request.onerror = (e) => reject(e.target.error);
-      });
-    },
-    async saveDraft(draft) {
-      const db = await this.init();
-      return new Promise((resolve, reject) => {
-        const tx = db.transaction(this.storeName, 'readwrite');
-        const store = tx.objectStore(this.storeName);
-        draft.lastModified = Date.now();
-        if (!draft.id) draft.id = 'draft_' + Date.now();
-        if (!draft.createdAt) draft.createdAt = Date.now();
-        const request = store.put(draft);
-        request.onsuccess = () => resolve(draft);
-        request.onerror = () => reject(request.error);
-      });
-    },
-    async getDrafts() {
-      const db = await this.init();
-      return new Promise((resolve, reject) => {
-        const tx = db.transaction(this.storeName, 'readonly');
-        const store = tx.objectStore(this.storeName);
-        const request = store.getAll();
-        request.onsuccess = () => resolve(request.result.sort((a,b) => b.lastModified - a.lastModified));
-        request.onerror = () => reject(request.error);
-      });
-    },
-    async deleteDraft(id) {
-      const db = await this.init();
-      return new Promise((resolve, reject) => {
-        const tx = db.transaction(this.storeName, 'readwrite');
-        const store = tx.objectStore(this.storeName);
-        const request = store.delete(id);
-        request.onsuccess = () => resolve();
-        request.onerror = () => reject(request.error);
-      });
-    }
-  };
-  window.DraftsDB = DraftsDB;
+const DraftsDB = {
+  dbName: 'HiHubbleDrafts',
+  dbVersion: 1,
+  storeName: 'drafts',
+  init() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(this.dbName, this.dbVersion);
+      request.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains(this.storeName)) {
+          db.createObjectStore(this.storeName, { keyPath: 'id' });
+        }
+      };
+      request.onsuccess = (e) => resolve(e.target.result);
+      request.onerror = (e) => reject(e.target.error);
+    });
+  },
+  async saveDraft(draft) {
+    const db = await this.init();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(this.storeName, 'readwrite');
+      const store = tx.objectStore(this.storeName);
+      draft.lastModified = Date.now();
+      if (!draft.id) draft.id = 'draft_' + Date.now();
+      if (!draft.createdAt) draft.createdAt = Date.now();
+      const request = store.put(draft);
+      request.onsuccess = () => resolve(draft);
+      request.onerror = () => reject(request.error);
+    });
+  },
+  async getDrafts() {
+    const db = await this.init();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(this.storeName, 'readonly');
+      const store = tx.objectStore(this.storeName);
+      const request = store.getAll();
+      request.onsuccess = () => resolve(request.result.sort((a, b) => b.lastModified - a.lastModified));
+      request.onerror = () => reject(request.error);
+    });
+  },
+  async deleteDraft(id) {
+    const db = await this.init();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(this.storeName, 'readwrite');
+      const store = tx.objectStore(this.storeName);
+      const request = store.delete(id);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+};
+window.DraftsDB = DraftsDB;
 
-  // --- SAVE DRAFT ACTION ---
-  window.saveCurrentDraft = async function() {
-    if (!window.chUploads || window.chUploads.length === 0) {
-      showToast('Please upload media first');
-      return;
-    }
-    const media = window.chUploads[0];
-    
-    // We must read the file into a base64 string or blob to store in IndexedDB.
-    // IndexedDB can store Blobs natively!
-    const draft = {
-      mediaFile: media.file,
-      mediaType: media.type,
-      mediaThumbUrl: media.thumbUrl,
-      editorState: JSON.parse(JSON.stringify(window.HubbleEditor.state)),
-      caption: document.querySelector('.ch-caption-input')?.value || '',
-      collaborationEnabled: window.collaborationEnabled !== false,
-      collaborators: window.selectedCollaborators ? JSON.parse(JSON.stringify(window.selectedCollaborators)) : [],
-      scheduleEnabled: document.getElementById('ch-schedule-toggle')?.checked || false,
-      scheduleDate: document.getElementById('ch-schedule-date')?.value || '',
-      scheduleTime: document.getElementById('ch-schedule-time')?.value || ''
-    };
-    
-    // Check if we are editing an existing draft
-    if (window.currentDraftId) {
-      draft.id = window.currentDraftId;
-      draft.createdAt = window.currentDraftCreatedAt;
-    }
-    
-    try {
-      await DraftsDB.saveDraft(draft);
-      if (!window._silentDraftSave) {
-        showToast('Saved as draft! 📝');
-      }
-      window._silentDraftSave = false;
-      window.renderDraftsList();
-    } catch(err) {
-      console.error(err);
-      if (!window._silentDraftSave) {
-        showToast('Failed to save draft');
-      }
-      window._silentDraftSave = false;
-    }
+// --- SAVE DRAFT ACTION ---
+window.saveCurrentDraft = async function () {
+  if (!window.chUploads || window.chUploads.length === 0) {
+    showToast('Please upload media first');
+    return;
+  }
+  const media = window.chUploads[0];
+
+  // We must read the file into a base64 string or blob to store in IndexedDB.
+  // IndexedDB can store Blobs natively!
+  const draft = {
+    mediaFile: media.file,
+    mediaType: media.type,
+    mediaThumbUrl: media.thumbUrl,
+    editorState: JSON.parse(JSON.stringify(window.HubbleEditor.state)),
+    caption: document.querySelector('.ch-caption-input')?.value || '',
+    collaborationEnabled: window.collaborationEnabled !== false,
+    collaborators: window.selectedCollaborators ? JSON.parse(JSON.stringify(window.selectedCollaborators)) : [],
+    scheduleEnabled: document.getElementById('ch-schedule-toggle')?.checked || false,
+    scheduleDate: document.getElementById('ch-schedule-date')?.value || '',
+    scheduleTime: document.getElementById('ch-schedule-time')?.value || ''
   };
 
-  window.renderDraftsList = async function() {
-    const list = document.getElementById('ch-drafts-list');
-    const hddList = document.getElementById('hdd-list');
-    const countLabel = document.getElementById('drafts-count');
-    const emptyState = document.getElementById('drafts-empty-state');
-    const hddEmptyState = document.getElementById('hdd-empty-state');
-    const seeAllBtn = document.getElementById('see-all-drafts-btn');
-    
-    const drafts = await DraftsDB.getDrafts();
-    if (countLabel) countLabel.innerText = drafts.length;
-    
-    // Clear both lists (except empty states)
-    if (list) {
-      Array.from(list.children).forEach(child => {
-        if (child.id !== 'drafts-empty-state') child.remove();
-      });
-    }
-    if (hddList) {
-      Array.from(hddList.children).forEach(child => {
-        if (child.id !== 'hdd-empty-state') child.remove();
-      });
-    }
+  // Check if we are editing an existing draft
+  if (window.currentDraftId) {
+    draft.id = window.currentDraftId;
+    draft.createdAt = window.currentDraftCreatedAt;
+  }
 
-    if (drafts.length === 0) {
-      if (emptyState) emptyState.style.display = 'flex';
-      if (hddEmptyState) hddEmptyState.style.display = 'flex';
-      if (seeAllBtn) seeAllBtn.style.display = 'none';
-    } else {
-      if (emptyState) emptyState.style.display = 'none';
-      if (hddEmptyState) hddEmptyState.style.display = 'none';
-      if (seeAllBtn) seeAllBtn.style.display = 'block';
-      
-      drafts.slice(0, 3).forEach(d => {
-        const timeAgo = Math.round((Date.now() - d.lastModified) / 60000); // mins
-        const timeStr = timeAgo < 60 ? `${timeAgo}m ago` : `${Math.round(timeAgo/60)}h ago`;
-        const title = d.caption || 'Untitled HUBB';
-        const imgUrl = d.mediaThumbUrl || URL.createObjectURL(d.mediaFile);
-        
-        // Share HUBBs Panel Item
-        if (list) {
-          const item = document.createElement('div');
-          item.className = 'ch-draft-item';
-          item.style.cssText = 'display:flex; justify-content:space-between; align-items:center; background: rgba(255,255,255,0.03); padding: 8px; border-radius: 12px; transition: all 0.2s ease;';
-          item.innerHTML = `
+  try {
+    await DraftsDB.saveDraft(draft);
+    if (!window._silentDraftSave) {
+      showToast('Saved as draft! 📝');
+    }
+    window._silentDraftSave = false;
+    window.renderDraftsList();
+  } catch (err) {
+    console.error(err);
+    if (!window._silentDraftSave) {
+      showToast('Failed to save draft');
+    }
+    window._silentDraftSave = false;
+  }
+};
+
+window.renderDraftsList = async function () {
+  const list = document.getElementById('ch-drafts-list');
+  const hddList = document.getElementById('hdd-list');
+  const countLabel = document.getElementById('drafts-count');
+  const emptyState = document.getElementById('drafts-empty-state');
+  const hddEmptyState = document.getElementById('hdd-empty-state');
+  const seeAllBtn = document.getElementById('see-all-drafts-btn');
+
+  const drafts = await DraftsDB.getDrafts();
+  if (countLabel) countLabel.innerText = drafts.length;
+
+  // Clear both lists (except empty states)
+  if (list) {
+    Array.from(list.children).forEach(child => {
+      if (child.id !== 'drafts-empty-state') child.remove();
+    });
+  }
+  if (hddList) {
+    Array.from(hddList.children).forEach(child => {
+      if (child.id !== 'hdd-empty-state') child.remove();
+    });
+  }
+
+  if (drafts.length === 0) {
+    if (emptyState) emptyState.style.display = 'flex';
+    if (hddEmptyState) hddEmptyState.style.display = 'flex';
+    if (seeAllBtn) seeAllBtn.style.display = 'none';
+  } else {
+    if (emptyState) emptyState.style.display = 'none';
+    if (hddEmptyState) hddEmptyState.style.display = 'none';
+    if (seeAllBtn) seeAllBtn.style.display = 'block';
+
+    drafts.slice(0, 3).forEach(d => {
+      const timeAgo = Math.round((Date.now() - d.lastModified) / 60000); // mins
+      const timeStr = timeAgo < 60 ? `${timeAgo}m ago` : `${Math.round(timeAgo / 60)}h ago`;
+      const title = d.caption || 'Untitled HUBB';
+      const imgUrl = d.mediaThumbUrl || URL.createObjectURL(d.mediaFile);
+
+      // Share HUBBs Panel Item
+      if (list) {
+        const item = document.createElement('div');
+        item.className = 'ch-draft-item';
+        item.style.cssText = 'display:flex; justify-content:space-between; align-items:center; background: rgba(255,255,255,0.03); padding: 8px; border-radius: 12px; transition: all 0.2s ease;';
+        item.innerHTML = `
             <div style="display:flex; gap:10px; align-items:center; cursor:pointer;" onclick="window.loadDraft('${d.id}')">
               <img src="${imgUrl}" style="width:40px; height:40px; border-radius:8px; object-fit:contain; object-position:center;" alt="Draft">
               <div class="ch-draft-info">
@@ -159,23 +221,23 @@ import './style.css'
               <button onclick="window.deleteDraft('${d.id}')" style="background:transparent; border:none; color: #ef4444; padding:4px; cursor:pointer; opacity: 0.6; transition: opacity 0.2s;"><i data-lucide="trash-2" style="width:14px; height:14px;"></i></button>
             </div>
           `;
-          list.appendChild(item);
-        }
+        list.appendChild(item);
+      }
 
-        // Home Dropdown Panel Item
-        if (hddList) {
-          const hItem = document.createElement('div');
-          hItem.className = 'ch-draft-item';
-          hItem.style.cssText = 'display:flex; justify-content:space-between; align-items:center; background: rgba(255,255,255,0.03); padding: 8px; border-radius: 12px; margin-bottom: 8px; cursor: pointer; transition: all 0.2s ease; border: 1px solid transparent;';
-          hItem.onclick = (e) => {
-            if (e.target.closest('button')) return; // Don't trigger load if clicking delete/duplicate
-            document.getElementById('home-drafts-panel')?.classList.remove('open');
-            window.loadDraft(d.id);
-          };
-          hItem.onmouseover = () => { hItem.style.transform = 'translateY(-2px)'; hItem.style.background = 'rgba(255,255,255,0.08)'; hItem.style.borderColor = 'rgba(168, 85, 247, 0.3)'; };
-          hItem.onmouseout = () => { hItem.style.transform = 'none'; hItem.style.background = 'rgba(255,255,255,0.03)'; hItem.style.borderColor = 'transparent'; };
-          const mediaCount = window.chUploads ? window.chUploads.length : 1;
-          hItem.innerHTML = `
+      // Home Dropdown Panel Item
+      if (hddList) {
+        const hItem = document.createElement('div');
+        hItem.className = 'ch-draft-item';
+        hItem.style.cssText = 'display:flex; justify-content:space-between; align-items:center; background: rgba(255,255,255,0.03); padding: 8px; border-radius: 12px; margin-bottom: 8px; cursor: pointer; transition: all 0.2s ease; border: 1px solid transparent;';
+        hItem.onclick = (e) => {
+          if (e.target.closest('button')) return; // Don't trigger load if clicking delete/duplicate
+          document.getElementById('home-drafts-panel')?.classList.remove('open');
+          window.loadDraft(d.id);
+        };
+        hItem.onmouseover = () => { hItem.style.transform = 'translateY(-2px)'; hItem.style.background = 'rgba(255,255,255,0.08)'; hItem.style.borderColor = 'rgba(168, 85, 247, 0.3)'; };
+        hItem.onmouseout = () => { hItem.style.transform = 'none'; hItem.style.background = 'rgba(255,255,255,0.03)'; hItem.style.borderColor = 'transparent'; };
+        const mediaCount = window.chUploads ? window.chUploads.length : 1;
+        hItem.innerHTML = `
             <div style="display:flex; gap:12px; align-items:center;">
               <div style="position: relative;">
                 <img src="${imgUrl}" style="width:48px; height:48px; border-radius:10px; object-fit:cover; object-position:center; box-shadow: 0 4px 12px rgba(0,0,0,0.3);" alt="Draft">
@@ -193,141 +255,142 @@ import './style.css'
               <button onclick="window.deleteDraft('${d.id}')" style="background:transparent; border:none; color: #ef4444; padding:8px; cursor:pointer; opacity: 0.8; transition: transform 0.2s;"><i data-lucide="trash-2" style="width:16px; height:16px;"></i></button>
             </div>
           `;
-          hddList.appendChild(hItem);
-        }
-      });
-      if (window.lucide) window.lucide.createIcons();
-    }
-  };
+        hddList.appendChild(hItem);
+      }
+    });
+    if (window.lucide) window.lucide.createIcons();
+  }
+};
 
-  window.loadDraft = async function(id) {
-    const drafts = await DraftsDB.getDrafts();
-    const d = drafts.find(x => x.id === id);
-    if(!d) return;
-    
-    // Restore variables
-    window.chUploads = [{
-      file: d.mediaFile,
-      type: d.mediaType,
-      thumbUrl: d.mediaThumbUrl || URL.createObjectURL(d.mediaFile)
-    }];
-    
-    window.currentDraftId = d.id;
-    window.currentDraftCreatedAt = d.createdAt;
-    
-    if (d.editorState) window.HubbleEditor.state = JSON.parse(JSON.stringify(d.editorState));
-    
-    const captionInput = document.querySelector('.ch-caption-input');
-    if (captionInput) captionInput.value = d.caption || '';
-    
-    // Switch view to editor
-    if (window.switchView) window.switchView('create-hubbs');
-    window.initCreateHubbsUpload();
-    
-    // Restore collaborators
-    window.collaborationEnabled = d.collaborationEnabled !== false;
-    const toggleEl = document.getElementById('ch-collab-toggle');
-    if (toggleEl) {
-      toggleEl.checked = window.collaborationEnabled;
-      if (window.toggleCollaboration) window.toggleCollaboration(window.collaborationEnabled);
-    }
-    
-    window.selectedCollaborators = d.collaborators || [];
-    if (window.renderCollaboratorChips) window.renderCollaboratorChips();
-    
-    // Restore scheduling
-    const schedToggle = document.getElementById('ch-schedule-toggle');
-    if (schedToggle) {
-      schedToggle.checked = d.scheduleEnabled === true;
-      if (window.toggleScheduling) window.toggleScheduling(schedToggle.checked);
-    }
-    const schedDate = document.getElementById('ch-schedule-date');
-    if (schedDate) schedDate.value = d.scheduleDate || '';
-    const schedTime = document.getElementById('ch-schedule-time');
-    if (schedTime) schedTime.value = d.scheduleTime || '';
-  };
+window.loadDraft = async function (id) {
+  const drafts = await DraftsDB.getDrafts();
+  const d = drafts.find(x => x.id === id);
+  if (!d) return;
 
-  window.deleteDraft = async function(id) {
-    if(confirm('Delete this draft?')) {
-      await DraftsDB.deleteDraft(id);
-      window.renderDraftsList();
-    }
-  };
-  
-  window.duplicateDraft = async function(id) {
-    const drafts = await DraftsDB.getDrafts();
-    const d = drafts.find(x => x.id === id);
-    if(!d) return;
-    
-    const clone = { ...d, id: undefined, createdAt: undefined };
-    await DraftsDB.saveDraft(clone);
+  // Restore variables
+  window.chUploads = [{
+    file: d.mediaFile,
+    type: d.mediaType,
+    thumbUrl: d.mediaThumbUrl || URL.createObjectURL(d.mediaFile)
+  }];
+
+  window.currentDraftId = d.id;
+  window.currentDraftCreatedAt = d.createdAt;
+
+  if (d.editorState) window.HubbleEditor.state = JSON.parse(JSON.stringify(d.editorState));
+
+  const captionInput = document.querySelector('.ch-caption-input');
+  if (captionInput) captionInput.value = d.caption || '';
+
+  // Switch view to editor
+  if (window.switchView) window.switchView('create-hubbs');
+  window.initCreateHubbsUpload();
+
+  // Restore collaborators
+  window.collaborationEnabled = d.collaborationEnabled !== false;
+  const toggleEl = document.getElementById('ch-collab-toggle');
+  if (toggleEl) {
+    toggleEl.checked = window.collaborationEnabled;
+    if (window.toggleCollaboration) window.toggleCollaboration(window.collaborationEnabled);
+  }
+
+  window.selectedCollaborators = d.collaborators || [];
+  if (window.renderCollaboratorChips) window.renderCollaboratorChips();
+
+  // Restore scheduling
+  const schedToggle = document.getElementById('ch-schedule-toggle');
+  if (schedToggle) {
+    schedToggle.checked = d.scheduleEnabled === true;
+    if (window.toggleScheduling) window.toggleScheduling(schedToggle.checked);
+  }
+  const schedDate = document.getElementById('ch-schedule-date');
+  if (schedDate) schedDate.value = d.scheduleDate || '';
+  const schedTime = document.getElementById('ch-schedule-time');
+  if (schedTime) schedTime.value = d.scheduleTime || '';
+};
+
+window.deleteDraft = async function (id) {
+  if (confirm('Delete this draft?')) {
+    await DraftsDB.deleteDraft(id);
     window.renderDraftsList();
-  };
+  }
+};
 
-  // --- AUTO SAVE DEBOUNCE ---
-  let autoSaveTimeout = null;
-  window.triggerAutoSave = function() {
-    const activeHubbsView = document.getElementById('view-create-hubbs');
-    const isActive = activeHubbsView && activeHubbsView.classList.contains('active');
-    if (isActive && window.chUploads && window.chUploads.length > 0) {
-      clearTimeout(autoSaveTimeout);
-      autoSaveTimeout = setTimeout(() => {
-        window._silentDraftSave = true;
-        if (window.saveCurrentDraft) window.saveCurrentDraft();
-      }, 3000);
+window.duplicateDraft = async function (id) {
+  const drafts = await DraftsDB.getDrafts();
+  const d = drafts.find(x => x.id === id);
+  if (!d) return;
+
+  const clone = { ...d, id: undefined, createdAt: undefined };
+  await DraftsDB.saveDraft(clone);
+  window.renderDraftsList();
+};
+
+// --- AUTO SAVE DEBOUNCE ---
+let autoSaveTimeout = null;
+window.triggerAutoSave = function () {
+  const activeHubbsView = document.getElementById('view-create-hubbs');
+  const isActive = activeHubbsView && activeHubbsView.classList.contains('active');
+  if (isActive && window.chUploads && window.chUploads.length > 0) {
+    clearTimeout(autoSaveTimeout);
+    autoSaveTimeout = setTimeout(() => {
+      window._silentDraftSave = true;
+      if (window.saveCurrentDraft) window.saveCurrentDraft();
+    }, 3000);
+  }
+};
+
+// Run on init
+document.addEventListener('DOMContentLoaded', () => {
+  document.addEventListener('input', (e) => {
+    if (e.target.closest('#view-create-hubbs') || e.target.closest('#view-review-hubbs')) {
+      window.triggerAutoSave();
     }
-  };
-
-  // Run on init
-  document.addEventListener('DOMContentLoaded', () => {
-    document.addEventListener('input', (e) => {
-      if (e.target.closest('#view-create-hubbs') || e.target.closest('#view-review-hubbs')) {
-        window.triggerAutoSave();
-      }
-    });
-    document.addEventListener('change', (e) => {
-      if (e.target.closest('#view-create-hubbs') || e.target.closest('#view-review-hubbs')) {
-        window.triggerAutoSave();
-      }
-    });
-    window.addEventListener('beforeunload', (e) => {
-      if (state.activeView === 'create-hubbs' && window.chUploads && window.chUploads.length > 0) {
-        window._silentDraftSave = true;
-        if (window.saveCurrentDraft) window.saveCurrentDraft();
-      }
-    });
-
-    setTimeout(() => {
-      window.renderDraftsList();
-    }, 500);
-
-    // Setup Home Drafts Bubble Toggle
-    const draftsBtn = document.getElementById('story-drafts-container');
-    const draftsPanel = document.getElementById('home-drafts-panel');
-    const closeBtn = document.getElementById('close-hdd-btn');
-    if (draftsBtn && draftsPanel) {
-      draftsBtn.addEventListener('click', (e) => {
-        // Prevent toggling if clicking inside the panel
-        if (e.target.closest('#home-drafts-panel')) return;
-        draftsPanel.classList.toggle('open');
-      });
+  });
+  document.addEventListener('change', (e) => {
+    if (e.target.closest('#view-create-hubbs') || e.target.closest('#view-review-hubbs')) {
+      window.triggerAutoSave();
     }
-    if (closeBtn) {
-      closeBtn.addEventListener('click', (e) => {
-        e.stopPropagation(); // prevent bubbling to container
-        if(draftsPanel) draftsPanel.classList.remove('open');
-      });
+  });
+  window.addEventListener('beforeunload', (e) => {
+    if (state.activeView === 'create-hubbs' && window.chUploads && window.chUploads.length > 0) {
+      window._silentDraftSave = true;
+      if (window.saveCurrentDraft) window.saveCurrentDraft();
     }
-    // Close dropdown when clicking outside
-    document.addEventListener('click', (e) => {
-      if (draftsBtn && !draftsBtn.contains(e.target)) {
-        draftsPanel.classList.remove('open');
-      }
-    });
   });
 
-  import './auth.css'
+  setTimeout(() => {
+    window.renderDraftsList();
+  }, 500);
+
+  // Setup Home Drafts Bubble Toggle
+  const draftsBtn = document.getElementById('story-drafts-container');
+  const draftsPanel = document.getElementById('home-drafts-panel');
+  const closeBtn = document.getElementById('close-hdd-btn');
+  if (draftsBtn && draftsPanel) {
+    draftsBtn.addEventListener('click', (e) => {
+      // Prevent toggling if clicking inside the panel
+      if (e.target.closest('#home-drafts-panel')) return;
+      draftsPanel.classList.toggle('open');
+    });
+  }
+  if (closeBtn) {
+    closeBtn.addEventListener('click', (e) => {
+      e.stopPropagation(); // prevent bubbling to container
+      if (draftsPanel) draftsPanel.classList.remove('open');
+    });
+  }
+  // Close dropdown when clicking outside
+  document.addEventListener('click', (e) => {
+    if (draftsBtn && !draftsBtn.contains(e.target)) {
+      draftsPanel.classList.remove('open');
+    }
+  });
+});
+
+import './auth.css'
 import { initAuth, updateAppUI, handleLogout, supabase } from './auth.js'
+window.supabase = supabase;
 
 document.addEventListener('DOMContentLoaded', () => {
   const API_URL = (
@@ -519,12 +582,17 @@ document.addEventListener('DOMContentLoaded', () => {
   // --- TOAST HELPER ---
   const toast = document.getElementById('toast-notif');
   function showToast(message) {
-    toast.textContent = message;
-    toast.classList.add('active');
-    setTimeout(() => {
-      toast.classList.remove('active');
-    }, 2500);
+    if (toast) {
+      toast.textContent = message;
+      toast.classList.add('active');
+      setTimeout(() => {
+        toast.classList.remove('active');
+      }, 2500);
+    } else {
+      console.log('[TOAST NOTIFICATION]', message);
+    }
   }
+  window.showToast = showToast;
 
   // --- VIEW SWITCHING MANAGER (SPACIOUS CONGESTION FIX) ---
   const viewPanels = document.querySelectorAll('.view-panel');
@@ -552,6 +620,10 @@ document.addEventListener('DOMContentLoaded', () => {
   function switchView(viewName, userId) {
     if (!viewName) return;
 
+    if (typeof window.stopAllPostMusic === 'function') {
+      window.stopAllPostMusic();
+    }
+
     if (viewName === 'create-post') {
       document.body.classList.add('create-post-view-active');
       mountCreatePost();
@@ -559,7 +631,19 @@ document.addEventListener('DOMContentLoaded', () => {
       document.body.classList.remove('create-post-view-active');
     }
 
-    if (state.activeView === 'create-hubbs' && viewName !== 'create-hubbs' && window.chUploads && window.chUploads.length > 0) {
+    if (viewName === 'create-hubbs') {
+      document.body.classList.add('create-hubbs-view-active');
+    } else {
+      document.body.classList.remove('create-hubbs-view-active');
+    }
+
+    if (viewName === 'review-hubbs') {
+      document.body.classList.add('review-hubbs-view-active');
+    } else {
+      document.body.classList.remove('review-hubbs-view-active');
+    }
+
+    if (state.activeView === 'create-hubbs' && viewName !== 'create-hubbs' && viewName !== 'review-hubbs' && window.chUploads && window.chUploads.length > 0) {
       window._silentDraftSave = true;
       if (window.saveCurrentDraft) window.saveCurrentDraft();
     }
@@ -573,7 +657,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
           const currentUser = JSON.parse(currentUserStr);
           targetId = currentUser.id || currentUser._id || currentUser.username;
-        } catch (_) {}
+        } catch (_) { }
       }
       loadUserProfile(targetId || 'me');
     }
@@ -582,19 +666,57 @@ document.addEventListener('DOMContentLoaded', () => {
     document.body.classList.remove('chats-view-active');
     if (viewName === 'chats') {
       if (appContainer) appContainer.classList.remove('chatting');
-      state.currentChatThread = null;
       const emptyState = document.getElementById('chat-empty-state');
       const chatHeader = document.getElementById('chat-window-header');
       const chatViewport = document.querySelector('.chat-dynamic-viewport');
       const chatFooter = document.getElementById('chat-global-footer');
-      if (emptyState) emptyState.style.display = 'flex';
-      if (chatHeader) chatHeader.style.display = 'none';
-      if (chatViewport) chatViewport.style.display = 'none';
-      if (chatFooter) chatFooter.style.display = 'none';
+
+      if (userId) {
+        state.currentChatThread = userId;
+        if (emptyState) emptyState.style.display = 'none';
+        if (chatHeader) chatHeader.style.display = '';
+        if (chatViewport) chatViewport.style.display = '';
+        if (chatFooter) chatFooter.style.display = '';
+
+        const token = localStorage.getItem('invibe_jwt_token');
+        if (token) {
+          fetch(`${API_URL}/api/chats/direct/${userId}`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` }
+          }).then(r => r.json()).then(data => {
+            if (data && data.targetUser) {
+              const u = data.targetUser;
+              if (chatHeaderName) chatHeaderName.textContent = u.fullName;
+              if (chatHeaderAvatar) chatHeaderAvatar.src = u.profileImage || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&h=150&q=80';
+            }
+          }).catch(() => {});
+        }
+
+        fetchMessages(userId, true);
+        loadChatThreads();
+      } else {
+        state.currentChatThread = null;
+        if (emptyState) emptyState.style.display = 'flex';
+        if (chatHeader) chatHeader.style.display = 'none';
+        if (chatViewport) chatViewport.style.display = 'none';
+        if (chatFooter) chatFooter.style.display = 'none';
+        loadChatThreads();
+      }
     }
 
-    // Update active view panels
-    viewPanels.forEach(panel => {
+    if (viewName === 'search' && typeof initSearchView === 'function') {
+      initSearchView();
+    }
+    if ((viewName === 'reels' || viewName === 'explore') && typeof loadFeedReels === 'function') {
+      loadFeedReels();
+    }
+    if ((viewName === 'chat' || viewName === 'messages') && typeof loadChatThreads === 'function') {
+      loadChatThreads();
+    }
+
+    // Update active view panels dynamically
+    const currentViewPanels = document.querySelectorAll('.view-panel');
+    currentViewPanels.forEach(panel => {
       if (panel.id === `view-${viewName}`) {
         panel.classList.add('active');
       } else {
@@ -649,6 +771,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Close radial menu after selection
     closeRadialMenu();
   }
+
+  window.switchView = switchView;
 
   // Bind view selectors
   sidebarNavItems.forEach(item => {
@@ -1086,9 +1210,10 @@ document.addEventListener('DOMContentLoaded', () => {
       if (tabName === 'reels') {
         exploreReelsContainer.classList.add('active');
         explorePostsContainer.classList.remove('active');
+        if (typeof loadFeedReels === 'function') loadFeedReels();
         // Autoplay first reel
         const firstVideo = exploreReelsContainer.querySelector('.reel-video');
-        if (firstVideo) firstVideo.play();
+        if (firstVideo) firstVideo.play().catch(() => { });
       } else {
         exploreReelsContainer.classList.remove('active');
         explorePostsContainer.classList.add('active');
@@ -1102,6 +1227,117 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // --- GLOBAL FEED ACTIONS DELEGATION ---
   document.addEventListener('click', async (e) => {
+    // Post Options (...)
+    const optionsBtn = e.target.closest('.post-options-btn');
+    if (optionsBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const postId = optionsBtn.getAttribute('data-post-id');
+      const authorId = optionsBtn.getAttribute('data-author-id');
+      const currentUserStr = localStorage.getItem('invibe_user') || localStorage.getItem('invibeUser');
+      const currentUser = currentUserStr ? JSON.parse(currentUserStr) : null;
+      const currentUserId = currentUser ? (currentUser.id || currentUser._id || currentUser.user_id || currentUser.userId) : null;
+
+      const isAlreadyOpen = optionsBtn.parentElement.querySelector('.post-options-dropdown');
+      document.querySelectorAll('.post-options-dropdown').forEach(d => d.remove());
+      if (isAlreadyOpen) return;
+
+      const isAuthor = !authorId || !currentUserId || String(authorId) === String(currentUserId) || (authorId === 'usr_unknown');
+
+      const dropdown = document.createElement('div');
+      dropdown.className = 'post-options-dropdown';
+
+      let optionsHTML = '';
+      if (isAuthor) {
+        optionsHTML += `
+          <button type="button" class="delete-post-action" data-post-id="${postId}">
+            <i data-lucide="trash-2" style="width: 14px; height: 14px;"></i> Delete Post
+          </button>
+        `;
+      }
+      optionsHTML += `
+        <button type="button" class="option-item-action copy-post-link-action" data-post-id="${postId}">
+          <i data-lucide="link" style="width: 14px; height: 14px;"></i> Copy Link
+        </button>
+      `;
+
+      dropdown.innerHTML = optionsHTML;
+      optionsBtn.parentElement.style.position = 'relative';
+      optionsBtn.parentElement.appendChild(dropdown);
+      if (window.lucide) window.lucide.createIcons();
+      return;
+    }
+
+    // Copy Post Link action
+    const copyLinkBtn = e.target.closest('.copy-post-link-action');
+    if (copyLinkBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const postId = copyLinkBtn.getAttribute('data-post-id');
+      const postUrl = `${window.location.origin}/#post-${postId}`;
+      navigator.clipboard.writeText(postUrl);
+      const toast = document.getElementById('toast-notif');
+      if (toast) {
+        toast.textContent = 'Post link copied to clipboard!';
+        toast.classList.add('active');
+        setTimeout(() => toast.classList.remove('active'), 3000);
+      }
+      document.querySelectorAll('.post-options-dropdown').forEach(d => d.remove());
+      return;
+    }
+
+    // Delete Post Action
+    const deleteBtn = e.target.closest('.delete-post-action');
+    if (deleteBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const postId = deleteBtn.getAttribute('data-post-id');
+
+      if (confirm('Are you sure you want to delete this post? This cannot be undone.')) {
+        try {
+          const token = localStorage.getItem('invibe_jwt_token') || localStorage.getItem('invibeToken') || localStorage.getItem('token');
+          const res = await fetch(`${API_URL}/api/posts/${postId}`, {
+            method: 'DELETE',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            }
+          });
+          const data = await res.json();
+          if (res.ok && (data.success || res.status === 200)) {
+            const card = document.getElementById(`post-${postId}`) || deleteBtn.closest('.feed-card') || deleteBtn.closest('article');
+            if (card) {
+              card.style.transition = 'all 0.3s ease';
+              card.style.opacity = '0';
+              card.style.transform = 'scale(0.95)';
+              setTimeout(() => card.remove(), 300);
+            }
+
+            const toast = document.getElementById('toast-notif');
+            if (toast) {
+              toast.textContent = 'Post deleted successfully!';
+              toast.classList.add('active');
+              setTimeout(() => toast.classList.remove('active'), 3000);
+            }
+          } else {
+            alert(data.error || 'Failed to delete post.');
+          }
+        } catch (err) {
+          console.error('Error deleting post:', err);
+          alert('Error deleting post: ' + err.message);
+        }
+      }
+      document.querySelectorAll('.post-options-dropdown').forEach(d => d.remove());
+      return;
+    }
+
+
+    // Close dropdowns if clicking elsewhere
+    if (!e.target.closest('.post-options-dropdown')) {
+      document.querySelectorAll('.post-options-dropdown').forEach(d => d.remove());
+    }
+
     // Like button
     const likeBtn = e.target.closest('.like-btn-action');
     if (likeBtn) {
@@ -1174,7 +1410,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!state.storyGroups[groupIndex]) return;
     state.activeGroupIndex = groupIndex;
     state.activeStoryIndex = storyIndex;
-    storyViewer.classList.add('active');
+    if (storyViewer) {
+      storyViewer.style.display = 'flex';
+      storyViewer.classList.add('active');
+    }
     loadStoryContent(groupIndex, storyIndex);
   }
 
@@ -1209,10 +1448,32 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     const data = group.stories[storyIndex];
 
-    storyViewerAvatar.src = data.avatar;
-    storyViewerName.textContent = data.name;
-    storyViewerTime.textContent = data.time;
-    storyViewerImg.src = data.img;
+    if (storyViewerAvatar) storyViewerAvatar.src = data.avatar;
+    if (storyViewerName) storyViewerName.textContent = data.name;
+    if (storyViewerTime) {
+      storyViewerTime.textContent = formatStoryTime(data.createdAt || data.created_at || data.time);
+    }
+    if (storyViewerImg) {
+      storyViewerImg.src = data.img;
+      storyViewerImg.style.display = 'block';
+    }
+
+    const captionEl = document.getElementById('story-viewer-caption-text');
+    if (captionEl) {
+      captionEl.textContent = data.caption || '';
+      const capContainer = document.getElementById('story-viewer-caption-container');
+      if (capContainer) capContainer.style.display = (data.caption && data.caption.trim()) ? 'block' : 'none';
+    }
+
+    const mediaContainer = document.getElementById('story-viewer-media-container');
+    if (mediaContainer && data.img) {
+      const isVideo = data.mediaType ? data.mediaType.includes('video') : (typeof data.img === 'string' && (data.img.endsWith('.mp4') || data.img.startsWith('data:video')));
+      if (isVideo) {
+        mediaContainer.innerHTML = `<video src="${data.img}" autoplay controls style="max-width:100%; max-height:100%; object-fit:contain; border-radius:12px;"></video>`;
+      } else {
+        mediaContainer.innerHTML = `<img src="${data.img}" id="story-viewer-img" alt="Story content" style="max-width:100%; max-height:100%; object-fit:contain; border-radius:12px;">`;
+      }
+    }
 
     const currentUser = getCurrentUser();
     const currentUserId = currentUser ? (currentUser.id || currentUser._id) : null;
@@ -1222,7 +1483,17 @@ document.addEventListener('DOMContentLoaded', () => {
       storyViewerDelete.style.display = 'none';
     }
 
+    console.log(`[STAGE 5: renderStoryViewer / loadStoryContent()] Group: ${groupIndex}, Story: ${storyIndex} | StoryId: ${data._id} | isLiked: ${data.isLiked} | likesCount: ${data.likesCount} | time: ${formatStoryTime(data.createdAt || data.created_at)}`);
     updateStoryLikeUI(data.isLiked || false, data.likesCount || 0);
+
+    const storyReplyInput = document.getElementById('story-reply-input');
+    const storyShareBtn = document.getElementById('story-share-btn');
+    const storyReplySend = document.getElementById('story-reply-send');
+    const storyLikeCount = document.getElementById('story-like-count');
+    if (storyLikeCount) storyLikeCount.textContent = data.likesCount || 0;
+    if (storyReplyInput) storyReplyInput.style.display = 'block';
+    if (storyShareBtn) storyShareBtn.style.display = 'flex';
+    if (storyReplySend) storyReplySend.style.display = 'flex';
 
     storyProgressBars.innerHTML = '';
     for (let i = 0; i < group.stories.length; i++) {
@@ -1247,13 +1518,34 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function startStoryTimer() {
     if (state.storyProgressInterval) return;
-    
+
     const activeFill = storyProgressBars.children[state.activeStoryIndex]?.querySelector('.story-progress-bar-fill');
-    
+    let tickCount = 0;
+
     state.storyProgressInterval = setInterval(() => {
       if (state.isStoryPaused) return;
       state.storyProgressPercent += 0.4;
       if (activeFill) activeFill.style.width = `${state.storyProgressPercent}%`;
+
+      tickCount++;
+      // Live dynamic relative time update every 1 second (50 * 20ms = 1000ms)
+      if (tickCount % 50 === 0) {
+        const group = state.storyGroups?.[state.activeGroupIndex];
+        const data = group?.stories?.[state.activeStoryIndex];
+        if (data && storyViewerTime) {
+          storyViewerTime.textContent = formatStoryTime(data.createdAt || data.created_at || data.time);
+
+          // Live 24-hour expiry check
+          const createdMs = new Date(data.createdAt || data.created_at).getTime();
+          if (!isNaN(createdMs) && (Date.now() - createdMs >= 24 * 60 * 60 * 1000)) {
+            console.log(`[LIVE EXPIRY] Story ${data._id} reached 24 hours while watching.`);
+            if (typeof purgeExpiredStories === 'function') {
+              purgeExpiredStories();
+            }
+            return;
+          }
+        }
+      }
 
       if (state.storyProgressPercent >= 100) {
         stopStoryTimer();
@@ -1280,7 +1572,10 @@ document.addEventListener('DOMContentLoaded', () => {
   function closeStoryViewer() {
     stopStoryTimer();
     state.storyProgressPercent = 0;
-    storyViewer.classList.remove('active');
+    if (storyViewer) {
+      storyViewer.classList.remove('active');
+      storyViewer.style.display = 'none';
+    }
   }
 
   // Tap to Pause implementation
@@ -1296,7 +1591,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (storyViewerClose) storyViewerClose.addEventListener('click', closeStoryViewer);
   if (storyViewerDelete) storyViewerDelete.addEventListener('click', deleteCurrentStory);
-  
+
   if (storyPrev) {
     storyPrev.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -1330,12 +1625,22 @@ document.addEventListener('DOMContentLoaded', () => {
   const storyReplySend = document.getElementById('story-reply-send');
   const storyReplyInput = document.getElementById('story-reply-input');
   if (storyReplySend) {
-    storyReplySend.addEventListener('click', () => {
+    storyReplySend.addEventListener('click', (e) => {
+      e.stopPropagation();
       const txt = storyReplyInput.value.trim();
       if (txt) {
-        showToast('Hubs reply sent! 📩');
+        showToast('Hubs reply sent! 💬');
         storyReplyInput.value = '';
         closeStoryViewer();
+      } else {
+        pauseStory();
+        const group = state.storyGroups[state.activeGroupIndex];
+        const storyData = group?.stories[state.activeStoryIndex];
+        if (storyData && storyData._id) {
+          if (typeof openShare === 'function') {
+            openShare('story_' + storyData._id);
+          }
+        }
       }
     });
   }
@@ -1343,12 +1648,29 @@ document.addEventListener('DOMContentLoaded', () => {
   // --- HUB (STORY) LIKE SYSTEM ---
   const storyLikeBtn = document.getElementById('story-like-btn');
   const storyLikeCount = document.getElementById('story-like-count');
+  let isLikingStory = false;
 
   async function likeCurrentStory() {
     const token = localStorage.getItem('invibe_jwt_token');
     if (!token) return;
-    const storyData = state.stories[state.activeStoryIndex];
-    if (!storyData || !storyData._id) return;
+
+    const group = state.storyGroups[state.activeGroupIndex];
+    const storyData = group?.stories[state.activeStoryIndex];
+    if (!storyData || !storyData._id || isLikingStory) return;
+
+    isLikingStory = true;
+
+    // Optimistic UI update
+    const previousIsLiked = storyData.isLiked;
+    const previousLikesCount = storyData.likesCount || 0;
+
+    storyData.isLiked = !previousIsLiked;
+    storyData.likesCount = previousIsLiked ? Math.max(0, previousLikesCount - 1) : previousLikesCount + 1;
+    updateStoryLikeUI(storyData.isLiked, storyData.likesCount);
+
+    const currentUser = getCurrentUser();
+    const currentUserId = currentUser ? (currentUser.id || currentUser._id) : null;
+    console.log(`[STAGE 1: HEART CLICK / likeCurrentStory()] StoryId: ${storyData._id} | CurrentUserId: ${currentUserId} | Prev isLiked: ${previousIsLiked} | Prev likesCount: ${previousLikesCount}`);
 
     try {
       const res = await fetch(`${API_URL}/api/stories/${storyData._id}/like`, {
@@ -1358,19 +1680,31 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!res.ok) throw new Error('Failed to like story');
       const result = await res.json();
 
-      // Update local state
-      storyData.likesCount = result.likesCount;
-      storyData.isLiked = result.isLiked;
+      console.log(`[STAGE 2: API POST /like RESULT] StoryId: ${storyData._id} | isLiked: ${result.isLiked} | likesCount: ${result.likesCount} | likes:`, result.likes);
 
-      // Update UI
-      updateStoryLikeUI(result.isLiked, result.likesCount);
+      // Sync with backend response
+      storyData.isLiked = result.isLiked;
+      storyData.likesCount = result.likesCount !== undefined ? result.likesCount : storyData.likesCount;
+      if (result.likes) storyData.likes = result.likes;
+
+      console.log(`[STAGE 3: SYNCED STORY OBJECT]`, { id: storyData._id, isLiked: storyData.isLiked, likesCount: storyData.likesCount });
+
+      updateStoryLikeUI(storyData.isLiked, storyData.likesCount);
       showToast(result.isLiked ? 'Liked this Hub! ❤️' : 'Unliked this Hub');
     } catch (err) {
       console.error('Error liking story:', err);
+      // Rollback optimistic update
+      storyData.isLiked = previousIsLiked;
+      storyData.likesCount = previousLikesCount;
+      updateStoryLikeUI(previousIsLiked, previousLikesCount);
+      showToast('Failed to like Hub');
+    } finally {
+      isLikingStory = false;
     }
   }
 
   function updateStoryLikeUI(isLiked, count) {
+    console.log(`[STAGE 6: Like count UI Updated] isLiked: ${isLiked} | count: ${count}`);
     if (storyLikeBtn) {
       storyLikeBtn.classList.toggle('liked', isLiked);
     }
@@ -1386,6 +1720,103 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // Remove obsolete storyShareBtn logic
+
+  // --- LOCAL STORAGE VIEWED STATE ---
+  function getSeenStories() {
+    try { return JSON.parse(localStorage.getItem('hihubble_seen_stories') || '[]'); }
+    catch (e) { return []; }
+  }
+  function markStorySeen(id) {
+    if (!id) return;
+    const seen = getSeenStories();
+    if (!seen.includes(id)) {
+      seen.push(id);
+      localStorage.setItem('hihubble_seen_stories', JSON.stringify(seen));
+    }
+  }
+
+  // Render story rings cleanly from state.storyGroups
+  function renderStoryRings() {
+    const storyScroll = document.getElementById('stories-scroll');
+    if (!storyScroll) return;
+
+    storyScroll.innerHTML = '';
+    if (!state.storyGroups || state.storyGroups.length === 0) return;
+
+    state.storyGroups.forEach((group, idx) => {
+      if (!group.stories || group.stories.length === 0) return;
+      const isSeen = group.stories.every(s => getSeenStories().includes(s._id));
+      const card = document.createElement('div');
+      card.className = `story-card active-story ${isSeen ? 'story-seen' : ''}`;
+      card.setAttribute('data-group-index', idx);
+      const hubCount = group.stories ? group.stories.length : 1;
+      card.innerHTML = `
+        <div class="story-avatar-container hubbs-user-avatar" style="width: 64px; height: 64px; aspect-ratio: 1/1; margin: 0 auto 4px auto; flex-shrink: 0; border-radius: 50%; overflow: hidden; position: relative; display: flex; justify-content: center; align-items: center; padding: 3px;">
+          <div class="story-ring" style="border-radius: 50%; position: absolute; top: 0; left: 0; right: 0; bottom: 0;"></div>
+          <img src="${group.avatar}" alt="${group.name}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%; border: 2px solid rgba(0,0,0,0.1);" />
+        </div>
+        <div style="display: flex; flex-direction: column; align-items: center; text-align: center; width: 100%; overflow: hidden;">
+          <span class="story-username" style="font-weight: 600; color: #fff; font-size: 0.85rem; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${group.name}</span>
+          <span style="font-size: 0.7rem; color: var(--text-muted); margin-top: 2px;">${hubCount} hub${hubCount > 1 ? 's' : ''}</span>
+        </div>
+      `;
+
+      card.addEventListener('click', () => {
+        openStoryViewer(idx, 0);
+        group.stories.forEach(s => markStorySeen(s._id));
+        card.classList.add('story-seen');
+      });
+
+      storyScroll.appendChild(card);
+    });
+
+    debouncedCreateIcons();
+  }
+  window.renderStoryRings = renderStoryRings;
+
+  // True 24-Hour Expiry: Clean expired stories from memory in real-time without page refresh
+  function purgeExpiredStories() {
+    if (!state.storyGroups || state.storyGroups.length === 0) return;
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    let changed = false;
+
+    for (let gIdx = state.storyGroups.length - 1; gIdx >= 0; gIdx--) {
+      const group = state.storyGroups[gIdx];
+      if (!group || !group.stories) continue;
+      const initialLen = group.stories.length;
+      group.stories = group.stories.filter(s => {
+        const createdDate = new Date(s.createdAt || s.created_at || 0);
+        const createdMs = createdDate.getTime();
+        return isNaN(createdMs) || createdMs > cutoff;
+      });
+      if (group.stories.length !== initialLen) {
+        changed = true;
+      }
+      if (group.stories.length === 0) {
+        state.storyGroups.splice(gIdx, 1);
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      console.log('[STORY PURGE] Expired stories (>24h) removed from state.');
+      renderStoryRings();
+      if (storyViewer && storyViewer.classList.contains('active')) {
+        const activeGroup = state.storyGroups[state.activeGroupIndex];
+        if (!activeGroup || !activeGroup.stories || !activeGroup.stories[state.activeStoryIndex]) {
+          closeStoryViewer();
+        }
+      }
+    }
+  }
+  window.purgeExpiredStories = purgeExpiredStories;
+
+  // Background 24h story expiry timer (runs every 15 seconds)
+  if (!window._hihubbleStoryPurgeInterval) {
+    window._hihubbleStoryPurgeInterval = setInterval(purgeExpiredStories, 15000);
+  }
+
   // Load dynamic stories from backend
   async function loadStories() {
     const token = localStorage.getItem('invibe_jwt_token');
@@ -1397,83 +1828,222 @@ document.addEventListener('DOMContentLoaded', () => {
       });
       if (!res.ok) throw new Error('Failed to fetch stories');
       const dbStories = await res.json();
-
-      const storyScroll = document.getElementById('stories-scroll');
-      if (!storyScroll) return;
+      console.log(`[STAGE 4: loadStories() FETCH COMPLETED] Count: ${dbStories.length}`);
 
       const yourVibeBtn = document.getElementById('story-btn-current');
-      const draftsBtn = document.getElementById('story-drafts-btn');
-      storyScroll.innerHTML = '';
-      if (yourVibeBtn) storyScroll.appendChild(yourVibeBtn);
-      if (draftsBtn) storyScroll.appendChild(draftsBtn);
+      if (yourVibeBtn) {
+        if (!yourVibeBtn.dataset.boundClick) {
+          yourVibeBtn.dataset.boundClick = "true";
+          yourVibeBtn.addEventListener('click', async (e) => {
+            if (e.target.closest('#add-story-file-trigger')) return;
+            const currentUser = getCurrentUser();
+            const currentUserId = currentUser ? (currentUser.id || currentUser._id) : null;
+            if (state.storyGroups && state.storyGroups.length > 0) {
+              const myGroupIdx = state.storyGroups.findIndex(g => g.authorId === currentUserId);
+              if (myGroupIdx !== -1) {
+                openStoryViewer(myGroupIdx, 0);
+              } else {
+                openStoryViewer(0, 0);
+              }
+            } else {
+              switchView('create-hubbs');
+            }
+          });
+        }
+      }
 
       const currentUser = getCurrentUser();
       const currentUserId = currentUser ? (currentUser.id || currentUser._id) : null;
-      
+      const currentUserIdStr = currentUserId ? currentUserId.toString() : '';
+      const cutoff24h = Date.now() - 24 * 60 * 60 * 1000;
+
       const groupedStories = {};
       dbStories.forEach(story => {
+        const rawCreatedAt = story.createdAt || story.created_at || new Date().toISOString();
+        const createdDate = new Date(rawCreatedAt);
+        const createdMs = createdDate.getTime();
+
+        // 24-hour expiry check on client side
+        if (!isNaN(createdMs) && createdMs <= cutoff24h) {
+          return; // Skip expired story
+        }
+
         const likes = story.likes || [];
-        const authorId = story.author._id || story.author.id;
+        const authorId = (story.author && (story.author._id || story.author.id)) || story.authorId;
+        const isLiked = (story.isLiked !== undefined && typeof story.isLiked === 'boolean')
+          ? story.isLiked
+          : (currentUserIdStr ? likes.some(uid => (uid && uid.toString() === currentUserIdStr)) : false);
+        const likesCount = (story.likesCount !== undefined && typeof story.likesCount === 'number')
+          ? story.likesCount
+          : likes.length;
+
+        console.log(`  [STORY OBJECT FROM API] StoryId: ${story._id || story.id} | createdAt: ${rawCreatedAt} | formatted: ${formatStoryTime(rawCreatedAt)} | likesCount: ${likesCount} | isLiked: ${isLiked}`);
+
         if (!groupedStories[authorId]) {
           groupedStories[authorId] = {
             authorId: authorId,
-            name: story.author.fullName,
-            avatar: story.author.profileImage || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=80&h=80&q=80',
+            name: (story.author && story.author.fullName) || 'User',
+            avatar: (story.author && story.author.profileImage) || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=80&h=80&q=80',
             stories: []
           };
         }
         groupedStories[authorId].stories.push({
-          _id: story._id,
+          _id: story._id || story.id,
           authorId: authorId,
-          name: story.author.fullName,
-          avatar: story.author.profileImage || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=80&h=80&q=80',
+          name: (story.author && story.author.fullName) || 'User',
+          avatar: (story.author && story.author.profileImage) || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=80&h=80&q=80',
           img: story.mediaUrl,
-          time: formatTimeAgo(story.createdAt),
-          likesCount: likes.length,
-          isLiked: currentUserId ? likes.includes(currentUserId) : false
+          caption: story.caption || '',
+          mediaType: story.mediaType || story.media_type || 'image',
+          createdAt: rawCreatedAt,
+          created_at: rawCreatedAt,
+          time: formatStoryTime(rawCreatedAt),
+          likesCount: likesCount,
+          isLiked: isLiked,
+          likes: likes
         });
       });
-      
+
       state.storyGroups = Object.values(groupedStories);
 
-      state.storyGroups.forEach((group, idx) => {
-        const card = document.createElement('div');
-        card.className = 'story-card active-story';
-        card.setAttribute('data-group-index', idx);
-        card.innerHTML = `
-          <div class="story-avatar-container">
-            <div class="story-ring"></div>
-            <img src="${group.avatar}" alt="${group.name}" />
-          </div>
-          <span class="story-username">${group.name.split(' ')[0]}</span>
-        `;
+      // Keep active viewer like and time UI in sync if currently viewing
+      if (storyViewer && storyViewer.classList.contains('active') && state.storyGroups[state.activeGroupIndex]) {
+        const activeData = state.storyGroups[state.activeGroupIndex]?.stories?.[state.activeStoryIndex];
+        if (activeData) {
+          updateStoryLikeUI(activeData.isLiked || false, activeData.likesCount || 0);
+          if (storyViewerTime) storyViewerTime.textContent = formatStoryTime(activeData.createdAt || activeData.created_at);
+        }
+      }
 
-        card.addEventListener('click', () => {
-          openStoryViewer(idx, 0);
-          card.classList.add('story-seen');
-        });
-
-        storyScroll.appendChild(card);
-      });
-
-      debouncedCreateIcons();
+      renderStoryRings();
     } catch (err) {
       console.error('Error loading stories:', err);
     }
   }
 
-  function formatTimeAgo(dateStr) {
-    const created = new Date(dateStr);
-    const diffMs = Date.now() - created.getTime();
-    const diffMin = Math.round(diffMs / 60000);
-    if (diffMin < 1) return 'Just now';
+  // Canonical Relative Time Formatter (Supports Date objects, ISO strings, Epoch timestamps)
+  function formatStoryTime(input) {
+    if (!input) return 'Just now';
+    let date;
+    if (input instanceof Date) {
+      date = input;
+    } else if (typeof input === 'number') {
+      date = new Date(input);
+    } else if (typeof input === 'string') {
+      if (!isNaN(input) && !isNaN(parseFloat(input)) && input.trim().length >= 10 && !input.includes('-') && !input.includes(':')) {
+        date = new Date(parseFloat(input));
+      } else {
+        date = new Date(input);
+      }
+    } else {
+      return 'Just now';
+    }
+
+    const timeMs = date.getTime();
+    if (isNaN(timeMs)) {
+      return 'Just now';
+    }
+
+    const now = Date.now();
+    const diffMs = Math.max(0, now - timeMs);
+    const diffSec = Math.floor(diffMs / 1000);
+
+    if (diffSec < 10) return 'Just now';
+    if (diffSec < 60) return `${diffSec}s ago`;
+
+    const diffMin = Math.floor(diffSec / 60);
     if (diffMin < 60) return `${diffMin}m ago`;
-    const diffHrs = Math.round(diffMin / 60);
+
+    const diffHrs = Math.floor(diffMin / 60);
     if (diffHrs < 24) return `${diffHrs}h ago`;
-    return '1d ago';
+
+    const diffDays = Math.floor(diffHrs / 24);
+    if (diffDays === 1) return 'Yesterday';
+    return `${diffDays}d ago`;
   }
 
+  window.formatStoryTime = formatStoryTime;
+  window.formatTimeAgo = formatStoryTime;
+  const formatTimeAgo = formatStoryTime;
   window.loadStories = loadStories;
+
+  // Subscribe to Supabase Realtime changes on public.stories, public.posts, and public.comments
+  if (supabase && typeof supabase.channel === 'function') {
+    try {
+      supabase.channel('public:stories_realtime')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'stories' }, () => {
+          console.log('⚡ Realtime story change event received from Supabase!');
+          if (typeof loadStories === 'function') loadStories();
+          if (typeof window.loadHubbStories === 'function') window.loadHubbStories();
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'story_reactions' }, async (payload) => {
+          console.log('⚡ Realtime story_reactions change event received!', payload);
+
+          const changedStoryId = payload.new?.story_id || payload.old?.story_id;
+          if (!changedStoryId) return;
+
+          const currentUser = getCurrentUser();
+          const currentUserId = currentUser ? (currentUser.id || currentUser._id) : null;
+          const changedUserId = payload.new?.user_id || payload.old?.user_id;
+          const isMe = changedUserId && currentUserId && (changedUserId.toString() === currentUserId.toString());
+
+          // Update in-memory state
+          if (state.storyGroups) {
+            state.storyGroups.forEach(group => {
+              (group.stories || []).forEach(story => {
+                if (story._id === changedStoryId) {
+                  if (!isMe) {
+                    if (payload.eventType === 'INSERT') {
+                      story.likesCount = (story.likesCount || 0) + 1;
+                    } else if (payload.eventType === 'DELETE') {
+                      story.likesCount = Math.max(0, (story.likesCount || 0) - 1);
+                    }
+                  }
+                }
+              });
+            });
+          }
+
+          const group = state.storyGroups?.[state.activeGroupIndex];
+          const activeStory = group?.stories?.[state.activeStoryIndex];
+          if (activeStory && activeStory._id === changedStoryId) {
+            if (!isMe) {
+              updateStoryLikeUI(activeStory.isLiked || false, activeStory.likesCount || 0);
+            }
+          }
+        })
+        .subscribe();
+
+      supabase.channel('public:posts_realtime')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, () => {
+          console.log('⚡ Realtime post change event received from Supabase!');
+          if (typeof loadFeedPosts === 'function') loadFeedPosts();
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, () => {
+          console.log('⚡ Realtime comment change event received from Supabase!');
+          if (typeof loadFeedPosts === 'function') loadFeedPosts();
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'reels' }, () => {
+          console.log('⚡ Realtime reel change event received from Supabase!');
+          if (typeof loadFeedReels === 'function') loadFeedReels();
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'reel_likes' }, () => {
+          console.log('⚡ Realtime reel_likes change event received from Supabase!');
+          if (typeof loadFeedReels === 'function') loadFeedReels();
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'reel_comments' }, () => {
+          console.log('⚡ Realtime reel_comments change event received from Supabase!');
+          if (typeof loadFeedReels === 'function') loadFeedReels();
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'reel_views' }, () => {
+          console.log('⚡ Realtime reel_views change event received from Supabase!');
+          if (typeof loadFeedReels === 'function') loadFeedReels();
+        })
+        .subscribe();
+    } catch (rtErr) {
+      console.warn('Realtime subscription notice:', rtErr);
+    }
+  }
 
   // Story Creation & Drafts logic
   const addStoryBtn = document.getElementById('add-story-file-trigger');
@@ -1593,7 +2163,7 @@ document.addEventListener('DOMContentLoaded', () => {
           });
         });
       }
-    } catch(err) {
+    } catch (err) {
       console.error(err);
     }
   }
@@ -1656,7 +2226,7 @@ document.addEventListener('DOMContentLoaded', () => {
           const tempVideo = document.createElement('video');
           tempVideo.preload = 'metadata';
           tempVideo.onloadedmetadata = () => {
-            try { URL.revokeObjectURL(tempVideo.src); } catch (e) {}
+            try { URL.revokeObjectURL(tempVideo.src); } catch (e) { }
             if (tempVideo.duration > 300) {
               showToast('Video length exceeds 5 minutes limit (max 5 mins allowed). ⏱️');
               createPostFileInput.value = '';
@@ -1676,7 +2246,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
           if (isVideo) {
             if (selectedPostMediaBlobUrl) {
-              try { URL.revokeObjectURL(selectedPostMediaBlobUrl); } catch (err) {}
+              try { URL.revokeObjectURL(selectedPostMediaBlobUrl); } catch (err) { }
             }
             selectedPostMediaBlobUrl = URL.createObjectURL(file);
             createPostPreviewImg.style.display = 'none';
@@ -1699,7 +2269,7 @@ document.addEventListener('DOMContentLoaded', () => {
     createPostRemoveBtn.addEventListener('click', () => {
       createPostFileInput.value = '';
       if (selectedPostMediaBlobUrl) {
-        try { URL.revokeObjectURL(selectedPostMediaBlobUrl); } catch (e) {}
+        try { URL.revokeObjectURL(selectedPostMediaBlobUrl); } catch (e) { }
         selectedPostMediaBlobUrl = null;
       }
       selectedPostMediaBase64 = null;
@@ -1713,7 +2283,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (createPostSubmitBtn) {
     createPostSubmitBtn.addEventListener('click', async () => {
       const captionText = createPostCaption.value.trim();
-      const token = localStorage.getItem('invibe_jwt_token') || localStorage.getItem('invibe_token') || 'session_token';
+      const token = localStorage.getItem('invibe_jwt_token') || localStorage.getItem('invibe_token');
 
       if (!selectedPostMediaBase64 && !captionText) {
         showToast('Please write a caption or add a photo/video.');
@@ -1767,6 +2337,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (apiRes.ok) {
           const data = await apiRes.json();
+
+          // Also persist as story in Supabase public.stories table
+          try {
+            await fetch('/api/stories', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+              },
+              body: JSON.stringify({
+                caption: captionText,
+                mediaUrl: mediaUrlPayload,
+                mediaType: mediaType
+              })
+            });
+          } catch (storyErr) {
+            console.warn("Story database save notice:", storyErr);
+          }
+
           showToast('New hub published successfully! 📸✨');
 
           // Reset fields
@@ -1781,6 +2370,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
           // Refresh lists
           await loadFeedPosts();
+          if (typeof loadStories === 'function') await loadStories();
           loadUserProfile('me');
         } else {
           const errData = await apiRes.json().catch(() => ({}));
@@ -2762,6 +3352,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const inboxSearchInput = document.getElementById('inbox-search-input');
   if (inboxSearchInput) {
     inboxSearchInput.addEventListener('input', async () => {
+      lastRenderedThreadsFingerprint = ''; // Ensure search results render without cache blocking
       const query = inboxSearchInput.value.trim();
       if (!query) {
         loadChatThreads();
@@ -4931,7 +5522,7 @@ document.addEventListener('DOMContentLoaded', () => {
             preferred2faMethod: new2faMethod
           })
         }).catch(err => console.warn("Backend profile sync notice:", err.message));
-      } catch (e) {}
+      } catch (e) { }
 
       const displayHandle = newHandle.startsWith('@') ? newHandle : '@' + newHandle;
 
@@ -5311,14 +5902,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // --- COMMENTS & SHARE MODALS CONTROLLER ---
-  const mockFriends = [
-    { name: "Zoe Lin", avatar: "https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=100&h=100&q=80" },
-    { name: "Jamie Sun", avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=150&h=150&q=80" },
-    { name: "Sarah Chen", avatar: "https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=150&h=150&q=80" },
-    { name: "Marcus", avatar: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=150&h=150&q=80" },
-    { name: "Emma Johnson", avatar: "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?auto=format&fit=crop&w=150&h=150&q=80" }
-  ];
-
+  // --- COMMENTS & SHARE MODALS CONTROLLER ---
   const commentsModal = document.getElementById('comments-modal');
   const shareModal = document.getElementById('share-modal');
 
@@ -5329,12 +5913,76 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
+  window.handleSharedHubClick = function (type, id) {
+    if (type === 'story') {
+      if (state.storyGroups) {
+        for (let gIdx = 0; gIdx < state.storyGroups.length; gIdx++) {
+          const sIdx = (state.storyGroups[gIdx].stories || []).findIndex(s => s._id === id || ('story_' + s._id) === id);
+          if (sIdx !== -1) {
+            openStoryViewer(gIdx, sIdx);
+            return;
+          }
+        }
+      }
+      if (typeof openStoryViewer === 'function' && state.storyGroups && state.storyGroups.length > 0) {
+        openStoryViewer(0, 0);
+      } else {
+        switchView('feed');
+      }
+    } else if (type === 'reel') {
+      switchView('reels');
+    } else {
+      switchView('feed');
+    }
+  };
+
+  let shareSearchDebounceTimer = null;
+  let cachedShareUsers = [];
+
   function openShare(key, modalOverride = shareModal) {
     const modal = modalOverride || shareModal;
     if (!modal) return;
 
     const shareList = modal.querySelector('.share-friends-list');
     if (!shareList) return;
+
+    const searchInput = modal.querySelector('#share-search-input') || modal.querySelector('.share-search-input');
+    if (searchInput) {
+      searchInput.value = '';
+      if (!searchInput.dataset.boundSearch) {
+        searchInput.dataset.boundSearch = 'true';
+        searchInput.addEventListener('input', (e) => {
+          const query = e.target.value.trim();
+          clearTimeout(shareSearchDebounceTimer);
+          shareSearchDebounceTimer = setTimeout(async () => {
+            if (!query) {
+              renderShareCards(cachedShareUsers, key, modal, shareList);
+              return;
+            }
+            const token = localStorage.getItem('invibe_jwt_token');
+            if (!token) return;
+            try {
+              shareList.innerHTML = '<div style="padding:10px; font-size:12px; color:var(--text-muted); text-align:center; grid-column: 1 / -1;">Searching...</div>';
+              const res = await fetch(`${API_URL}/api/users/search?q=${encodeURIComponent(query)}`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+              });
+              if (res.ok) {
+                const results = await res.json();
+                const mappedResults = (results || []).map(u => ({
+                  _id: u._id || u.id,
+                  fullName: u.fullName || u.full_name || u.username,
+                  username: u.username || 'user',
+                  profileImage: u.profileImage || u.profile_image_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&h=150&q=80'
+                }));
+                renderShareCards(mappedResults, key, modal, shareList);
+              }
+            } catch (searchErr) {
+              console.error('Error searching share users:', searchErr);
+            }
+          }, 200);
+        });
+      }
+    }
 
     renderShareFriends(key, modal, shareList);
     modal.classList.add('active');
@@ -5344,168 +5992,168 @@ document.addEventListener('DOMContentLoaded', () => {
     const list = shareList || modal?.querySelector('.share-friends-list');
     if (!list) return;
 
-    list.innerHTML = '<div style="padding:10px; font-size:12px; color:var(--text-muted);">Loading Hubbies...</div>';
-
-    // Add external sharing section if not present
-    const shareCard = modal.querySelector('.share-card');
-    if (shareCard && !shareCard.querySelector('.external-share-section')) {
-      const extSection = document.createElement('div');
-      extSection.className = 'external-share-section';
-      extSection.style.cssText = 'margin-top: 16px; border-top: 1px solid rgba(255, 255, 255, 0.08); padding: 16px 20px 20px 20px;';
-
-      const title = document.createElement('h4');
-      title.innerText = 'Share to other apps';
-      title.style.cssText = 'font-size: 11px; color: var(--text-muted); margin-bottom: 12px; font-family: var(--font-title); font-weight: 600; text-transform: uppercase; letter-spacing: 1px;';
-      extSection.appendChild(title);
-
-      const buttonsContainer = document.createElement('div');
-      buttonsContainer.className = 'external-share-buttons';
-      buttonsContainer.style.cssText = 'display: flex; gap: 16px; justify-content: space-around; align-items: center;';
-
-      const shareOptions = [
-        { name: 'WhatsApp', icon: 'message-circle', color: '#25D366', url: (url) => `https://api.whatsapp.com/send?text=${encodeURIComponent('Check this out on HI-HUBBLE: ' + url)}` },
-        { name: 'X', svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="display:block;"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>`, color: '#ffffff', url: (url) => `https://x.com/intent/tweet?url=${encodeURIComponent(url)}&text=${encodeURIComponent('Check this out on HI-HUBBLE!')}` },
-        { name: 'Telegram', icon: 'send', color: '#0088cc', url: (url) => `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent('Check this out on HI-HUBBLE!')}` },
-        { name: 'Gmail', icon: 'mail', color: '#EA4335', url: (url) => `mailto:?subject=${encodeURIComponent('Check this out on HI-HUBBLE')}&body=${encodeURIComponent(url)}` },
-        {
-          name: 'Copy Link', icon: 'copy', color: '#8b5cf6', action: async (url) => {
-            try {
-              await navigator.clipboard.writeText(url);
-              showToast('Link copied to clipboard! 📋');
-            } catch (err) {
-              showToast('Failed to copy link.');
-            }
-          }
-        }
-      ];
-
-      shareOptions.forEach(opt => {
-        const btn = document.createElement('button');
-        btn.className = 'external-share-btn';
-        btn.style.cssText = 'display: flex; flex-direction: column; align-items: center; gap: 6px; background: none; border: none; cursor: pointer; color: var(--text-color); font-size: 11px; transition: transform 0.2s;';
-
-        btn.addEventListener('mouseenter', () => btn.style.transform = 'scale(1.1)');
-        btn.addEventListener('mouseleave', () => btn.style.transform = 'scale(1)');
-
-        const iconContainer = document.createElement('div');
-        iconContainer.style.cssText = `width: 42px; height: 42px; border-radius: 50%; background: ${opt.color}15; border: 1px solid ${opt.color}40; color: ${opt.color}; display: flex; justify-content: center; align-items: center; font-size: 18px; box-shadow: 0 4px 12px ${opt.color}10;`;
-
-        if (opt.svg) {
-          iconContainer.innerHTML = opt.svg;
-        } else {
-          iconContainer.innerHTML = `<i data-lucide="${opt.icon}"></i>`;
-        }
-
-        const label = document.createElement('span');
-        label.innerText = opt.name;
-        label.style.cssText = 'color: var(--text-muted); font-weight: 500; margin-top: 2px;';
-
-        btn.appendChild(iconContainer);
-        btn.appendChild(label);
-
-        btn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const currentUrl = window.location.href;
-          if (opt.url) {
-            window.open(opt.url(currentUrl), '_blank');
-          } else if (opt.action) {
-            opt.action(currentUrl);
-          }
-        });
-
-        buttonsContainer.appendChild(btn);
-      });
-
-      extSection.appendChild(buttonsContainer);
-      shareCard.appendChild(extSection);
-      debouncedCreateIcons();
-    }
+    list.innerHTML = '<div style="padding:10px; font-size:12px; color:var(--text-muted); text-align:center; grid-column: 1 / -1;">Loading Hubbies...</div>';
 
     const token = localStorage.getItem('invibe_jwt_token');
     const currentUser = getCurrentUser();
     if (!token || !currentUser) {
-      list.innerHTML = '<div style="padding:10px; font-size:12px; color:var(--text-muted); text-align:center;">Please log in to share with Hubbies.</div>';
+      list.innerHTML = '<div style="padding:10px; font-size:12px; color:var(--text-muted); text-align:center; grid-column: 1 / -1;">Please log in to share with Hubbies.</div>';
       return;
     }
 
     try {
-      const targetId = currentUser.id || currentUser._id;
-      const res = await fetch(`${API_URL}/api/users/${targetId}/following-list`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (!res.ok) throw new Error();
-      const users = await res.json();
+      const currentUserId = (currentUser.id || currentUser._id || '').toString();
+      const userMap = new Map();
 
-      list.innerHTML = '';
-
-      if (users.length === 0) {
-        list.innerHTML = '<div style="padding:10px; font-size:12px; color:var(--text-muted); text-align:center;">No hubbies found. Follow someone to share!</div>';
-        return;
+      // 1. Retrieve existing chat conversations
+      try {
+        const threadsRes = await fetch(`${API_URL}/api/chats/threads`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (threadsRes.ok) {
+          const threads = await threadsRes.json();
+          (threads || []).forEach(t => {
+            const u = t.user;
+            if (u && (u._id || u.id)) {
+              const uid = (u._id || u.id).toString();
+              if (uid !== currentUserId) {
+                userMap.set(uid, {
+                  _id: u._id || u.id,
+                  fullName: u.fullName || u.username || 'Hubber',
+                  username: u.username || 'user',
+                  profileImage: u.profileImage || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&h=150&q=80'
+                });
+              }
+            }
+          });
+        }
+      } catch (threadsErr) {
+        console.warn('Error fetching threads for share popup:', threadsErr);
       }
 
-      users.forEach(u => {
-        if (!u) return;
-
-        const card = document.createElement('div');
-        card.className = 'share-friend-card';
-        card.innerHTML = `
-          <img src="${u.profileImage || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&h=150&q=80'}" class="share-friend-avatar" alt="${u.fullName}" />
-          <span class="share-friend-name">${u.fullName}</span>
-        `;
-
-        card.addEventListener('click', async () => {
-          const currentUser = getCurrentUser();
-          if (!currentUser) return;
-
-          const secretKey = getChatSecretKey(currentUser.id || currentUser._id, u._id);
-          const isReel = key.startsWith('reel');
-
-          let sharedContentHtml = '';
-          if (isReel) {
-            sharedContentHtml = `<div class="shared-hub-card reel" data-shared-id="${key}"><i data-lucide="video" style="display:inline-block; vertical-align:middle; margin-right:4px;"></i> Shared a Reel</div>`;
-          } else {
-            sharedContentHtml = `<div class="shared-hub-card post" data-shared-id="${key}"><i data-lucide="image" style="display:inline-block; vertical-align:middle; margin-right:4px;"></i> Shared a Post</div>`;
-          }
-
-          const encryptedText = encryptMessage(sharedContentHtml, secretKey);
-
-          try {
-            const sendRes = await fetch(`${API_URL}/api/chats/message`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-              },
-              body: JSON.stringify({
-                recipient: u._id,
-                content: encryptedText,
-                mediaUrl: key,
-                mediaType: 'hub',
-                mediaName: isReel ? 'Shared Reel' : 'Shared Post',
-                mediaSize: 'Link'
-              })
+      // 2. If fewer than 5 contacts, supplement with suggested users
+      if (userMap.size < 6) {
+        try {
+          const suggRes = await fetch(`${API_URL}/api/users/suggestions?limit=20`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (suggRes.ok) {
+            const suggestions = await suggRes.json();
+            (suggestions || []).forEach(s => {
+              const sid = (s._id || s.id || '').toString();
+              if (sid && sid !== currentUserId && !userMap.has(sid)) {
+                userMap.set(sid, {
+                  _id: s._id || s.id,
+                  fullName: s.fullName || s.username || 'Hubber',
+                  username: s.username || 'user',
+                  profileImage: s.profileImage || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&h=150&q=80'
+                });
+              }
             });
-            if (!sendRes.ok) throw new Error();
-
-            showToast(`Shared successfully to ${u.fullName}! ✈️`);
-            if (modal) modal.classList.remove('active');
-
-            loadChatThreads();
-            if (state.currentChatThread && state.currentChatThread.toString() === u._id.toString()) {
-              await fetchMessages(u._id, true);
-            }
-          } catch (err) {
-            console.error('Error sharing hub content:', err);
-            showToast('Failed to share item.');
           }
-        });
+        } catch (suggErr) {
+          console.warn('Error fetching suggestions for share popup:', suggErr);
+        }
+      }
 
-        list.appendChild(card);
-      });
+      cachedShareUsers = Array.from(userMap.values());
+      renderShareCards(cachedShareUsers, key, modal, list);
     } catch (err) {
       console.error('Error rendering friends share list:', err);
-      list.innerHTML = '<div style="padding:10px; font-size:12px; color:var(--text-muted);">Failed to load friends.</div>';
+      list.innerHTML = '<div style="padding:10px; font-size:12px; color:var(--text-muted); text-align:center; grid-column: 1 / -1;">Failed to load friends.</div>';
     }
+  }
+
+  function renderShareCards(users, key, modal, list) {
+    list.innerHTML = '';
+
+    if (!users || users.length === 0) {
+      list.innerHTML = '<div style="padding:16px; font-size:12px; color:var(--text-muted); text-align:center; grid-column: 1 / -1;">No Hubbies found.</div>';
+      return;
+    }
+
+    const token = localStorage.getItem('invibe_jwt_token');
+    const currentUser = getCurrentUser();
+    const currentUserId = currentUser ? (currentUser.id || currentUser._id) : null;
+
+    users.forEach(u => {
+      if (!u || !u._id) return;
+
+      const card = document.createElement('div');
+      card.className = 'share-friend-card';
+      card.title = `${u.fullName} (@${u.username})`;
+      card.innerHTML = `
+        <img src="${u.profileImage || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&h=150&q=80'}" class="share-friend-avatar" alt="${u.fullName}" />
+        <span class="share-friend-name" style="font-weight: 600; font-size: 12px; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center;">${u.fullName}</span>
+        <span style="font-size: 10px; color: var(--text-muted); width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center;">@${u.username}</span>
+      `;
+
+      card.addEventListener('click', async () => {
+        if (!currentUser || !token) return;
+
+        const secretKey = getChatSecretKey(currentUserId, u._id);
+        const isStory = key.startsWith('story_');
+        const isReel = key.startsWith('reel_') || key.startsWith('reel');
+        const rawId = key.replace(/^(story_|reel_|post_)/, '');
+
+        let hubPayload = {
+          text: isStory ? 'Shared a Hub Story' : (isReel ? 'Shared a Reel' : 'Shared a Post'),
+          hubType: isStory ? 'story' : (isReel ? 'reel' : 'post'),
+          hubId: rawId,
+          thumbnail: '',
+          authorName: currentUser.fullName || currentUser.username || 'Hubber',
+          authorAvatar: currentUser.profileImage || '',
+          timestamp: new Date().toISOString()
+        };
+
+        if (isStory && state.storyGroups) {
+          state.storyGroups.forEach(g => {
+            (g.stories || []).forEach(s => {
+              if (s._id === rawId || ('story_' + s._id) === key) {
+                hubPayload.thumbnail = s.img || '';
+                hubPayload.authorName = s.name || hubPayload.authorName;
+                hubPayload.authorAvatar = s.avatar || '';
+                hubPayload.text = s.caption ? `Shared a Hub: "${s.caption}"` : 'Shared a Hub Story';
+              }
+            });
+          });
+        }
+
+        const encryptedText = encryptMessage(JSON.stringify(hubPayload), secretKey);
+
+        try {
+          const sendRes = await fetch(`${API_URL}/api/chats/message`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({
+              recipient: u._id,
+              content: encryptedText,
+              mediaUrl: key,
+              mediaType: 'hub',
+              mediaName: isStory ? 'Shared Hub Story' : (isReel ? 'Shared Reel' : 'Shared Post'),
+              mediaSize: 'Link'
+            })
+          });
+          if (!sendRes.ok) throw new Error('Failed to send message');
+
+          showToast(`Shared successfully to ${u.fullName}! ✈️`);
+          if (modal) modal.classList.remove('active');
+
+          loadChatThreads();
+          if (state.currentChatThread && state.currentChatThread.toString() === u._id.toString()) {
+            await fetchMessages(u._id, true);
+          }
+        } catch (err) {
+          console.error('Error sharing hub content:', err);
+          showToast('Failed to share item.');
+        }
+      });
+
+      list.appendChild(card);
+    });
   }
 
   // Handle comment click events (focuses the inline comment input field on dynamic posts or opens modal)
@@ -5561,7 +6209,7 @@ document.addEventListener('DOMContentLoaded', () => {
       localStorage.removeItem('invibe_custom_posts');
       localStorage.removeItem('invibe_posts');
       window.invibe_memory_posts = [];
-    } catch (_) {}
+    } catch (_) { }
 
     let posts = [];
     try {
@@ -5632,10 +6280,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 <h4 class="author-name" style="margin: 0; cursor: pointer;" data-user-id="${authorId}">${authorName}</h4>
                 <span class="author-handle" style="font-size: 12px; color: var(--text-muted, #94a3b8);">@${authorUsername}</span>
               </div>
-              <div class="post-meta" style="margin-top: 2px;">
+              <div class="post-meta" style="margin-top: 2px; display: flex; align-items: center; gap: 6px;">
                 <span class="post-time">${new Date(post.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                 <span class="dot-separator">•</span>
                 <i data-lucide="globe" class="meta-icon"></i>
+                ${post.location ? `
+                  <span class="dot-separator">•</span>
+                  <span class="post-location" style="display: inline-flex; align-items: center; gap: 3px; color: var(--primary, #a855f7); font-size: 11px; font-weight: 600; max-width: 140px; overflow: hidden;">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:block; flex-shrink: 0;"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+                    <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${post.location}</span>
+                  </span>
+                ` : ''}
               </div>
             </div>
           </div>
@@ -5645,20 +6300,66 @@ document.addEventListener('DOMContentLoaded', () => {
                 ${isFollowing ? 'Following' : (isPending ? 'Requested' : '+ Follow')}
               </button>
             ` : ''}
-            <button class="post-options-btn"><i data-lucide="more-horizontal"></i></button>
+            <button class="post-options-btn" data-post-id="${post._id}" data-author-id="${authorId}"><i data-lucide="more-horizontal"></i></button>
           </div>
         </div>
 
         <div class="post-media-container" style="position:relative; overflow:hidden; border-radius: 12px; margin: 12px 0;">
-          ${post.mediaType === 'video'
-          ? `<video src="${post.mediaUrl}" controls loop muted playsinline style="width:100%; max-height:600px; border-radius:12px; display:block;" class="post-media-video"></video>
-               <div class="video-mute-container" style="position: absolute; left: 16px; bottom: 48px; z-index: 12;">
-                 <button class="action-circle-btn mute-btn-action" data-post-id="${post._id}">
-                   <i data-lucide="volume-2"></i>
-                 </button>
-               </div>`
-          : `<img src="${post.mediaUrl}" alt="Post Media" style="width:100%; border-radius:12px; display:block;" />`
+          ${(post.mediaItems && post.mediaItems.length > 1)
+          ? `
+            <div class="post-carousel-wrapper" style="position: relative; width: 100%; max-height: 480px; overflow: hidden; display: flex; flex-direction: column;">
+              <div class="post-carousel-slides" onscroll="((container) => {
+                const index = Math.round(container.scrollLeft / container.clientWidth);
+                const dots = container.parentNode.querySelectorAll('.carousel-dot');
+                dots.forEach((dot, idx) => {
+                  dot.style.background = idx === index ? '#6C3BFF' : 'rgba(255, 255, 255, 0.5)';
+                  dot.style.transform = idx === index ? 'scale(1.2)' : 'scale(1)';
+                });
+              })(this)" style="display: flex; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory; scrollbar-width: none; -ms-overflow-style: none; width: 100%; height: 100%;">
+                ${post.mediaItems.map((item, idx) => `
+                  <div class="carousel-slide-item" style="flex: 0 0 100%; width: 100%; height: 100%; scroll-snap-align: start; display: flex; justify-content: center; align-items: center; background: #000; position: relative; overflow: hidden;">
+                    ${item.type === 'video'
+              ? `<video src="${item.url}" controls loop muted playsinline style="width: 100%; max-height: 100%; object-fit: contain; display: block;" class="post-media-video"></video>`
+              : `<img src="${item.url}" alt="Post Media ${idx + 1}" class="post-media-img" style="max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; display: block;" />`
+            }
+                  </div>
+                `).join('')}
+              </div>
+              
+              <!-- Bottom Controls with chevrons beside the dots -->
+              <div class="carousel-controls-bottom" style="position: absolute; bottom: 12px; left: 0; right: 0; display: flex; justify-content: center; align-items: center; gap: 12px; z-index: 5;">
+                <button class="carousel-nav-btn prev-btn" onclick="this.parentNode.parentNode.querySelector('.post-carousel-slides').scrollBy({left: -this.parentNode.parentNode.clientWidth, behavior: 'smooth'})" style="background: rgba(0,0,0,0.5); border: none; border-radius: 50%; width: 22px; height: 22px; color: white; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 11px; font-weight: bold; outline: none; transition: all 0.2s ease;">‹</button>
+                
+                <div class="carousel-dots-container" style="display: flex; gap: 6px; pointer-events: none; align-items: center;">
+                  ${post.mediaItems.map((_, idx) => `
+                    <span class="carousel-dot ${idx === 0 ? 'active' : ''}" style="width: 6px; height: 6px; border-radius: 50%; background: ${idx === 0 ? '#6C3BFF' : 'rgba(255, 255, 255, 0.5)'}; transition: all 0.2s ease;"></span>
+                  `).join('')}
+                </div>
+                
+                <button class="carousel-nav-btn next-btn" onclick="this.parentNode.parentNode.querySelector('.post-carousel-slides').scrollBy({left: this.parentNode.parentNode.clientWidth, behavior: 'smooth'})" style="background: rgba(0,0,0,0.5); border: none; border-radius: 50%; width: 22px; height: 22px; color: white; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 11px; font-weight: bold; outline: none; transition: all 0.2s ease;">›</button>
+              </div>
+            </div>
+            `
+          : (post.mediaType === 'video'
+            ? `<video src="${post.mediaUrl}" controls loop muted playsinline style="border-radius:12px; display:block;" class="post-media-video"></video>
+                 <div class="video-mute-container" style="position: absolute; left: 16px; bottom: 48px; z-index: 12;">
+                   <button class="action-circle-btn mute-btn-action" data-post-id="${post._id}">
+                     <i data-lucide="volume-2"></i>
+                   </button>
+                 </div>`
+            : `<img src="${post.mediaUrl}" alt="Post Media" class="post-media-img" style="border-radius:12px; display:block;" />`
+          )
         }
+
+          <!-- Speaker Overlay Button (if musicUrl is present) -->
+          ${(() => {
+          const musicUrl = getPostMusicUrl(post);
+          return musicUrl ? `
+              <button class="post-music-speaker-btn" onclick="window.togglePostMusic(this, '${musicUrl}', '${post._id}')" style="position: absolute; left: 12px; bottom: 12px; background: rgba(0,0,0,0.6); border: none; border-radius: 50%; width: 28px; height: 28px; color: white; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 10; outline: none; transition: background 0.2s, transform 0.2s;">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block;"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="22" x2="16" y1="9" y2="15"/><line x1="16" x2="22" y1="9" y2="15"/></svg>
+              </button>
+            ` : '';
+        })()}
 
           <!-- Vertical engagement overlay right aligned -->
           <div class="post-engagement-actions">
@@ -5694,111 +6395,111 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         `;
 
-        feedContainer.appendChild(card);
+      feedContainer.appendChild(card);
 
-        // Click handlers to view post author profile
-        const avatarEl = card.querySelector('.author-avatar');
-        const nameEl = card.querySelector('.author-name');
-        const usernameEl = card.querySelector('.author-username');
+      // Click handlers to view post author profile
+      const avatarEl = card.querySelector('.author-avatar');
+      const nameEl = card.querySelector('.author-name');
+      const usernameEl = card.querySelector('.author-username');
 
-        [avatarEl, nameEl, usernameEl].forEach(el => {
-          if (el) {
-            el.style.cursor = 'pointer';
-            el.addEventListener('click', () => {
-              switchView('profile', post.author._id);
-            });
-          }
-        });
+      [avatarEl, nameEl, usernameEl].forEach(el => {
+        if (el) {
+          el.style.cursor = 'pointer';
+          el.addEventListener('click', () => {
+            switchView('profile', post.author._id);
+          });
+        }
+      });
+    });
+
+    debouncedCreateIcons();
+
+    // Local Like and Bookmark listeners removed in favor of global event delegation
+
+    const dynamicVideoOverlays = feedContainer.querySelectorAll('.video-play-overlay');
+    dynamicVideoOverlays.forEach(overlay => {
+      const container = overlay.closest('.post-media-container');
+      const video = container.querySelector('.post-media-video');
+      const playIcon = overlay.querySelector('i');
+
+      overlay.addEventListener('click', (e) => {
+        e.stopPropagation();
+        video.play();
+        overlay.style.display = 'none';
+        debouncedCreateIcons();
       });
 
-      debouncedCreateIcons();
+      video.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!video.paused) {
+          video.pause();
+          playIcon.setAttribute('data-lucide', 'play');
+          overlay.style.display = 'flex';
+          overlay.style.background = 'rgba(0,0,0,0.25)';
+          overlay.style.opacity = '1';
+          debouncedCreateIcons();
+        }
+      });
+    });
 
-      // Local Like and Bookmark listeners removed in favor of global event delegation
-
-      const dynamicVideoOverlays = feedContainer.querySelectorAll('.video-play-overlay');
-      dynamicVideoOverlays.forEach(overlay => {
-        const container = overlay.closest('.post-media-container');
+    const muteButtons = feedContainer.querySelectorAll('.mute-btn-action');
+    muteButtons.forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const container = btn.closest('.post-media-container');
         const video = container.querySelector('.post-media-video');
-        const playIcon = overlay.querySelector('i');
+        const muteIcon = btn.querySelector('i');
 
-        overlay.addEventListener('click', (e) => {
-          e.stopPropagation();
-          video.play();
-          overlay.style.display = 'none';
-          debouncedCreateIcons();
-        });
-
-        video.addEventListener('click', (e) => {
-          e.stopPropagation();
-          if (!video.paused) {
-            video.pause();
-            playIcon.setAttribute('data-lucide', 'play');
-            overlay.style.display = 'flex';
-            overlay.style.background = 'rgba(0,0,0,0.25)';
-            overlay.style.opacity = '1';
-            debouncedCreateIcons();
-          }
-        });
+        if (video.muted) {
+          video.muted = false;
+          muteIcon.setAttribute('data-lucide', 'volume-2');
+        } else {
+          video.muted = true;
+          muteIcon.setAttribute('data-lucide', 'volume-2');
+        }
+        debouncedCreateIcons();
       });
+    });
 
-      const muteButtons = feedContainer.querySelectorAll('.mute-btn-action');
-      muteButtons.forEach(btn => {
-        btn.addEventListener('click', (e) => {
+    const mediaBoxes = feedContainer.querySelectorAll('.post-media-container');
+    mediaBoxes.forEach(container => {
+      let lastTap = 0;
+      container.addEventListener('click', async (e) => {
+        if (e.target.closest('.post-engagement-actions') || e.target.closest('.video-mute-container')) return; // ignore clicks on engagement overlays or mute button
+        const now = Date.now();
+        const timespan = now - lastTap;
+        if (timespan < 300 && timespan > 0) {
           e.preventDefault();
-          e.stopPropagation();
-          const container = btn.closest('.post-media-container');
-          const video = container.querySelector('.post-media-video');
-          const muteIcon = btn.querySelector('i');
+          const btn = container.closest('.feed-card').querySelector('.like-btn-action');
+          const pid = btn.getAttribute('data-post-id');
+          const rect = container.getBoundingClientRect();
+          const relativeX = e.clientX - rect.left;
+          const relativeY = e.clientY - rect.top;
 
-          if (video.muted) {
-            video.muted = false;
-            muteIcon.setAttribute('data-lucide', 'volume-2');
-          } else {
-            video.muted = true;
-            muteIcon.setAttribute('data-lucide', 'volume-2');
+          triggerHeartExplosion(relativeX, relativeY, container);
+
+          if (!btn.classList.contains('liked')) {
+            await togglePostLike(pid, btn);
           }
-          debouncedCreateIcons();
-        });
+        }
+        lastTap = now;
       });
+    });
 
-      const mediaBoxes = feedContainer.querySelectorAll('.post-media-container');
-      mediaBoxes.forEach(container => {
-        let lastTap = 0;
-        container.addEventListener('click', async (e) => {
-          if (e.target.closest('.post-engagement-actions') || e.target.closest('.video-mute-container')) return; // ignore clicks on engagement overlays or mute button
-          const now = Date.now();
-          const timespan = now - lastTap;
-          if (timespan < 300 && timespan > 0) {
-            e.preventDefault();
-            const btn = container.closest('.feed-card').querySelector('.like-btn-action');
-            const pid = btn.getAttribute('data-post-id');
-            const rect = container.getBoundingClientRect();
-            const relativeX = e.clientX - rect.left;
-            const relativeY = e.clientY - rect.top;
+    // Posted via Enter key only (send button removed)
 
-            triggerHeartExplosion(relativeX, relativeY, container);
-
-            if (!btn.classList.contains('liked')) {
-              await togglePostLike(pid, btn);
-            }
+    const commentInputs = feedContainer.querySelectorAll('.comment-input-field');
+    commentInputs.forEach(input => {
+      input.addEventListener('keydown', async (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const pid = input.id.replace('comment-input-', '');
+          const text = input.value.trim();
+          if (text) {
+            await submitComment(pid, text, input);
           }
-          lastTap = now;
-        });
-      });
-
-      // Posted via Enter key only (send button removed)
-
-      const commentInputs = feedContainer.querySelectorAll('.comment-input-field');
-      commentInputs.forEach(input => {
-        input.addEventListener('keydown', async (e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            const pid = input.id.replace('comment-input-', '');
-            const text = input.value.trim();
-            if (text) {
-              await submitComment(pid, text, input);
-            }
-          }
+        }
       });
     });
   }
@@ -6109,7 +6810,7 @@ document.addEventListener('DOMContentLoaded', () => {
           countBadge.textContent = comments.length;
         }
       }
-    } catch (_) {}
+    } catch (_) { }
   }
 
   async function refreshPostLikesCount(postId) {
@@ -6125,7 +6826,7 @@ document.addEventListener('DOMContentLoaded', () => {
           if (countBadge) countBadge.textContent = (targetPost.likes || []).length;
         }
       }
-    } catch (_) {}
+    } catch (_) { }
   }
 
   initRealtimeFeedSubscriptions();
@@ -6135,91 +6836,201 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!scroller) return;
 
     try {
-      const res = await fetch(`${API_URL}/api/reels`);
-      if (!res.ok) throw new Error('Failed to fetch reels');
-      const reels = await res.json();
+      const token = localStorage.getItem('invibe_jwt_token') || localStorage.getItem('invibe_token');
+      const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+
+      console.log('[HUBB FEED] Fetching reels from API...');
+      const res = await fetch(`${API_URL}/api/reels`, { headers });
+      console.log('[HUBB FEED] API response status:', res.status);
+
+      if (!res.ok) throw new Error('Failed to fetch reels (HTTP ' + res.status + ')');
+      const rawData = await res.json();
+
+      let reels = [];
+      if (Array.isArray(rawData)) reels = rawData;
+      else if (Array.isArray(rawData?.reels)) reels = rawData.reels;
+      else if (Array.isArray(rawData?.data)) reels = rawData.data;
+
+      console.log('[HUBB FEED] reel count:', reels.length);
+      if (reels.length > 0) {
+        console.log('[HUBB FEED] first reel:', reels[0]);
+      }
 
       scroller.innerHTML = '';
 
-      const currentUserStr = localStorage.getItem('invibeUser');
-      const currentUser = currentUserStr ? JSON.parse(currentUserStr) : null;
+      if (!Array.isArray(reels) || reels.length === 0) {
+        scroller.innerHTML = `
+          <div class="empty-reels-state" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 420px; width: 100%; text-align: center; color: rgba(255,255,255,0.7); gap: 14px; padding: 24px; box-sizing: border-box;">
+            <div style="width: 72px; height: 72px; border-radius: 50%; background: rgba(168,85,247,0.15); display: flex; align-items: center; justify-content: center; border: 1px solid rgba(168,85,247,0.3);">
+              <i data-lucide="clapperboard" style="width: 36px; height: 36px; color: #a855f7;"></i>
+            </div>
+            <h3 style="margin: 0; color: white; font-size: 1.2rem; font-weight: 700;">No Hubbing Reels Yet</h3>
+            <p style="margin: 0; font-size: 13px; max-width: 300px; color: rgba(255,255,255,0.6); line-height: 1.5;">Be the first to create and share a reel in Hi-HUBBLE!</p>
+            <button class="welcome-btn btn-primary open-hubbing-editor-btn" style="padding: 10px 24px; font-size: 13.5px; font-weight: 600; border-radius: 10px; cursor: pointer; border: none; color: white; display: flex; align-items: center; gap: 8px; background: linear-gradient(135deg, #a855f7 0%, #d946ef 100%); box-shadow: 0 4px 15px rgba(168,85,247,0.4); transition: transform 0.2s ease;">
+              <i data-lucide="plus" style="width:16px; height:16px;"></i> Post a Reel
+            </button>
+          </div>
+        `;
+        const openBtn = scroller.querySelector('.open-hubbing-editor-btn');
+        if (openBtn) {
+          openBtn.addEventListener('click', () => {
+            const modal = document.getElementById('explore-create-modal');
+            if (modal) modal.classList.add('active');
+          });
+        }
+        if (window.debouncedCreateIcons) window.debouncedCreateIcons();
+        return;
+      }
 
       reels.forEach(reel => {
-        const isLikedByMe = currentUser ? reel.likes.includes(currentUser.id) : false;
+        const authorName = reel.author ? (reel.author.fullName || reel.author.username || 'Hubble User') : 'Hubble User';
+        const authorUser = reel.author ? (reel.author.username || 'hubble_user') : 'hubble_user';
+        const authorAvatar = reel.author?.profileImage || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=100&h=100&q=80';
+
+        const captionText = reel.caption || '';
+        const captionHtml = captionText.replace(/#(\w+)/g, '<span style="color:#c084fc; font-weight:600;">#$1</span>');
+
+        console.log('[HUBB FEED] rendering reel:', reel._id || reel.id);
+        console.log('[HUBB VIDEO] video URL:', reel.videoUrl);
 
         const card = document.createElement('div');
         card.className = 'reel-card';
+        card.setAttribute('data-reel-id', reel._id || reel.id);
+        card.style.cssText = `position: relative; width: 100%; max-width: 400px; height: 620px; margin: 0 auto 24px auto; border-radius: 18px; overflow: hidden; background: #000; box-shadow: 0 12px 35px rgba(0,0,0,0.6); border: 1px solid rgba(255,255,255,0.12);`;
+
         card.innerHTML = `
-          <video src="${reel.videoUrl}" loop muted playsinline class="reel-video"></video>
-          <div class="reel-play-icon-overlay"><i data-lucide="play"></i></div>
+          <video src="${reel.videoUrl}" loop autoplay muted playsinline class="reel-video" style="width:100%; height:100%; object-fit:cover; display:block;"></video>
           
-          <div class="reel-overlay">
-            <div class="reel-left-info">
-              <div class="reel-user">
-                <img src="${reel.author.profileImage || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=100&h=100&q=80'}" alt="${reel.author.fullName}" />
-                <span>${reel.author.username} • <strong class="reel-follow-btn" data-author-id="${reel.author._id}">Follow</strong></span>
+          <div class="reel-play-icon-overlay" style="position:absolute; inset:0; display:none; align-items:center; justify-content:center; pointer-events:none; z-index:4;">
+            <i data-lucide="play" style="width:52px; height:52px; color:white; opacity:0.85;"></i>
+          </div>
+          
+          <div class="double-tap-heart"><i data-lucide="heart"></i></div>
+
+          <div class="reel-overlay" style="position:absolute; inset:0; background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.15) 50%, rgba(0,0,0,0.3) 100%); display:flex; justify-content:space-between; align-items:flex-end; padding:20px; box-sizing:border-box; z-index:5;">
+            
+            <div class="reel-left-info" style="display:flex; flex-direction:column; gap:10px; max-width:72%;">
+              <div class="reel-user" style="display:flex; align-items:center; gap:8px;">
+                <img src="${authorAvatar}" alt="${authorName}" style="width:36px; height:36px; border-radius:50%; object-fit:cover; border:2px solid #a855f7;" />
+                <span style="color:white; font-size:13px; font-weight:600;">@${authorUser}</span>
+                <strong class="reel-follow-btn" data-author-id="${reel.author?._id || reel.author?.id || ''}" style="color:white; font-size:11px; cursor:pointer; background:linear-gradient(135deg, #a855f7 0%, #ec4899 100%); padding:3px 10px; border-radius:12px; font-weight:600;">Follow</strong>
               </div>
-              <p class="reel-caption">${reel.caption}</p>
-              <div class="reel-music"><i data-lucide="music" class="music-icon-spin"></i> <span>Original Audio - ${reel.author.username}</span></div>
+              <p class="reel-caption" style="color:white; font-size:13px; margin:0; line-height:1.4;">${captionHtml}</p>
+              <div class="reel-music" style="display:flex; align-items:center; gap:6px; color:rgba(255,255,255,0.8); font-size:11px;">
+                <i data-lucide="music" style="width:12px; height:12px;" class="music-icon-spin"></i> <span>${reel.audioTrackName || ('Original Audio - ' + authorUser)}</span>
+              </div>
             </div>
-            <div class="reel-right-actions">
-              <div class="reel-actions-capsule">
-                <div class="reel-action-btn reel-like-action" data-reel-id="${reel._id}">
-                  <button class="action-circle-btn heart-btn ${isLikedByMe ? 'liked' : ''}"><i data-lucide="heart" style="${isLikedByMe ? 'fill:#8b5cf6; stroke:#8b5cf6;' : ''}"></i></button>
-                  <span class="action-count">${reel.likes.length}</span>
+            
+            <div class="reel-right-actions" style="display:flex; flex-direction:column; gap:14px; align-items:center;">
+              <div class="reel-actions-capsule" style="background: rgba(15, 23, 42, 0.45); backdrop-filter: blur(12px); border-radius: 36px; padding: 18px 8px; border: 1px solid rgba(255,255,255,0.12); display: flex; flex-direction: column; gap: 18px; align-items: center; box-shadow: 0 10px 30px rgba(0,0,0,0.4);">
+                
+                <!-- 1. Like -->
+                <div class="reel-action-btn reel-like-action" data-reel-id="${reel._id || reel.id}" style="display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer;">
+                  <button class="action-circle-btn heart-btn ${reel.isLiked ? 'liked' : ''}" style="background:none; border:none; color:white; width:40px; height:40px; display:flex; align-items:center; justify-content:center; cursor:pointer;">
+                    <i data-lucide="heart" style="${reel.isLiked ? 'fill:#8b5cf6; stroke:#8b5cf6;' : ''}"></i>
+                  </button>
+                  <span class="action-count" style="color:white; font-size:11px; font-weight:700;">${reel.formattedLikes || reel.likeCount || '0'}</span>
                 </div>
-                <div class="reel-action-btn reel-comment-sim">
-                  <button class="action-circle-btn"><i data-lucide="message-square"></i></button>
-                  <span class="action-count">1.2K</span>
+
+                <!-- 2. Comment -->
+                <div class="reel-action-btn reel-comment-sim" data-reel-id="${reel._id || reel.id}" style="display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer;">
+                  <button class="action-circle-btn" style="background:none; border:none; color:white; width:40px; height:40px; display:flex; align-items:center; justify-content:center; cursor:pointer;">
+                    <i data-lucide="message-circle"></i>
+                  </button>
+                  <span class="action-count" style="color:white; font-size:11px; font-weight:700;">${reel.formattedComments || reel.commentCount || '0'}</span>
                 </div>
-                <div class="reel-action-btn reel-share-sim">
-                  <button class="action-circle-btn"><i data-lucide="send"></i></button>
+
+                <!-- 3. Share -->
+                <div class="reel-action-btn reel-share-sim" data-reel-id="${reel._id || reel.id}" style="display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer;">
+                  <button class="action-circle-btn" style="background:none; border:none; color:white; width:40px; height:40px; display:flex; align-items:center; justify-content:center; cursor:pointer;">
+                    <i data-lucide="send"></i>
+                  </button>
+                  <span class="action-count" style="color:white; font-size:11px; font-weight:700;">${reel.formattedShares || reel.shareCount || '0'}</span>
                 </div>
-                <div class="reel-action-btn">
-                  <button class="action-circle-btn"><i data-lucide="more-vertical"></i></button>
+
+                <!-- 4. Save/Bookmark -->
+                <div class="reel-action-btn reel-save-action" data-reel-id="${reel._id || reel.id}" style="display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer;">
+                  <button class="action-circle-btn star-btn ${reel.isSaved ? 'saved' : ''}" style="background:none; border:none; color:white; width:40px; height:40px; display:flex; align-items:center; justify-content:center; cursor:pointer;">
+                    <i data-lucide="bookmark" style="${reel.isSaved ? 'fill:#FBBF24; stroke:#FBBF24;' : ''}"></i>
+                  </button>
                 </div>
+
+                <!-- 5. Sound / Audio Mute Toggle -->
+                <div class="reel-action-btn reel-audio-action" data-reel-id="${reel._id || reel.id}" style="display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer;" title="Toggle Audio">
+                  <button class="action-circle-btn reel-audio-toggle-btn" style="background:none; border:none; color:white; width:40px; height:40px; display:flex; align-items:center; justify-content:center; cursor:pointer;">
+                    <i data-lucide="volume-x"></i>
+                  </button>
+                </div>
+              </div>
+
+              <!-- 5. More Options -->
+              <div class="reel-action-btn reel-more-sim" data-reel-id="${reel._id || reel.id}">
+                <button class="action-circle-btn" style="width:40px; height:40px; border-radius:50%; background:rgba(0,0,0,0.4); border:1px solid rgba(255,255,255,0.15); display:flex; align-items:center; justify-content:center; color:white; cursor:pointer;">
+                  <i data-lucide="more-horizontal"></i>
+                </button>
               </div>
             </div>
           </div>
 
-          <div class="story-viewer-overlay reel-comments-modal">
-            <div class="comments-card glass-panel">
-              <div class="modal-header">
-                <h3>Comments</h3>
-                <button class="modal-close-btn"><i data-lucide="x"></i></button>
+          <!-- Bottom Center Mascot Circle -->
+          <div class="reel-mascot-overlay" style="position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); width: 44px; height: 44px; border-radius: 50%; background: radial-gradient(circle, rgba(168,85,247,0.9) 0%, rgba(139,92,246,0.5) 60%, transparent 100%); display: flex; align-items: center; justify-content: center; box-shadow: 0 0 20px rgba(168,85,247,0.8); z-index: 8; cursor: pointer; border: 1.5px solid rgba(255,255,255,0.3);" title="Hi-HUBBLE Mascot">
+            <img src="/hihubble-mascot-circle.png" alt="Mascot" style="width: 38px; height: 38px; border-radius: 50%; object-fit: cover;" />
+          </div>
+
+          <!-- Comments Modal -->
+          <div class="story-viewer-overlay reel-comments-modal" data-reel-id="${reel._id || reel.id}">
+            <div class="comments-card glass-panel" style="background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(20px); border-radius: 20px; border: 1px solid rgba(255,255,255,0.15); width: 90%; max-width: 380px; max-height: 80vh; display: flex; flex-direction: column; overflow: hidden;">
+              <div class="modal-header" style="display:flex; justify-content:space-between; align-items:center; padding:16px 20px; border-bottom:1px solid rgba(255,255,255,0.1);">
+                <h3 style="margin:0; font-size:16px; color:white; font-weight:600;">Comments</h3>
+                <button class="modal-close-btn" style="background:none; border:none; color:white; cursor:pointer; font-size:18px;"><i data-lucide="x"></i></button>
               </div>
-              <div class="comments-list" id="comments-list-${reel._id}"></div>
-              <div class="comments-footer">
-                <input type="text" placeholder="Add a comment..." />
-                <button class="comment-send-btn"><i data-lucide="send"></i></button>
+              <div class="comments-list" style="flex:1; overflow-y:auto; padding:16px; min-height:180px; max-height:360px;"></div>
+              <div class="comments-footer" style="display:flex; gap:10px; padding:12px 16px; border-top:1px solid rgba(255,255,255,0.1); background:rgba(0,0,0,0.3);">
+                <input type="text" placeholder="Add a comment..." style="flex:1; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); border-radius:20px; padding:8px 16px; color:white; font-size:13px; outline:none;" />
+                <button class="comment-send-btn" style="width:36px; height:36px; border-radius:50%; background:linear-gradient(135deg, #a855f7 0%, #d946ef 100%); border:none; color:white; display:flex; align-items:center; justify-content:center; cursor:pointer;"><i data-lucide="send" style="width:16px; height:16px;"></i></button>
               </div>
             </div>
           </div>
 
-          <div class="story-viewer-overlay reel-share-modal">
-            <div class="share-card glass-panel">
-              <div class="modal-header">
-                <h3>Share to Hubbies</h3>
-                <button class="modal-close-btn"><i data-lucide="x"></i></button>
+          <!-- Share Modal -->
+          <div class="story-viewer-overlay reel-share-modal" data-reel-id="${reel._id || reel.id}">
+            <div class="share-card glass-panel" style="background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(20px); border-radius: 20px; border: 1px solid rgba(255,255,255,0.15); width: 90%; max-width: 360px; display: flex; flex-direction: column; overflow: hidden;">
+              <div class="modal-header" style="display:flex; justify-content:space-between; align-items:center; padding:16px 20px; border-bottom:1px solid rgba(255,255,255,0.1);">
+                <h3 style="margin:0; font-size:16px; color:white; font-weight:600;">Share Reel</h3>
+                <button class="modal-close-btn" style="background:none; border:none; color:white; cursor:pointer; font-size:18px;"><i data-lucide="x"></i></button>
               </div>
-              <div class="share-friends-list"></div>
+              <div class="share-options" style="padding: 20px; display: flex; flex-direction: column; gap: 12px;">
+                <button class="copy-link-btn" style="padding: 12px; border-radius: 12px; background: linear-gradient(135deg, #a855f7 0%, #d946ef 100%); color: white; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: 600; font-size: 13.5px;"><i data-lucide="copy" style="width:18px; height:18px;"></i> Copy Reel Link</button>
+              </div>
             </div>
           </div>
         `;
 
+        // Diagnostic video element listeners
+        const video = card.querySelector('.reel-video');
+        if (video) {
+          video.addEventListener('loadedmetadata', () => console.log('[HUBB VIDEO] loadedmetadata for reel:', reel._id || reel.id));
+          video.addEventListener('canplay', () => console.log('[HUBB VIDEO] canplay for reel:', reel._id || reel.id));
+          video.addEventListener('error', (e) => console.error('[HUBB VIDEO] error for reel:', reel._id || reel.id, video.error));
+          video.addEventListener('stalled', () => console.warn('[HUBB VIDEO] stalled for reel:', reel._id || reel.id));
+          video.addEventListener('waiting', () => console.warn('[HUBB VIDEO] waiting for reel:', reel._id || reel.id));
+        }
+
         scroller.appendChild(card);
       });
 
-      debouncedCreateIcons();
+      if (window.debouncedCreateIcons) window.debouncedCreateIcons();
       wireReelInteractions(scroller);
 
     } catch (err) {
-      console.error('Error loading reels:', err);
+      console.error('[HUBB FEED] Error loading reels:', err);
     }
   }
 
+  window.loadFeedReels = loadFeedReels;
+
   async function toggleReelLike(reelId, btnElement) {
-    const token = localStorage.getItem('invibe_jwt_token');
+    const token = localStorage.getItem('invibe_jwt_token') || localStorage.getItem('invibe_token');
     if (!token) {
       showToast('Please log in to like reels! 🔐');
       return;
@@ -6250,15 +7061,140 @@ document.addEventListener('DOMContentLoaded', () => {
           heartIcon.style.stroke = 'currentColor';
         }
       }
-      if (countSpan) countSpan.textContent = data.likesCount;
+      if (countSpan) countSpan.textContent = data.formattedLikes || data.likesCount;
     } catch (err) {
       console.error('Error liking reel:', err);
       showToast(err.message);
     }
   }
 
+  async function toggleReelSave(reelId, btnElement) {
+    const token = localStorage.getItem('invibe_jwt_token') || localStorage.getItem('invibe_token');
+    if (!token) {
+      showToast('Please log in to save reels! 🔐');
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_URL}/api/reels/${reelId}/save`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+
+      const starIcon = btnElement.querySelector('i, svg');
+      if (data.isSaved) {
+        btnElement.classList.add('saved');
+        if (starIcon) {
+          starIcon.style.fill = '#FBBF24';
+          starIcon.style.stroke = '#FBBF24';
+        }
+        showToast('Reel saved to bookmarks! ⭐');
+      } else {
+        btnElement.classList.remove('saved');
+        if (starIcon) {
+          starIcon.style.fill = 'none';
+          starIcon.style.stroke = 'currentColor';
+        }
+        showToast('Reel removed from bookmarks.');
+      }
+    } catch (err) {
+      showToast(err.message);
+    }
+  }
+
+  async function loadReelComments(reelId, modalElement) {
+    const listElem = modalElement.querySelector('.comments-list');
+    if (!listElem) return;
+    listElem.innerHTML = '<div style="padding: 20px; text-align: center; color: rgba(255,255,255,0.6); font-size: 13px;">Loading comments...</div>';
+
+    try {
+      const res = await fetch(`${API_URL}/api/reels/${reelId}/comments`);
+      const comments = await res.json();
+      listElem.innerHTML = '';
+      if (!Array.isArray(comments) || comments.length === 0) {
+        listElem.innerHTML = '<div style="padding: 20px; text-align: center; color: rgba(255,255,255,0.5); font-size: 13px;">No comments yet. Be the first to comment!</div>';
+        return;
+      }
+      comments.forEach(c => {
+        const item = document.createElement('div');
+        item.className = 'comment-item';
+        item.style.cssText = 'display: flex; gap: 10px; margin-bottom: 12px; align-items: flex-start;';
+        const avatar = c.author?.profileImage || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=100&h=100&q=80';
+        item.innerHTML = `
+          <img src="${avatar}" style="width:30px; height:30px; border-radius:50%; object-fit:cover; border:1px solid rgba(255,255,255,0.2);" />
+          <div style="flex:1; background: rgba(255,255,255,0.06); padding: 8px 12px; border-radius: 12px;">
+            <div style="font-size:12px; font-weight:700; color:white;">@${c.author?.username || 'user'}</div>
+            <div style="font-size:12.5px; color:rgba(255,255,255,0.9); margin-top:3px; line-height: 1.4;">${c.content}</div>
+          </div>
+        `;
+        listElem.appendChild(item);
+      });
+    } catch (err) {
+      listElem.innerHTML = '<div style="padding: 20px; text-align: center; color: #ef4444; font-size: 13px;">Failed to load comments</div>';
+    }
+  }
+
+  async function submitReelComment(reelId, text, inputField, modalElement, countSpan) {
+    const token = localStorage.getItem('invibe_jwt_token') || localStorage.getItem('invibe_token');
+    if (!token) {
+      showToast('Please log in to post a comment! 🔐');
+      return;
+    }
+    const trimmed = (text || '').trim();
+    if (!trimmed) return;
+
+    try {
+      const res = await fetch(`${API_URL}/api/reels/${reelId}/comments`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ content: trimmed })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Unable to post comment. Please try again.');
+      }
+
+      inputField.value = '';
+      if (countSpan) {
+        countSpan.textContent = data.formattedComments !== undefined ? data.formattedComments : data.commentCount;
+      }
+      showToast('Comment posted! 💬');
+      await loadReelComments(reelId, modalElement);
+    } catch (err) {
+      console.error('Error posting comment:', err);
+      showToast(err.message || 'Unable to post comment. Please try again.');
+    }
+  }
+
+  async function handleReelShare(reelId, shareModal, countSpan) {
+    try {
+      const res = await fetch(`${API_URL}/api/reels/${reelId}/share`, { method: 'POST' });
+      const data = await res.json();
+      if (data.formattedShares && countSpan) {
+        countSpan.textContent = data.formattedShares;
+      }
+    } catch (_) { }
+
+    if (shareModal) shareModal.classList.add('active');
+    const copyBtn = shareModal ? shareModal.querySelector('.copy-link-btn') : null;
+    if (copyBtn) {
+      copyBtn.onclick = () => {
+        const reelUrl = `${window.location.origin}/#reel-${reelId}`;
+        navigator.clipboard.writeText(reelUrl).then(() => {
+          showToast('Reel link copied to clipboard! 📋');
+          if (shareModal) shareModal.classList.remove('active');
+        });
+      };
+    }
+  }
+
   async function toggleFollowFromReel(authorId, btnElement) {
-    const token = localStorage.getItem('invibe_jwt_token');
+    const token = localStorage.getItem('invibe_jwt_token') || localStorage.getItem('invibe_token');
     if (!token) {
       showToast('Please log in to follow users! 🔐');
       return;
@@ -6273,10 +7209,10 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!res.ok) throw new Error(data.error);
 
       btnElement.textContent = 'Hubbies';
-      btnElement.style.background = 'rgba(255,255,255,0.2)';
+      btnElement.style.background = 'rgba(255,255,255,0.25)';
       showToast(data.message || 'Followed successfully!');
-      loadProfileStats();
-      loadFollowSuggestions();
+      if (typeof loadProfileStats === 'function') loadProfileStats();
+      if (typeof loadFollowSuggestions === 'function') loadFollowSuggestions();
     } catch (err) {
       showToast(err.message);
     }
@@ -6292,13 +7228,14 @@ document.addEventListener('DOMContentLoaded', () => {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`
       }
-    }).catch(() => {});
+    }).catch(() => { });
   }
 
   sendPresenceHeartbeat();
   setInterval(sendPresenceHeartbeat, 30000);
   setTimeout(() => {
     loadFollowSuggestions();
+    loadTrendingHubbs();
     loadActiveVibers();
   }, 100);
 
@@ -6313,7 +7250,7 @@ document.addEventListener('DOMContentLoaded', () => {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
         keepalive: true
-      }).catch(() => {});
+      }).catch(() => { });
     }
   };
 
@@ -6398,6 +7335,13 @@ document.addEventListener('DOMContentLoaded', () => {
       `;
       listContainer.appendChild(row);
 
+      const infoArea = row.querySelector('.user-info-area');
+      if (infoArea) {
+        infoArea.addEventListener('click', () => {
+          switchView('chats', user._id);
+        });
+      }
+
       const btnElement = row.querySelector('.follow-row-btn');
       if (btnElement) {
         btnElement.addEventListener('click', async (e) => {
@@ -6407,6 +7351,81 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
+
+  // --- TRENDING HUBBS HOME WIDGET ---
+  async function loadTrendingHubbs() {
+    const container = document.getElementById('trending-hubbs-list');
+    if (!container) return;
+
+    try {
+      const res = await fetch(`${API_URL}/api/posts/trending`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const hubbs = await res.json();
+
+      container.innerHTML = '';
+      if (!hubbs || hubbs.length === 0) {
+        container.innerHTML = '<div style="padding: 16px; text-align: center; color: var(--text-muted); font-size: 13px;">No trending hubbs.</div>';
+        return;
+      }
+
+      hubbs.forEach(hubb => {
+        const item = document.createElement('div');
+        item.className = 'trending-hubb-item';
+        item.style.cssText = 'display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; margin-bottom: 8px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; cursor: pointer; transition: all 0.2s ease;';
+
+        item.addEventListener('mouseenter', () => {
+          item.style.background = 'rgba(168, 85, 247, 0.12)';
+          item.style.borderColor = 'rgba(168, 85, 247, 0.3)';
+        });
+        item.addEventListener('mouseleave', () => {
+          item.style.background = 'rgba(255,255,255,0.03)';
+          item.style.borderColor = 'rgba(255,255,255,0.06)';
+        });
+
+        const displayTitle = (hubb.title || '').replace(/<[^>]*>/g, '').trim() || 'Latest Hubb';
+
+        item.innerHTML = `
+          <div style="display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;">
+            ${hubb.mediaUrl ? `
+              <div style="width: 36px; height: 36px; border-radius: 8px; overflow: hidden; flex-shrink: 0; background: #000;">
+                ${hubb.mediaType === 'video' ? `<video src="${hubb.mediaUrl}" style="width:100%; height:100%; object-fit:cover;"></video>` : `<img src="${hubb.mediaUrl}" style="width:100%; height:100%; object-fit:cover;" />`}
+              </div>
+            ` : `
+              <div style="width: 36px; height: 36px; border-radius: 8px; flex-shrink: 0; background: linear-gradient(135deg, #6c3bff, #a855f7); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 14px;">
+                #
+              </div>
+            `}
+            <div style="min-width: 0; flex: 1;">
+              <div style="font-size: 12px; font-weight: 600; color: var(--text-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${displayTitle}</div>
+              <div style="font-size: 10px; color: var(--text-muted); display: flex; align-items: center; gap: 4px; margin-top: 1px;">
+                <span style="color: var(--primary, #a855f7); font-weight: 600;">${hubb.hashtag}</span>
+                <span>•</span>
+                <span>@${hubb.author.username}</span>
+              </div>
+            </div>
+          </div>
+          <div style="font-size: 10px; color: var(--text-muted); display: flex; align-items: center; gap: 3px; padding-left: 6px; flex-shrink: 0;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="none" style="color: #ef4444;"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>
+            <span>${hubb.likesCount || 0}</span>
+          </div>
+        `;
+
+        item.addEventListener('click', () => {
+          const card = document.getElementById(`post-${hubb._id}`);
+          if (card) {
+            card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            card.style.outline = '2px solid var(--primary, #a855f7)';
+            setTimeout(() => { card.style.outline = 'none'; }, 2000);
+          }
+        });
+
+        container.appendChild(item);
+      });
+    } catch (err) {
+      console.error('[loadTrendingHubbs Error]:', err);
+    }
+  }
+
 
   async function toggleFollowUser(targetUserId, btnElement, userObj = null) {
     const token = localStorage.getItem('invibe_jwt_token') || localStorage.getItem('invibe_token');
@@ -6705,6 +7724,49 @@ document.addEventListener('DOMContentLoaded', () => {
         });
       }
 
+      const saveBtnAction = card.querySelector('.reel-save-action');
+      const starBtn = card.querySelector('.reel-save-action .star-btn');
+      if (saveBtnAction && starBtn) {
+        saveBtnAction.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          await toggleReelSave(reelId, starBtn);
+        });
+      }
+
+      const audioBtnAction = card.querySelector('.reel-audio-action');
+      const audioToggleBtn = card.querySelector('.reel-audio-toggle-btn');
+      if (audioBtnAction && audioToggleBtn && video) {
+        audioBtnAction.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const isCurrentlyMuted = video.muted;
+          if (isCurrentlyMuted) {
+            // Mute all other reel videos first so only one active reel produces sound
+            document.querySelectorAll('.reel-video').forEach(v => {
+              if (v !== video) {
+                v.muted = true;
+                const otherBtn = v.closest('.reel-card')?.querySelector('.reel-audio-toggle-btn i');
+                if (otherBtn) otherBtn.setAttribute('data-lucide', 'volume-x');
+              }
+            });
+
+            video.muted = false;
+            video.volume = 1.0;
+            video.play().catch(err => console.log('[REEL AUDIO DEBUG] Play on unmute notice:', err.message));
+            const icon = audioToggleBtn.querySelector('i');
+            if (icon) icon.setAttribute('data-lucide', 'volume-2');
+            if (typeof safeShowToast === 'function') safeShowToast('Reel audio unmuted 🔊');
+            else if (typeof window.showToast === 'function') window.showToast('Reel audio unmuted 🔊');
+          } else {
+            video.muted = true;
+            const icon = audioToggleBtn.querySelector('i');
+            if (icon) icon.setAttribute('data-lucide', 'volume-x');
+            if (typeof safeShowToast === 'function') safeShowToast('Reel audio muted 🔇');
+            else if (typeof window.showToast === 'function') window.showToast('Reel audio muted 🔇');
+          }
+          if (window.debouncedCreateIcons) window.debouncedCreateIcons();
+        });
+      }
+
       const followReel = card.querySelector('.reel-follow-btn');
       if (followReel) {
         followReel.addEventListener('click', async (e) => {
@@ -6716,10 +7778,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const commentBtn = card.querySelector('.reel-comment-sim');
       const commentModal = card.querySelector('.reel-comments-modal');
+      const commentCountSpan = card.querySelector('.reel-comment-sim .action-count');
       if (commentBtn && commentModal) {
         commentBtn.addEventListener('click', (e) => {
           e.stopPropagation();
           commentModal.classList.add('active');
+          loadReelComments(reelId, commentModal);
         });
         const closeBtn = commentModal.querySelector('.modal-close-btn');
         if (closeBtn) {
@@ -6740,7 +7804,7 @@ document.addEventListener('DOMContentLoaded', () => {
           const handleSend = async () => {
             const text = inputField.value.trim();
             if (text) {
-              await submitComment(reelId, text, inputField);
+              await submitReelComment(reelId, text, inputField, commentModal, commentCountSpan);
             }
           };
           sendBtn.addEventListener('click', handleSend);
@@ -6755,10 +7819,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const shareBtn = card.querySelector('.reel-share-sim');
       const shareModal = card.querySelector('.reel-share-modal');
+      const shareCountSpan = card.querySelector('.reel-share-sim .action-count');
       if (shareBtn && shareModal) {
         shareBtn.addEventListener('click', (e) => {
           e.stopPropagation();
-          openShare('reel_' + reelId, shareModal);
+          handleReelShare(reelId, shareModal, shareCountSpan);
         });
         const closeBtn = shareModal.querySelector('.modal-close-btn');
         if (closeBtn) {
@@ -6771,6 +7836,16 @@ document.addEventListener('DOMContentLoaded', () => {
           if (e.target === shareModal) {
             shareModal.classList.remove('active');
           }
+        });
+      }
+
+      const mascotOverlay = card.querySelector('.reel-mascot-overlay');
+      if (mascotOverlay) {
+        mascotOverlay.addEventListener('click', (e) => {
+          e.stopPropagation();
+          mascotOverlay.style.transform = 'translateX(-50%) scale(1.2)';
+          setTimeout(() => { mascotOverlay.style.transform = 'translateX(-50%) scale(1)'; }, 300);
+          showToast('Hi-HUBBLE Hubbing Mascot 🚀💜');
         });
       }
 
@@ -6886,7 +7961,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Immediately set UI to user's profile info (no loading placeholders)
     const profileAvatar = document.querySelector('.profile-screen-avatar');
-    if (profileAvatar) profileAvatar.src = (isMe && localPhoto) ? localPhoto : (localPhoto || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80');
+    if (profileAvatar) profileAvatar.src = isMe ? (localPhoto || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80') : 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=100&h=100&q=80';
 
     const profileName = document.querySelector('.profile-summary-top h3');
     if (profileName) profileName.innerHTML = isMe ? (currentUser.fullName || currentUser.username) : 'Hubber Profile';
@@ -6905,13 +7980,22 @@ document.addEventListener('DOMContentLoaded', () => {
       if (followBtn) followBtn.style.display = 'none';
       if (optionsList) optionsList.style.display = 'grid';
       if (logoutBtn) logoutBtn.style.display = 'block';
+    } else {
+      if (followBtn) {
+        followBtn.style.display = 'block';
+        followBtn.setAttribute('data-user-id', user._id);
+        followBtn.classList.remove('followed');
+        followBtn.textContent = 'Follow';
+      }
+      if (optionsList) optionsList.style.display = 'none';
+      if (logoutBtn) logoutBtn.style.display = 'none';
     }
 
     let user = {
       _id: isMe ? (currentUser.id || currentUser._id || 'me') : userId,
       username: isMe ? (currentUser.username || 'haribol') : (userId || 'user'),
       fullName: isMe ? (currentUser.fullName || currentUser.username || 'haribol') : (userId || 'user'),
-      profileImage: (isMe && localPhoto) ? localPhoto : (localPhoto || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80'),
+      profileImage: isMe ? (localPhoto || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80') : 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=100&h=100&q=80',
       bio: 'Hubber creator on Hi-Hubble 🚀',
       followersCount: 0,
       followingCount: 0
@@ -6934,7 +8018,29 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (res && res.ok) {
           const data = await res.json();
-          if (data.user) user = { ...user, ...data.user };
+          if (data.user) {
+            user = { ...user, ...data.user };
+            
+            // Dynamically refresh the profile details with actual database fields
+            if (profileAvatar) profileAvatar.src = user.profileImage || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=100&h=100&q=80';
+            if (profileName) profileName.innerHTML = user.fullName || user.username || 'Hubber Profile';
+            if (profileHandle) profileHandle.textContent = '@' + (user.username || 'user');
+            if (profileBio) profileBio.textContent = user.bio || 'Hubber creator on Hi-Hubble 🚀';
+
+            if (!isMe && followBtn) {
+              followBtn.setAttribute('data-user-id', user._id);
+              if (user.isFollowing) {
+                followBtn.classList.add('followed');
+                followBtn.textContent = 'Hubbies';
+              } else if (user.isPending) {
+                followBtn.classList.add('followed');
+                followBtn.textContent = 'Requested';
+              } else {
+                followBtn.classList.remove('followed');
+                followBtn.textContent = 'Follow';
+              }
+            }
+          }
           if (Array.isArray(data.posts)) posts = data.posts;
           if (Array.isArray(data.reels)) reels = data.reels;
         }
@@ -7036,29 +8142,82 @@ document.addEventListener('DOMContentLoaded', () => {
             <img src="${post.author.profileImage || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=80&h=80&q=80'}" alt="${post.author.fullName}" class="author-avatar" />
             <div>
               <h4 class="author-name">${post.author.fullName}</h4>
-              <div class="post-meta">
+              <div class="post-meta" style="display: flex; align-items: center; gap: 6px;">
                 <span class="post-time">${new Date(post.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                 <span class="dot-separator">•</span>
                 <i data-lucide="globe" class="meta-icon"></i>
+                ${post.location ? `
+                  <span class="dot-separator">•</span>
+                  <span class="post-location" style="display: inline-flex; align-items: center; gap: 3px; color: var(--primary, #a855f7); font-size: 11px; font-weight: 600; max-width: 140px; overflow: hidden;">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:block; flex-shrink: 0;"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+                    <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${post.location}</span>
+                  </span>
+                ` : ''}
               </div>
             </div>
           </div>
-          <button class="post-options-btn"><i data-lucide="more-horizontal"></i></button>
+          <button class="post-options-btn" data-post-id="${post._id}" data-author-id="${post.author._id || post.author}"><i data-lucide="more-horizontal"></i></button>
         </div>
 
         <div class="post-media-container" style="position:relative; overflow:hidden; border-radius: 12px; margin: 12px 0;">
-          ${post.mediaType === 'video'
-        ? `<video src="${post.mediaUrl}" loop muted playsinline style="width:100%; border-radius:12px; display:block;" class="post-media-video"></video>
-               <div class="video-play-overlay">
-                 <button class="play-btn-big"><i data-lucide="play"></i></button>
-               </div>
-               <div class="video-mute-container" style="position: absolute; left: 16px; bottom: 24px; z-index: 12;">
-                 <button class="action-circle-btn mute-btn-action" data-post-id="${post._id}">
-                   <i data-lucide="volume-2"></i>
-                 </button>
-               </div>`
-        : `<img src="${post.mediaUrl}" alt="Post Media" style="width:100%; border-radius:12px; display:block;" />`
+          ${(post.mediaItems && post.mediaItems.length > 1)
+        ? `
+            <div class="post-carousel-wrapper" style="position: relative; width: 100%; max-height: 480px; overflow: hidden; display: flex; flex-direction: column;">
+              <div class="post-carousel-slides" onscroll="((container) => {
+                const index = Math.round(container.scrollLeft / container.clientWidth);
+                const dots = container.parentNode.querySelectorAll('.carousel-dot');
+                dots.forEach((dot, idx) => {
+                  dot.style.background = idx === index ? '#6C3BFF' : 'rgba(255, 255, 255, 0.5)';
+                  dot.style.transform = idx === index ? 'scale(1.2)' : 'scale(1)';
+                });
+              })(this)" style="display: flex; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory; scrollbar-width: none; -ms-overflow-style: none; width: 100%; height: 100%;">
+                ${post.mediaItems.map((item, idx) => `
+                  <div class="carousel-slide-item" style="flex: 0 0 100%; width: 100%; height: 100%; scroll-snap-align: start; display: flex; justify-content: center; align-items: center; background: #000; position: relative; overflow: hidden;">
+                    ${item.type === 'video'
+            ? `<video src="${item.url}" controls loop muted playsinline style="width: 100%; max-height: 100%; object-fit: contain; display: block;" class="post-media-video"></video>`
+            : `<img src="${item.url}" alt="Post Media ${idx + 1}" class="post-media-img" style="max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; display: block;" />`
+          }
+                  </div>
+                `).join('')}
+              </div>
+              
+              <!-- Bottom Controls with chevrons beside the dots -->
+              <div class="carousel-controls-bottom" style="position: absolute; bottom: 12px; left: 0; right: 0; display: flex; justify-content: center; align-items: center; gap: 12px; z-index: 5;">
+                <button class="carousel-nav-btn prev-btn" onclick="this.parentNode.parentNode.querySelector('.post-carousel-slides').scrollBy({left: -this.parentNode.parentNode.clientWidth, behavior: 'smooth'})" style="background: rgba(0,0,0,0.5); border: none; border-radius: 50%; width: 22px; height: 22px; color: white; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 11px; font-weight: bold; outline: none; transition: all 0.2s ease;">‹</button>
+                
+                <div class="carousel-dots-container" style="display: flex; gap: 6px; pointer-events: none; align-items: center;">
+                  ${post.mediaItems.map((_, idx) => `
+                    <span class="carousel-dot ${idx === 0 ? 'active' : ''}" style="width: 6px; height: 6px; border-radius: 50%; background: ${idx === 0 ? '#6C3BFF' : 'rgba(255, 255, 255, 0.5)'}; transition: all 0.2s ease;"></span>
+                  `).join('')}
+                </div>
+                
+                <button class="carousel-nav-btn next-btn" onclick="this.parentNode.parentNode.querySelector('.post-carousel-slides').scrollBy({left: this.parentNode.parentNode.clientWidth, behavior: 'smooth'})" style="background: rgba(0,0,0,0.5); border: none; border-radius: 50%; width: 22px; height: 22px; color: white; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 11px; font-weight: bold; outline: none; transition: all 0.2s ease;">›</button>
+              </div>
+            </div>
+            `
+        : (post.mediaType === 'video'
+          ? `<video src="${post.mediaUrl}" loop muted playsinline style="border-radius:12px; display:block;" class="post-media-video"></video>
+                 <div class="video-play-overlay">
+                   <button class="play-btn-big"><i data-lucide="play"></i></button>
+                 </div>
+                 <div class="video-mute-container" style="position: absolute; left: 16px; bottom: 24px; z-index: 12;">
+                   <button class="action-circle-btn mute-btn-action" data-post-id="${post._id}">
+                     <i data-lucide="volume-2"></i>
+                   </button>
+                 </div>`
+          : `<img src="${post.mediaUrl}" alt="Post Media" class="post-media-img" style="border-radius:12px; display:block;" />`
+        )
       }
+
+          <!-- Speaker Overlay Button (if musicUrl is present) -->
+          ${(() => {
+        const musicUrl = getPostMusicUrl(post);
+        return musicUrl ? `
+              <button class="post-music-speaker-btn" onclick="window.togglePostMusic(this, '${musicUrl}', '${post._id}')" style="position: absolute; left: 12px; bottom: 12px; background: rgba(0,0,0,0.6); border: none; border-radius: 50%; width: 28px; height: 28px; color: white; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 10; outline: none; transition: background 0.2s, transform 0.2s;">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block;"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="22" x2="16" y1="9" y2="15"/><line x1="16" x2="22" y1="9" y2="15"/></svg>
+              </button>
+            ` : '';
+      })()}
 
           <div class="post-engagement-actions">
             <div class="engagement-item like-btn-action ${isLikedByMe ? 'liked' : ''}" data-post-id="${post._id}">
@@ -7324,9 +8483,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!res.ok) throw new Error(data.error);
 
         if (endpoint === 'follow') {
-          profileFollowBtn.classList.add('followed');
-          profileFollowBtn.textContent = 'Hubbies';
-          showToast(data.message || 'Followed successfully!');
+          if (data.status === 'pending') {
+            profileFollowBtn.classList.add('followed');
+            profileFollowBtn.textContent = 'Requested';
+            showToast(data.message || 'Follow request sent. ⏳');
+          } else {
+            profileFollowBtn.classList.add('followed');
+            profileFollowBtn.textContent = 'Hubbies';
+            showToast(data.message || 'Followed successfully!');
+          }
         } else {
           profileFollowBtn.classList.remove('followed');
           profileFollowBtn.textContent = 'Follow';
@@ -7432,9 +8597,15 @@ document.addEventListener('DOMContentLoaded', () => {
               if (!res.ok) throw new Error(data.error);
 
               if (endpoint === 'follow') {
-                rFollowBtn.classList.add('followed');
-                rFollowBtn.textContent = 'Hubbies';
-                showToast(data.message || 'Followed successfully!');
+                if (data.status === 'pending') {
+                  rFollowBtn.classList.add('followed');
+                  rFollowBtn.textContent = 'Requested';
+                  showToast(data.message || 'Follow request sent. ⏳');
+                } else {
+                  rFollowBtn.classList.add('followed');
+                  rFollowBtn.textContent = 'Hubbies';
+                  showToast(data.message || 'Followed successfully!');
+                }
               } else {
                 rFollowBtn.classList.remove('followed');
                 rFollowBtn.textContent = 'Follow';
@@ -7579,134 +8750,751 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Dedicated search tab input event listener
-  const searchViewInput = document.getElementById('search-view-input');
-  if (searchViewInput) {
-    let searchViewDebounce;
-    searchViewInput.addEventListener('input', () => {
-      clearTimeout(searchViewDebounce);
-      const query = searchViewInput.value.trim();
+  // --- HOMEPAGE USER ACCOUNT SEARCH LOGIC ---
+  const homepageSearchInput = document.getElementById('stories-search');
+  const homepageSearchDropdown = document.getElementById('homepage-search-dropdown');
+  const homepageSearchList = document.getElementById('homepage-search-list');
 
-      const searchGrid = document.querySelector('.search-view .search-grid');
-      let resultsContainer = document.getElementById('search-view-results');
-      if (!resultsContainer) {
-        resultsContainer = document.createElement('div');
-        resultsContainer.id = 'search-view-results';
-        resultsContainer.className = 'search-person-list';
-        resultsContainer.style.marginTop = '20px';
-        searchViewInput.closest('.search-view').appendChild(resultsContainer);
+  if (homepageSearchInput && homepageSearchDropdown && homepageSearchList) {
+    let homepageSearchDebounceTimeout;
+
+    homepageSearchInput.addEventListener('input', () => {
+      clearTimeout(homepageSearchDebounceTimeout);
+      const query = homepageSearchInput.value.trim();
+
+      // Maintain existing stories filtering behavior
+      if (typeof window.filterStories === 'function') {
+        window.filterStories(homepageSearchInput.value);
       }
 
       if (!query) {
-        if (searchGrid) searchGrid.style.display = 'grid';
-        resultsContainer.style.display = 'none';
-        resultsContainer.innerHTML = '';
+        homepageSearchDropdown.style.display = 'none';
+        homepageSearchList.innerHTML = '';
         return;
       }
 
-      searchViewDebounce = setTimeout(async () => {
-        const token = localStorage.getItem('invibe_jwt_token');
+      // Show loading state
+      homepageSearchList.innerHTML = '<div style="padding: 12px; text-align: center; color: var(--text-muted); font-size: 13px; display: flex; align-items: center; justify-content: center; gap: 8px;"><div class="spinner" style="width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.1); border-top-color: var(--primary, #a855f7); border-radius: 50%; animation: spin 0.8s linear infinite;"></div><span>Searching...</span></div>';
+      homepageSearchDropdown.style.display = 'block';
+
+      homepageSearchDebounceTimeout = setTimeout(async () => {
+        const token = localStorage.getItem('invibe_jwt_token') || localStorage.getItem('invibe_token');
         if (!token) return;
 
         try {
           const res = await fetch(`${API_URL}/api/users/search?q=${encodeURIComponent(query)}`, {
             headers: { 'Authorization': `Bearer ${token}` }
           });
-          if (!res.ok) throw new Error('Search failed');
+          
+          if (!res.ok) throw new Error('Search request failed');
           const users = await res.json();
 
-          if (searchGrid) searchGrid.style.display = 'none';
-          resultsContainer.style.display = 'block';
-          resultsContainer.innerHTML = '';
-
+          homepageSearchList.innerHTML = '';
           if (users.length === 0) {
-            resultsContainer.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-muted);">No users found matching your search.</div>';
+            homepageSearchList.innerHTML = '<div style="padding: 12px; text-align: center; color: var(--text-muted); font-size: 13px;">No users found</div>';
             return;
           }
 
           users.forEach(user => {
             const row = document.createElement('div');
-            row.className = 'search-person-row';
-            row.style.margin = '12px 0';
+            row.className = 'search-result-row';
             row.style.display = 'flex';
-            row.style.justifyContent = 'space-between';
             row.style.alignItems = 'center';
-            row.style.background = 'rgba(255, 255, 255, 0.03)';
-            row.style.padding = '12px';
-            row.style.borderRadius = 'var(--radius-lg)';
-            row.style.border = '1px solid rgba(255, 255, 255, 0.05)';
+            row.style.justifyContent = 'space-between';
+            row.style.padding = '8px 12px';
+            row.style.borderRadius = 'var(--radius-sm)';
+            row.style.cursor = 'pointer';
 
             row.innerHTML = `
-              <div class="person-info" style="display: flex; align-items: center; cursor: pointer; flex-grow: 1;">
-                <img src="${user.profileImage || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=100&h=100&q=80'}" alt="${user.fullName}" style="width: 44px; height: 44px; border-radius: 50%; object-fit: cover; margin-right: 12px;" />
-                <div style="display: flex; flex-direction: column;">
-                  <strong style="font-size: 14px; color: var(--text-color);">${user.fullName}</strong>
-                  <span style="font-size: 12px; color: var(--text-muted);">@${user.username}</span>
+              <div style="display: flex; align-items: center; gap: 12px; flex-grow: 1;">
+                <img src="${user.profileImage || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=80&h=80&q=80'}" alt="${escapeHtml(user.fullName)}" class="search-result-avatar" style="width: 32px; height: 32px; border-radius: 50%; object-fit: cover;" />
+                <div class="search-result-info">
+                  <h5 style="margin: 0; font-size: 14px; color: var(--text-main); font-weight: 600;">${escapeHtml(user.fullName)}</h5>
+                  <p style="margin: 0; font-size: 12px; color: var(--text-muted);">@${escapeHtml(user.username)}</p>
                 </div>
               </div>
-              <button class="search-follow-btn ${user.isFollowing ? 'followed' : ''}" data-user-id="${user._id}">
-                ${user.isFollowing ? 'Hubbies' : 'Follow'}
+              <button class="search-follow-btn ${user.isFollowing ? 'followed' : ''}" data-user-id="${user._id}" style="padding: 4px 12px; border-radius: 12px; font-size: 11px; font-weight: 600; cursor: pointer; border: none; flex-shrink: 0;">
+                ${user.isFollowing ? 'Hubbies' : 'Connect'}
               </button>
             `;
 
-            // Row click triggers profile navigation
-            row.querySelector('.person-info').addEventListener('click', () => {
+            row.addEventListener('click', (e) => {
+              if (e.target.closest('.search-follow-btn')) return;
+              homepageSearchDropdown.style.display = 'none';
+              homepageSearchInput.value = '';
+              // Restore stories filter
+              if (typeof window.filterStories === 'function') {
+                window.filterStories('');
+              }
               switchView('profile', user._id);
-              searchViewInput.value = '';
-              if (searchGrid) searchGrid.style.display = 'grid';
-              resultsContainer.style.display = 'none';
             });
 
-            // Follow button listener
             const followBtn = row.querySelector('.search-follow-btn');
             if (followBtn) {
-              followBtn.addEventListener('click', async (e) => {
+              followBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                const uid = followBtn.getAttribute('data-user-id');
-                const isFollowing = followBtn.classList.contains('followed');
-                const endpoint = isFollowing ? 'unfollow' : 'follow';
-
-                try {
-                  const res = await fetch(`${API_URL}/api/users/${uid}/${endpoint}`, {
-                    method: 'POST',
-                    headers: { 'Authorization': `Bearer ${token}` }
-                  });
-                  const data = await res.json();
-                  if (!res.ok) throw new Error(data.error);
-
-                  if (endpoint === 'follow') {
-                    followBtn.classList.add('followed');
-                    followBtn.textContent = 'Hubbies';
-                    showToast(data.message || 'Followed successfully!');
-                  } else {
-                    followBtn.classList.remove('followed');
-                    followBtn.textContent = 'Follow';
-                    showToast('Unfollowed successfully.');
-                  }
-                  loadProfileStats();
-                } catch (err) {
-                  showToast(err.message);
-                }
+                toggleFollowUser(user._id, followBtn);
               });
             }
 
-            resultsContainer.appendChild(row);
+            homepageSearchList.appendChild(row);
           });
         } catch (err) {
-          console.error(err);
-          showToast('Search query failed.');
+          console.error('[Homepage Search Query Error]:', err);
+          homepageSearchList.innerHTML = '<div style="padding: 12px; text-align: center; color: #ef4444; font-size: 13px;">Unable to search users. Please try again.</div>';
         }
       }, 300);
     });
+
+    // Close dropdown on click outside
+    document.addEventListener('click', (e) => {
+      if (!homepageSearchInput.contains(e.target) && !homepageSearchDropdown.contains(e.target)) {
+        homepageSearchDropdown.style.display = 'none';
+      }
+    });
   }
 
-  // Run database sync loaders
+  // ==================== DYNAMIC SUPABASE SEARCH SYSTEM ====================
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  let searchDebounceTimer = null;
+  let searchRequestCounter = 0;
+  let isSearchRealtimeSubscribed = false;
+
+  async function initSearchView() {
+    const token = localStorage.getItem('invibe_jwt_token') || localStorage.getItem('invibe_token');
+    if (!token) return;
+
+    const searchInput = document.getElementById('search-view-input');
+    if (searchInput && searchInput.value.trim() !== '') {
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_URL}/api/search/initial`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+        cache: 'no-store'
+      });
+      if (!res.ok) throw new Error('Failed to load initial search data');
+      const data = await res.json();
+      renderInitialSearchView(data);
+    } catch (err) {
+      console.error('[Search Initial Load Error]:', err);
+    }
+
+    setupSearchRealtimeSubscriptions();
+  }
+
+  function renderInitialSearchView(data) {
+    const { recentSearches, suggestedHubbers, trendingTags, activeCount } = data;
+
+    // 1. Active Hubbers Badge
+    const activeBadge = document.getElementById('active-hubbers-count-badge');
+    if (activeBadge) {
+      activeBadge.textContent = `${activeCount || 0} online`;
+    }
+
+    // 2. Recent Searches Container
+    const recentContainer = document.getElementById('search-recent-items-container');
+    if (recentContainer) {
+      recentContainer.innerHTML = '';
+      if (!recentSearches || recentSearches.length === 0) {
+        recentContainer.innerHTML = '<div style="color: var(--text-muted); font-size: 13px; padding: 6px 0;">No recent searches</div>';
+      } else {
+        recentSearches.forEach(item => {
+          const itemEl = document.createElement('div');
+          itemEl.className = 'search-recent-item';
+          itemEl.style.display = 'flex';
+          itemEl.style.alignItems = 'center';
+          itemEl.style.justifyContent = 'space-between';
+
+          const span = document.createElement('span');
+          span.textContent = item.query;
+          span.style.cursor = 'pointer';
+          span.addEventListener('click', () => {
+            const searchInput = document.getElementById('search-view-input');
+            if (searchInput) {
+              searchInput.value = item.query;
+              handleSearchViewInput(item.query);
+            }
+          });
+
+          const removeBtn = document.createElement('button');
+          removeBtn.setAttribute('aria-label', 'Remove');
+          removeBtn.textContent = '×';
+          removeBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            await deleteRecentSearchItem(item.id);
+          });
+
+          itemEl.appendChild(span);
+          itemEl.appendChild(removeBtn);
+          recentContainer.appendChild(itemEl);
+        });
+      }
+    }
+
+    // 3. Suggested Hubbers Container
+    const sugContainer = document.getElementById('search-suggested-hubbers-container');
+    if (sugContainer) {
+      sugContainer.innerHTML = '';
+      if (!suggestedHubbers || suggestedHubbers.length === 0) {
+        sugContainer.innerHTML = '<div style="color: var(--text-muted); font-size: 13px; padding: 12px 0; text-align: center;">No suggested hubbers yet</div>';
+      } else {
+        suggestedHubbers.forEach(user => {
+          const row = document.createElement('div');
+          row.className = 'search-person-row';
+          row.style.display = 'flex';
+          row.style.alignItems = 'center';
+          row.style.justifyContent = 'space-between';
+          row.style.padding = '8px 12px';
+          row.style.borderRadius = 'var(--radius-lg)';
+          row.style.background = 'rgba(255, 255, 255, 0.02)';
+          row.style.margin = '6px 0';
+
+          row.innerHTML = `
+            <div class="person-info" style="display: flex; align-items: center; cursor: pointer; flex-grow: 1;">
+              <img src="${user.profileImage || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=100&h=100&q=80'}" alt="${escapeHtml(user.fullName)}" style="width: 40px; height: 40px; border-radius: 50%; object-fit: cover; margin-right: 12px;" />
+              <div style="display: flex; flex-direction: column;">
+                <strong style="font-size: 14px; color: var(--text-color);">${escapeHtml(user.fullName)}</strong>
+                <span style="font-size: 12px; color: var(--text-muted);">@${escapeHtml(user.username)}</span>
+              </div>
+            </div>
+            <button class="connect-btn search-follow-btn ${user.isFollowing ? 'followed' : ''}" data-user-id="${user._id}" style="padding: 6px 16px; border-radius: 20px; font-size: 12px; font-weight: 600; cursor: pointer; border: none;">
+              ${user.isFollowing ? 'Hubbies' : (user.isRequested ? 'Requested' : 'Connect')}
+            </button>
+          `;
+
+          row.querySelector('.person-info').addEventListener('click', () => {
+            switchView('profile', user._id);
+          });
+
+          const followBtn = row.querySelector('.search-follow-btn');
+          if (followBtn) {
+            followBtn.addEventListener('click', (e) => {
+              e.stopPropagation();
+              toggleFollowUser(user._id, followBtn);
+            });
+          }
+
+          sugContainer.appendChild(row);
+        });
+      }
+    }
+
+    // 4. Trending Hubs & Tags Container
+    const trendingContainer = document.getElementById('search-trending-hubs-container');
+    if (trendingContainer) {
+      trendingContainer.innerHTML = '';
+      if (!trendingTags || trendingTags.length === 0) {
+        trendingContainer.innerHTML = '<div style="color: var(--text-muted); font-size: 13px; grid-column: span 3; text-align: center; padding: 12px;">No trending hubs yet</div>';
+      } else {
+        trendingTags.slice(0, 3).forEach(tag => {
+          const card = document.createElement('div');
+          card.className = 'search-card mini-card';
+          card.style.cursor = 'pointer';
+          card.innerHTML = `
+            <span>${escapeHtml(tag.name)}</span>
+            <strong>${tag.useCount} post${tag.useCount === 1 ? '' : 's'}</strong>
+          `;
+          card.addEventListener('click', () => {
+            const searchInput = document.getElementById('search-view-input');
+            if (searchInput) {
+              searchInput.value = tag.name;
+              handleSearchViewInput(tag.name);
+            }
+          });
+          trendingContainer.appendChild(card);
+        });
+      }
+    }
+
+    // 5. Quick Tags Chips
+    const quickTagsContainer = document.getElementById('search-quick-tags-container');
+    if (quickTagsContainer) {
+      quickTagsContainer.innerHTML = '';
+      if (trendingTags && trendingTags.length > 3) {
+        trendingTags.slice(3, 8).forEach(tag => {
+          const chip = document.createElement('span');
+          chip.className = 'search-chip';
+          chip.style.cursor = 'pointer';
+          chip.textContent = tag.name;
+          chip.addEventListener('click', () => {
+            const searchInput = document.getElementById('search-view-input');
+            if (searchInput) {
+              searchInput.value = tag.name;
+              handleSearchViewInput(tag.name);
+            }
+          });
+          quickTagsContainer.appendChild(chip);
+        });
+      }
+    }
+  }
+
+  async function saveRecentSearch(query, searchedUserId = null) {
+    if (!query || !query.trim()) return;
+    const token = localStorage.getItem('invibe_jwt_token') || localStorage.getItem('invibe_token');
+    if (!token) return;
+
+    try {
+      await fetch(`${API_URL}/api/search/recent`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ query: query.trim(), searchedUserId })
+      });
+    } catch (err) {
+      console.error('[Save Recent Search Error]:', err);
+    }
+  }
+
+  async function deleteRecentSearchItem(id) {
+    const token = localStorage.getItem('invibe_jwt_token') || localStorage.getItem('invibe_token');
+    if (!token) return;
+
+    try {
+      await fetch(`${API_URL}/api/search/recent/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      initSearchView();
+    } catch (err) {
+      console.error('[Delete Recent Search Error]:', err);
+    }
+  }
+
+  async function clearAllRecentSearches() {
+    const token = localStorage.getItem('invibe_jwt_token') || localStorage.getItem('invibe_token');
+    if (!token) return;
+
+    try {
+      await fetch(`${API_URL}/api/search/recent`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const recentContainer = document.getElementById('search-recent-items-container');
+      if (recentContainer) {
+        recentContainer.innerHTML = '<div style="color: var(--text-muted); font-size: 13px; padding: 6px 0;">No recent searches</div>';
+      }
+    } catch (err) {
+      console.error('[Clear Recent Searches Error]:', err);
+    }
+  }
+
+  const clearRecentBtn = document.getElementById('search-recent-clear-btn');
+  if (clearRecentBtn) {
+    clearRecentBtn.addEventListener('click', () => {
+      clearAllRecentSearches();
+    });
+  }
+
+  async function toggleFollowUser(targetUserId, btnEl) {
+    const token = localStorage.getItem('invibe_jwt_token') || localStorage.getItem('invibe_token');
+    if (!token || !targetUserId) return;
+
+    const isFollowing = btnEl.classList.contains('followed');
+    const endpoint = isFollowing ? 'unfollow' : 'follow';
+
+    try {
+      const res = await fetch(`${API_URL}/api/users/${targetUserId}/${endpoint}`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Action failed');
+
+      if (endpoint === 'follow') {
+        btnEl.classList.add('followed');
+        btnEl.textContent = 'Hubbies';
+        showToast(data.message || 'Connected!');
+      } else {
+        btnEl.classList.remove('followed');
+        btnEl.textContent = 'Connect';
+        showToast('Disconnected.');
+      }
+      if (typeof loadProfileStats === 'function') loadProfileStats();
+    } catch (err) {
+      showToast(err.message || 'Follow action failed');
+    }
+  }
+
+  function handleSearchViewInput(query) {
+    const searchGrid = document.getElementById('search-landing-grid');
+    const searchContextRow = document.getElementById('search-landing-context-row');
+    const resultsContainer = document.getElementById('search-view-results');
+    if (!resultsContainer) return;
+
+    const trimmed = query.trim();
+
+    if (!trimmed) {
+      if (searchGrid) searchGrid.style.display = 'grid';
+      if (searchContextRow) searchContextRow.style.display = 'flex';
+      resultsContainer.style.display = 'none';
+      resultsContainer.innerHTML = '';
+      initSearchView();
+      return;
+    }
+
+    if (searchGrid) searchGrid.style.display = 'none';
+    if (searchContextRow) searchContextRow.style.display = 'none';
+    resultsContainer.style.display = 'block';
+
+    resultsContainer.innerHTML = `
+      <div style="padding: 30px; text-align: center; color: var(--text-muted); display: flex; align-items: center; justify-content: center; gap: 10px;">
+        <div class="spinner" style="width: 20px; height: 20px; border: 2px solid rgba(255,255,255,0.1); border-top-color: var(--primary, #a855f7); border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+        <span>Searching Supabase database...</span>
+      </div>
+    `;
+
+    const currentRequestId = ++searchRequestCounter;
+
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(async () => {
+      const token = localStorage.getItem('invibe_jwt_token') || localStorage.getItem('invibe_token');
+      if (!token) return;
+
+      try {
+        let res = await fetch(`${API_URL}/api/search/query?q=${encodeURIComponent(trimmed)}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          },
+          cache: 'no-store'
+        });
+
+        if (currentRequestId !== searchRequestCounter) {
+          return;
+        }
+
+        let data = null;
+        if (res.status === 200) {
+          data = await res.json();
+        } else if (res.status === 304) {
+          const freshRes = await fetch(`${API_URL}/api/search/query?q=${encodeURIComponent(trimmed)}&_t=${Date.now()}`, {
+            headers: { 'Authorization': `Bearer ${token}` },
+            cache: 'no-store'
+          });
+          if (freshRes.ok) {
+            data = await freshRes.json();
+          }
+        }
+
+        if (!data) {
+          throw new Error(`Search request failed with status ${res.status}`);
+        }
+
+        saveRecentSearch(trimmed);
+        renderSearchResults(data, trimmed, resultsContainer);
+      } catch (err) {
+        if (currentRequestId === searchRequestCounter) {
+          console.error('[Search Query Error]:', err);
+          resultsContainer.innerHTML = `
+            <div style="padding: 24px; text-align: center; color: #ef4444;">
+              Unable to complete search. Please try again.<br/>
+              <span style="font-size: 11px; color: #a1a1aa; font-family: monospace; display: block; margin-top: 8px;">Error: ${escapeHtml(err.message)}</span>
+            </div>
+          `;
+        }
+      }
+    }, 350);
+  }
+
+  function renderSearchResults(data, query, container) {
+    const { users = [], hashtags = [], posts = [], hubs = [] } = data;
+    container.innerHTML = '';
+
+    const totalResults = users.length + hashtags.length + posts.length + hubs.length;
+
+    if (totalResults === 0) {
+      container.innerHTML = `
+        <div style="padding: 40px 20px; text-align: center; color: var(--text-muted);">
+          <i data-lucide="search-x" style="width: 48px; height: 48px; stroke-width: 1.5; opacity: 0.5; margin-bottom: 12px;"></i>
+          <h3 style="font-weight: 600; font-size: 16px; color: var(--text-color); margin-bottom: 4px;">No results found for "${escapeHtml(query)}"</h3>
+          <p style="font-size: 13px;">Check for spelling errors or try searching for a different username or hashtag.</p>
+        </div>
+      `;
+      if (window.lucide) window.lucide.createIcons();
+      return;
+    }
+
+    // 1. USERS SECTION
+    const userSection = document.createElement('div');
+    userSection.style.marginBottom = '24px';
+    userSection.innerHTML = `<h4 style="font-size: 14px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px;">People</h4>`;
+
+    if (users.length === 0) {
+      userSection.innerHTML += `<div style="padding: 12px; font-size: 13px; color: var(--text-muted);">No people found</div>`;
+    } else {
+      users.forEach(user => {
+        const row = document.createElement('div');
+        row.className = 'search-person-row';
+        row.style.display = 'flex';
+        row.style.alignItems = 'center';
+        row.style.justifyContent = 'space-between';
+        row.style.padding = '10px 14px';
+        row.style.borderRadius = 'var(--radius-lg)';
+        row.style.background = 'rgba(255, 255, 255, 0.02)';
+        row.style.margin = '8px 0';
+        row.style.border = '1px solid rgba(255, 255, 255, 0.04)';
+
+        row.innerHTML = `
+          <div class="person-info" style="display: flex; align-items: center; cursor: pointer; flex-grow: 1;">
+            <img src="${user.profileImage || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=100&h=100&q=80'}" alt="${escapeHtml(user.fullName)}" style="width: 44px; height: 44px; border-radius: 50%; object-fit: cover; margin-right: 12px;" />
+            <div style="display: flex; flex-direction: column;">
+              <strong style="font-size: 14px; color: var(--text-color);">${escapeHtml(user.fullName)}</strong>
+              <span style="font-size: 12px; color: var(--text-muted);">@${escapeHtml(user.username)} ${user.followersCount ? `• ${user.followersCount} followers` : ''}</span>
+            </div>
+          </div>
+          <button class="connect-btn search-follow-btn ${user.isFollowing ? 'followed' : ''}" data-user-id="${user._id}" style="padding: 6px 16px; border-radius: 20px; font-size: 12px; font-weight: 600; cursor: pointer; border: none;">
+            ${user.isFollowing ? 'Hubbies' : (user.isRequested ? 'Requested' : 'Connect')}
+          </button>
+        `;
+
+        row.querySelector('.person-info').addEventListener('click', () => {
+          saveRecentSearch(query, user._id);
+          switchView('profile', user._id);
+        });
+
+        const followBtn = row.querySelector('.search-follow-btn');
+        if (followBtn) {
+          followBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleFollowUser(user._id, followBtn);
+          });
+        }
+
+        userSection.appendChild(row);
+      });
+    }
+    container.appendChild(userSection);
+
+    // 2. HASHTAGS SECTION
+    const tagSection = document.createElement('div');
+    tagSection.style.marginBottom = '24px';
+    tagSection.innerHTML = `<h4 style="font-size: 14px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px;">Hashtags</h4>`;
+
+    if (hashtags.length === 0) {
+      tagSection.innerHTML += `<div style="padding: 12px; font-size: 13px; color: var(--text-muted);">No hashtags found</div>`;
+    } else {
+      const tagGrid = document.createElement('div');
+      tagGrid.style.display = 'grid';
+      tagGrid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(180px, 1fr))';
+      tagGrid.style.gap = '10px';
+
+      hashtags.forEach(tag => {
+        const card = document.createElement('div');
+        card.className = 'search-card mini-card';
+        card.style.cursor = 'pointer';
+        card.style.padding = '12px 16px';
+        card.style.background = 'rgba(255, 255, 255, 0.03)';
+        card.style.borderRadius = '12px';
+        card.style.border = '1px solid rgba(255, 255, 255, 0.05)';
+        card.innerHTML = `
+          <span style="font-weight: 600; color: var(--primary, #a855f7); font-size: 14px;">${escapeHtml(tag.name)}</span>
+          <strong style="font-size: 12px; color: var(--text-muted); font-weight: 400; display: block; margin-top: 4px;">${tag.useCount} post${tag.useCount === 1 ? '' : 's'}</strong>
+        `;
+
+        card.addEventListener('click', () => {
+          saveRecentSearch(tag.name);
+          const searchInput = document.getElementById('search-view-input');
+          if (searchInput) {
+            searchInput.value = tag.name;
+            handleSearchViewInput(tag.name);
+          }
+        });
+
+        tagGrid.appendChild(card);
+      });
+      tagSection.appendChild(tagGrid);
+    }
+    container.appendChild(tagSection);
+
+    // 3. POSTS SECTION
+    const postSection = document.createElement('div');
+    postSection.style.marginBottom = '24px';
+    postSection.innerHTML = `<h4 style="font-size: 14px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px;">Posts</h4>`;
+
+    if (posts.length === 0) {
+      postSection.innerHTML += `<div style="padding: 12px; font-size: 13px; color: var(--text-muted);">No posts found</div>`;
+    } else {
+      posts.forEach(post => {
+        if (!post) return;
+        const row = document.createElement('div');
+        row.style.display = 'flex';
+        row.style.alignItems = 'center';
+        row.style.padding = '12px';
+        row.style.borderRadius = 'var(--radius-lg)';
+        row.style.background = 'rgba(255, 255, 255, 0.02)';
+        row.style.margin = '8px 0';
+        row.style.border = '1px solid rgba(255, 255, 255, 0.04)';
+        row.style.cursor = 'pointer';
+
+        const author = post.author || {};
+        const authorImage = author.profileImage || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=100&h=100&q=80';
+        const authorName = author.fullName || author.username || 'User';
+        const authorUsername = author.username || 'user';
+        const postCaption = post.caption || 'Untitled Post';
+        const postLocation = post.location || '';
+
+        row.innerHTML = `
+          <img src="${authorImage}" alt="${escapeHtml(authorName)}" class="author-profile-pic" style="width: 44px; height: 44px; border-radius: 50%; object-fit: cover; margin-right: 14px; flex-shrink: 0; border: 1px solid rgba(255,255,255,0.08); cursor: pointer;" />
+          <div style="flex-grow: 1; min-width: 0; margin-right: 12px;">
+            <div style="font-size: 13px; font-weight: 600; color: var(--text-color); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(postCaption)}</div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Posted by <span class="author-profile-link" style="color: var(--primary, #a855f7); font-weight: 600; cursor: pointer;">@${escapeHtml(authorUsername)}</span>${postLocation ? ` • ${escapeHtml(postLocation)}` : ''}</div>
+          </div>
+          ${post.mediaUrl ? `<img src="${post.mediaUrl}" alt="Post Media" style="width: 44px; height: 44px; border-radius: 8px; object-fit: cover; flex-shrink: 0; border: 1px solid rgba(255,255,255,0.05);" />` : ''}
+        `;
+
+        // Redirect to user profile on profile pic click
+        const profilePic = row.querySelector('.author-profile-pic');
+        if (profilePic && author.id) {
+          profilePic.addEventListener('click', (e) => {
+            e.stopPropagation();
+            saveRecentSearch(query, author.id);
+            switchView('profile', author.id);
+          });
+        }
+
+        // Redirect to user profile on username click
+        const profileLink = row.querySelector('.author-profile-link');
+        if (profileLink && author.id) {
+          profileLink.addEventListener('click', (e) => {
+            e.stopPropagation();
+            saveRecentSearch(query, author.id);
+            switchView('profile', author.id);
+          });
+        }
+
+        row.addEventListener('click', async () => {
+          saveRecentSearch(query);
+          try {
+            const token = localStorage.getItem('invibe_jwt_token') || localStorage.getItem('invibe_token');
+            const res = await fetch(`${API_URL}/api/posts/${post.id}`, {
+              headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (res.ok) {
+              const fullPost = await res.json();
+              openProfilePostViewer(fullPost);
+            } else {
+              console.error('Failed to fetch post details for search redirection');
+              switchView('home');
+            }
+          } catch (err) {
+            console.error('Error fetching post details for search redirection:', err);
+            switchView('home');
+          }
+        });
+
+        postSection.appendChild(row);
+      });
+    }
+    container.appendChild(postSection);
+
+    // 4. HUBS SECTION
+    const hubSection = document.createElement('div');
+    hubSection.style.marginBottom = '24px';
+    hubSection.innerHTML = `
+      <h4 style="font-size: 14px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px;">Hubs</h4>
+      <div style="padding: 12px; font-size: 13px; color: var(--text-muted);">No hubs found</div>
+    `;
+    container.appendChild(hubSection);
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  function setupSearchRealtimeSubscriptions() {
+    if (isSearchRealtimeSubscribed || !window.supabaseClient) return;
+    isSearchRealtimeSubscribed = true;
+
+    try {
+      const channel = window.supabaseClient.channel('search-page-realtime');
+      channel
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'recent_searches' }, () => {
+          if (state.activeView === 'search') initSearchView();
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => {
+          if (state.activeView === 'search') initSearchView();
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'online_users' }, () => {
+          if (state.activeView === 'search') initSearchView();
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'hashtags' }, () => {
+          if (state.activeView === 'search') initSearchView();
+        })
+        .subscribe();
+    } catch (err) {
+      console.warn('[Search Realtime Subscription Warning]:', err);
+    }
+  }
+
+  const searchViewInput = document.getElementById('search-view-input');
+  if (searchViewInput) {
+    searchViewInput.addEventListener('input', () => {
+      handleSearchViewInput(searchViewInput.value);
+    });
+  }
+
+  // --- PROGRESSIVE APP INITIALIZATION & DEDUPLICATED BACKGROUND LOADERS ---
+  // 1. Immediately load feed posts for Home view
   loadFeedPosts();
-  loadFeedReels();
-  loadFollowSuggestions();
-  loadProfileStats();
-  loadStories();
-  loadActiveVibers();
+
+  // Deduplication flags for secondary background tasks
+  let isProfileStatsLoading = false;
+  let isFollowSuggestionsLoading = false;
+  let isStoriesLoading = false;
+  let isActiveVibersLoading = false;
+  let isNotificationsLoading = false;
+
+  function scheduleBackgroundLoaders() {
+    // Stagger non-critical background data loading progressively so initial app shell render is instant (< 20ms)
+    setTimeout(() => {
+      if (!isProfileStatsLoading && typeof loadProfileStats === 'function') {
+        isProfileStatsLoading = true;
+        Promise.resolve(loadProfileStats()).finally(() => { isProfileStatsLoading = false; });
+      }
+    }, 150);
+
+    setTimeout(() => {
+      if (!isFollowSuggestionsLoading && typeof loadFollowSuggestions === 'function') {
+        isFollowSuggestionsLoading = true;
+        Promise.resolve(loadFollowSuggestions()).finally(() => { isFollowSuggestionsLoading = false; });
+      }
+    }, 320);
+
+    setTimeout(() => {
+      if (!isStoriesLoading && typeof loadStories === 'function') {
+        isStoriesLoading = true;
+        Promise.resolve(loadStories()).finally(() => { isStoriesLoading = false; });
+      }
+    }, 500);
+
+    setTimeout(() => {
+      if (!isActiveVibersLoading && typeof loadActiveVibers === 'function') {
+        isActiveVibersLoading = true;
+        Promise.resolve(loadActiveVibers()).finally(() => { isActiveVibersLoading = false; });
+      }
+    }, 700);
+
+    setTimeout(() => {
+      if (!isNotificationsLoading && typeof loadNotifications === 'function') {
+        isNotificationsLoading = true;
+        Promise.resolve(loadNotifications()).finally(() => { isNotificationsLoading = false; });
+      }
+    }, 900);
+  }
+
+  // Schedule background loading after home feed starts rendering
+  scheduleBackgroundLoaders();
 
   // Custom auth reload hook
   window.updateAppUI = function () {
@@ -7715,6 +9503,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!userStr) return;
     try {
       const user = JSON.parse(userStr);
+
+      // Instant synchronous UI DOM update from local session (< 10ms)
       const headerAvatar = document.querySelector('#header-profile-avatar img');
       if (headerAvatar && profileImage) headerAvatar.src = profileImage;
       const sidebarAvatar = document.querySelector('.profile-preview-avatar img');
@@ -7745,11 +9535,8 @@ document.addEventListener('DOMContentLoaded', () => {
         sidebarBanner.style.backgroundPosition = 'center';
       }
 
-      loadProfileStats();
-      loadFollowSuggestions();
-      loadStories();
-      loadActiveVibers();
-      loadNotifications();
+      // Schedule background updates progressively without blocking render
+      scheduleBackgroundLoaders();
     } catch (e) {
       console.error(e);
     }
@@ -7957,17 +9744,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     debouncedCreateIcons();
-  }
-
-  function formatTimeAgo(date) {
-    const seconds = Math.floor((new Date() - date) / 1000);
-    if (seconds < 60) return 'just now';
-    const minutes = Math.floor(seconds / 60);
-    if (minutes < 60) return `${minutes}m ago`;
-    const hours = Math.floor(minutes / 60);
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(hours / 24);
-    return `${days}d ago`;
   }
 
   // Setup click handler for toggle panel
@@ -8584,13 +10360,13 @@ function initBeforeAfterSlider() {
     const updateSlider = (x) => {
       const rect = container.getBoundingClientRect();
       let position = x - rect.left;
-      
+
       // Keep within bounds
       position = Math.max(0, Math.min(position, rect.width));
-      
+
       // Calculate percentage
       const percentage = (position / rect.width) * 100;
-      
+
       // Update DOM
       imageBefore.style.clipPath = `inset(0 ${100 - percentage}% 0 0)`;
       handle.style.left = `${percentage}%`;
@@ -8624,7 +10400,7 @@ function initBeforeAfterSlider() {
     document.addEventListener('touchend', () => {
       isDragging = false;
     });
-    
+
     // Initial setup (50%)
     imageBefore.style.clipPath = `inset(0 50% 0 0)`;
     handle.style.left = `50%`;
@@ -8714,7 +10490,7 @@ function initCreateHubbsUpload() {
   async function handleFiles(files) {
     const maxSize = 100 * 1024 * 1024; // 100MB
     const toast = document.getElementById('toast-notif');
-    
+
     function showMsg(msg) {
       if (window.showToast) {
         window.showToast(msg);
@@ -8764,8 +10540,8 @@ function initCreateHubbsUpload() {
           img.src = thumbUrl;
           await new Promise(r => { img.onload = r; img.onerror = r; });
           if (img.naturalWidth) {
-              originalWidth = img.naturalWidth;
-              originalHeight = img.naturalHeight;
+            originalWidth = img.naturalWidth;
+            originalHeight = img.naturalHeight;
           }
         }
 
@@ -8779,9 +10555,9 @@ function initCreateHubbsUpload() {
           name: file.name,
           size: file.size,
           editorState: {
-             filter: 'original', rotation: 0, zoom: 1, panX: 0, panY: 0,
-             adjustments: { brightness: 100, contrast: 100, exposure: 100, highlights: 100, shadows: 100, temperature: 0, tint: 0, saturation: 100, vibrance: 100, sharpness: 0, blur: 0, opacity: 100 },
-             crop: null, layers: [], isMuted: false, musicTrack: null, selectedLocation: null
+            filter: 'original', rotation: 0, zoom: 1, panX: 0, panY: 0,
+            adjustments: { brightness: 100, contrast: 100, exposure: 100, highlights: 100, shadows: 100, temperature: 0, tint: 0, saturation: 100, vibrance: 100, sharpness: 0, blur: 0, opacity: 100 },
+            crop: null, layers: [], isMuted: false, musicTrack: null, selectedLocation: null
           }
         });
       } catch (err) {
@@ -8837,34 +10613,34 @@ function initCreateHubbsUpload() {
     return `${m}:${s.toString().padStart(2, '0')}`;
   }
 
-  window.getEffectiveLayout = function(layoutName, uploads) {
-      if (layoutName !== 'auto') return layoutName;
-      if (!uploads || uploads.length === 0) return layoutName;
-      const count = uploads.length;
-      let portraits = 0, landscapes = 0, squares = 0;
-      uploads.forEach(item => {
-          const ar = (window.HubbleEditor && window.HubbleEditor.getEditedAspectRatio) ? window.HubbleEditor.getEditedAspectRatio(item) : 1;
-          if (ar < 0.9) portraits++;
-          else if (ar > 1.1) landscapes++;
-          else squares++;
-      });
-      if (count === 1) return 'single';
-      if (count === 2) {
-          if (portraits >= 1 && landscapes === 0 && squares === 0) return 'vertical-split';
-          if (portraits === 2) return 'vertical-split';
-          return 'side-by-side';
-      }
-      return '2x2-grid';
+  window.getEffectiveLayout = function (layoutName, uploads) {
+    if (layoutName !== 'auto') return layoutName;
+    if (!uploads || uploads.length === 0) return layoutName;
+    const count = uploads.length;
+    let portraits = 0, landscapes = 0, squares = 0;
+    uploads.forEach(item => {
+      const ar = (window.HubbleEditor && window.HubbleEditor.getEditedAspectRatio) ? window.HubbleEditor.getEditedAspectRatio(item) : 1;
+      if (ar < 0.9) portraits++;
+      else if (ar > 1.1) landscapes++;
+      else squares++;
+    });
+    if (count === 1) return 'single';
+    if (count === 2) {
+      if (portraits >= 1 && landscapes === 0 && squares === 0) return 'vertical-split';
+      if (portraits === 2) return 'vertical-split';
+      return 'side-by-side';
+    }
+    return '2x2-grid';
   };
 
   function renderMediaPreviews() {
     // Remove existing previews and layout rows except the Add More button
     const existingItems = previewRow.querySelectorAll('.ch-layout-row, .ch-preview-item');
     existingItems.forEach(el => {
-       // Ensure we don't accidentally remove the addMoreBtn if it somehow matches
-       if (el.id !== 'ch-add-more-media-btn') {
-          el.remove();
-       }
+      // Ensure we don't accidentally remove the addMoreBtn if it somehow matches
+      if (el.id !== 'ch-add-more-media-btn') {
+        el.remove();
+      }
     });
 
     if (window.chUploads.length === 0) {
@@ -8885,7 +10661,7 @@ function initCreateHubbsUpload() {
       previewEl.setAttribute('data-index', index);
       // Inline styles to match original structure
       previewEl.style.cssText = 'position: relative; flex-shrink: 0; width: 100px; height: 100px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.08); transition: transform 0.2s, box-shadow 0.2s; cursor: grab; background: #1a1a1a;';
-      
+
       const img = document.createElement('img');
       img.src = item.thumbUrl;
       img.style.cssText = 'width: 100%; height: 100%; object-fit: contain; object-position: center; border-radius: 10px; pointer-events: none;';
@@ -8915,32 +10691,32 @@ function initCreateHubbsUpload() {
           if (window.HubbleEditor && window.HubbleEditor.cleanupMedia) {
             window.HubbleEditor.cleanupMedia();
           }
-          
+
           if (window.HubbleEditor) {
-             if (window.chUploads.length === 0) {
+            if (window.chUploads.length === 0) {
+              window.HubbleEditor.activeMediaIndex = 0;
+              window.HubbleEditor.state = {
+                filter: 'original', rotation: 0, zoom: 1, panX: 0, panY: 0,
+                adjustments: { brightness: 100, contrast: 100, exposure: 100, highlights: 100, shadows: 100, temperature: 0, tint: 0, saturation: 100, vibrance: 100, sharpness: 0, blur: 0, opacity: 100 },
+                crop: null, layers: [], isMuted: false, musicTrack: null, selectedLocation: null
+              };
+              window.HubbleEditor.history = [JSON.parse(JSON.stringify(window.HubbleEditor.state))];
+              window.HubbleEditor.redoStack = [];
+              window.HubbleEditor.activeSelectedLayerId = null;
+              window.HubbleEditor.updateRender();
+            } else {
+              if (window.HubbleEditor.activeMediaIndex === index) {
                 window.HubbleEditor.activeMediaIndex = 0;
-                window.HubbleEditor.state = {
-                     filter: 'original', rotation: 0, zoom: 1, panX: 0, panY: 0,
-                     adjustments: { brightness: 100, contrast: 100, exposure: 100, highlights: 100, shadows: 100, temperature: 0, tint: 0, saturation: 100, vibrance: 100, sharpness: 0, blur: 0, opacity: 100 },
-                     crop: null, layers: [], isMuted: false, musicTrack: null, selectedLocation: null
-                };
-                window.HubbleEditor.history = [JSON.parse(JSON.stringify(window.HubbleEditor.state))];
-                window.HubbleEditor.redoStack = [];
-                window.HubbleEditor.activeSelectedLayerId = null;
-                window.HubbleEditor.updateRender();
-             } else {
-                if (window.HubbleEditor.activeMediaIndex === index) {
-                   window.HubbleEditor.activeMediaIndex = 0;
-                   if (window.chUploads[0].editorState) {
-                       window.HubbleEditor.state = JSON.parse(JSON.stringify(window.chUploads[0].editorState));
-                   }
-                   window.HubbleEditor.updateRender();
-                } else if (window.HubbleEditor.activeMediaIndex > index) {
-                   window.HubbleEditor.activeMediaIndex--;
+                if (window.chUploads[0].editorState) {
+                  window.HubbleEditor.state = JSON.parse(JSON.stringify(window.chUploads[0].editorState));
                 }
-             }
+                window.HubbleEditor.updateRender();
+              } else if (window.HubbleEditor.activeMediaIndex > index) {
+                window.HubbleEditor.activeMediaIndex--;
+              }
+            }
           }
-          
+
           renderMediaPreviews();
         }, 350); // wait for animation to complete
       };
@@ -8976,37 +10752,37 @@ function initCreateHubbsUpload() {
       // Click to select and edit this specific media item
       previewEl.addEventListener('click', () => {
         if (window.HubbleEditor) {
-           // Save current state to the previously active media
-           if (window.chUploads[window.HubbleEditor.activeMediaIndex]) {
-               window.chUploads[window.HubbleEditor.activeMediaIndex].editorState = JSON.parse(JSON.stringify(window.HubbleEditor.state));
-           }
-           // Switch active media index
-           window.HubbleEditor.activeMediaIndex = index;
-           // Load the state for the new media, or reset if none exists
-           if (item.editorState) {
-               window.HubbleEditor.state = JSON.parse(JSON.stringify(item.editorState));
-           } else {
-               window.HubbleEditor.state = {
-                 filter: 'original', rotation: 0, zoom: 1, panX: 0, panY: 0,
-                 adjustments: { brightness: 100, contrast: 100, exposure: 100, highlights: 100, shadows: 100, temperature: 0, tint: 0, saturation: 100, vibrance: 100, sharpness: 0, blur: 0, opacity: 100 },
-                 crop: null, layers: [], isMuted: false, musicTrack: null, selectedLocation: null
-               };
-           }
-           window.HubbleEditor.updateRender();
+          // Save current state to the previously active media
+          if (window.chUploads[window.HubbleEditor.activeMediaIndex]) {
+            window.chUploads[window.HubbleEditor.activeMediaIndex].editorState = JSON.parse(JSON.stringify(window.HubbleEditor.state));
+          }
+          // Switch active media index
+          window.HubbleEditor.activeMediaIndex = index;
+          // Load the state for the new media, or reset if none exists
+          if (item.editorState) {
+            window.HubbleEditor.state = JSON.parse(JSON.stringify(item.editorState));
+          } else {
+            window.HubbleEditor.state = {
+              filter: 'original', rotation: 0, zoom: 1, panX: 0, panY: 0,
+              adjustments: { brightness: 100, contrast: 100, exposure: 100, highlights: 100, shadows: 100, temperature: 0, tint: 0, saturation: 100, vibrance: 100, sharpness: 0, blur: 0, opacity: 100 },
+              crop: null, layers: [], isMuted: false, musicTrack: null, selectedLocation: null
+            };
+          }
+          window.HubbleEditor.updateRender();
         }
-        
+
         // Highlight active preview visually
         document.querySelectorAll('.ch-preview-item').forEach(el => el.style.border = '1px solid rgba(255,255,255,0.08)');
         previewEl.style.border = '2px solid var(--primary, #a855f7)';
-        
+
         if (window.showToast) window.showToast(`Editing ${item.name} 🔍`);
       });
 
       // Update this thumbnail to reflect any existing edits visually BEFORE grouping
       if (window.HubbleEditor && typeof window.HubbleEditor.updatePreviewThumbnail === 'function') {
-         window.HubbleEditor.updatePreviewThumbnail(index, previewEl);
+        window.HubbleEditor.updatePreviewThumbnail(index, previewEl);
       }
-      
+
       previewBlocks.push({ mediaItem: item, el: previewEl });
     });
 
@@ -9019,13 +10795,13 @@ function initCreateHubbsUpload() {
     const activeIndex = window.HubbleEditor ? window.HubbleEditor.activeMediaIndex : 0;
     const activeEl = previewRow.querySelector(`.ch-preview-item[data-index="${activeIndex}"]`);
     if (activeEl) {
-       activeEl.style.border = '2px solid var(--primary, #a855f7)';
+      activeEl.style.border = '2px solid var(--primary, #a855f7)';
     }
 
     if (window.lucide) {
       window.lucide.createIcons();
     }
-    
+
     // Toggle Media Layouts visibility
     const layoutsDisabledMsg = document.getElementById('ch-layouts-disabled-msg');
     const layoutsOptions = document.getElementById('ch-layouts-options');
@@ -9033,27 +10809,27 @@ function initCreateHubbsUpload() {
       if (window.chUploads.length >= 2) {
         layoutsDisabledMsg.style.display = 'none';
         layoutsOptions.style.display = 'flex';
-        
+
         const btnSideBySide = document.querySelector('.ch-layout-btn[data-layout="side-by-side"]');
         const btnVerticalSplit = document.querySelector('.ch-layout-btn[data-layout="vertical-split"]');
         const btn2x2Grid = document.querySelector('.ch-layout-btn[data-layout="2x2-grid"]');
-        
+
         if (window.chUploads.length === 2) {
-           if (btnSideBySide) btnSideBySide.style.display = 'block';
-           if (btnVerticalSplit) btnVerticalSplit.style.display = 'block';
-           if (btn2x2Grid) btn2x2Grid.style.display = 'none';
-           
-           if (window.HubbleEditor && window.HubbleEditor.activeLayout === '2x2-grid') {
-               window.HubbleEditor.setLayout('auto');
-           }
+          if (btnSideBySide) btnSideBySide.style.display = 'block';
+          if (btnVerticalSplit) btnVerticalSplit.style.display = 'block';
+          if (btn2x2Grid) btn2x2Grid.style.display = 'none';
+
+          if (window.HubbleEditor && window.HubbleEditor.activeLayout === '2x2-grid') {
+            window.HubbleEditor.setLayout('auto');
+          }
         } else {
-           if (btnSideBySide) btnSideBySide.style.display = 'none';
-           if (btnVerticalSplit) btnVerticalSplit.style.display = 'none';
-           if (btn2x2Grid) btn2x2Grid.style.display = 'block';
-           
-           if (window.HubbleEditor && (window.HubbleEditor.activeLayout === 'side-by-side' || window.HubbleEditor.activeLayout === 'vertical-split')) {
-               window.HubbleEditor.setLayout('auto');
-           }
+          if (btnSideBySide) btnSideBySide.style.display = 'none';
+          if (btnVerticalSplit) btnVerticalSplit.style.display = 'none';
+          if (btn2x2Grid) btn2x2Grid.style.display = 'block';
+
+          if (window.HubbleEditor && (window.HubbleEditor.activeLayout === 'side-by-side' || window.HubbleEditor.activeLayout === 'vertical-split')) {
+            window.HubbleEditor.setLayout('auto');
+          }
         }
       } else {
         layoutsDisabledMsg.style.display = 'block';
@@ -9075,28 +10851,28 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
 // =========================================================================
 // REVIEW HUBBS - NAVIGATION & VALIDATION
 // =========================================================================
-window.toggleScheduling = function(checked) {
+window.toggleScheduling = function (checked) {
   const row = document.getElementById('ch-schedule-datetime-row');
   const dateInput = document.getElementById('ch-schedule-date');
   const timeInput = document.getElementById('ch-schedule-time');
-  
+
   if (checked) {
     row.style.display = 'flex';
     // Small delay to allow display:flex to apply before setting opacity for transition
     setTimeout(() => {
       row.style.opacity = '1';
     }, 10);
-    
+
     // Set default date/time to now + 1 hour if empty
     if (!dateInput.value || !timeInput.value) {
       const now = new Date();
       now.setHours(now.getHours() + 1);
-      
+
       const yyyy = now.getFullYear();
       const mm = String(now.getMonth() + 1).padStart(2, '0');
       const dd = String(now.getDate()).padStart(2, '0');
       dateInput.value = `${yyyy}-${mm}-${dd}`;
-      
+
       const hh = String(now.getHours()).padStart(2, '0');
       const min = String(now.getMinutes()).padStart(2, '0');
       timeInput.value = `${hh}:${min}`;
@@ -9109,137 +10885,111 @@ window.toggleScheduling = function(checked) {
   }
 };
 
-window.handleReviewNavigation = function() {
+window.handleReviewNavigation = function () {
   if (!window.chUploads || window.chUploads.length === 0) {
     showValidationModal();
     return;
   }
-  
+
   // Validate scheduling if enabled
   const toggle = document.getElementById('ch-schedule-toggle');
   let scheduledAtIso = null;
-  
+
   if (toggle && toggle.checked) {
     const dateVal = document.getElementById('ch-schedule-date').value;
     const timeVal = document.getElementById('ch-schedule-time').value;
-    
+
     if (!dateVal || !timeVal) {
       if (window.showToast) window.showToast('Please select a valid date and time for scheduling.', 'error');
       return;
     }
-    
+
     const scheduledTime = new Date(`${dateVal}T${timeVal}`);
     if (isNaN(scheduledTime.getTime())) {
       if (window.showToast) window.showToast('Invalid date or time selected.', 'error');
       return;
     }
-    
+
     if (scheduledTime <= new Date()) {
       if (window.showToast) window.showToast('Scheduled time must be in the future.', 'error');
       return;
     }
-    
+
     scheduledAtIso = scheduledTime.toISOString();
     window.chScheduledAt = scheduledAtIso; // Store for publish
-    
+
     // Update Review Page Footer
     const infoBox = document.getElementById('review-scheduled-info');
     const infoText = document.getElementById('review-scheduled-text');
     const pubText = document.getElementById('review-publish-text');
     const pubIcon = document.getElementById('review-publish-icon');
-    
+
     if (infoBox && infoText && pubText && pubIcon) {
       infoBox.style.display = 'flex';
       const formattedDate = scheduledTime.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
       const formattedTime = scheduledTime.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
       infoText.innerText = `${formattedDate} at ${formattedTime}`;
-      
-      pubText.innerText = 'Schedule Hubb';
+
+      pubText.innerText = 'Schedule HUB';
       pubIcon.setAttribute('data-lucide', 'calendar-clock');
       if (window.lucide) window.lucide.createIcons();
     }
   } else {
     window.chScheduledAt = null;
-    
+
     // Reset Review Page Footer
     const infoBox = document.getElementById('review-scheduled-info');
     const pubText = document.getElementById('review-publish-text');
     const pubIcon = document.getElementById('review-publish-icon');
-    
+
     if (infoBox && pubText && pubIcon) {
       infoBox.style.display = 'none';
-      pubText.innerText = 'Publish Hubb';
-      pubIcon.setAttribute('data-lucide', 'upload-cloud');
+      pubText.innerText = 'Share your HUB';
+      pubIcon.setAttribute('data-lucide', 'send');
       if (window.lucide) window.lucide.createIcons();
     }
   }
-  
+
   // Navigate to review view
-  switchView('review-hubbs');
-  
+  if (typeof window.switchView === 'function') {
+    window.switchView('review-hubbs');
+  } else {
+    switchView('review-hubbs');
+  }
+
   // Initialize slider with the actual uploaded media
   setTimeout(window.initReviewSlider, 50);
 };
 
 function showValidationModal() {
-  let overlay = document.getElementById('review-validation-overlay');
-  
-  if (!overlay) {
-    overlay = document.createElement('div');
-    overlay.id = 'review-validation-overlay';
-    overlay.className = 'review-validation-modal-overlay';
-    
-    overlay.innerHTML = `
-      <div class="review-validation-modal">
-        <h3 style="margin: 0 0 8px 0; font-size: 1.5rem; font-weight: 700;">No HUBB Selected</h3>
-        <p style="margin: 0 0 24px 0; font-size: 0.95rem;">Please select at least one photo or video before continuing.</p>
-        <div style="display: flex; gap: 12px; justify-content: center;">
-          <button id="rv-cancel-btn" style="padding: 10px 24px; border-radius: 8px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.1); color: #fff; font-weight: 600; cursor: pointer; transition: all 0.2s;">Cancel</button>
-          <button id="rv-upload-btn" style="padding: 10px 24px; border-radius: 8px; background: linear-gradient(135deg, var(--primary) 0%, #a855f7 100%); border: none; color: white; font-weight: 600; cursor: pointer; box-shadow: 0 4px 12px rgba(168,85,247,0.3); transition: all 0.2s;">Upload Media</button>
-        </div>
-      </div>
-    `;
-    document.body.appendChild(overlay);
-    
-    document.getElementById('rv-cancel-btn').addEventListener('click', () => {
-      overlay.classList.remove('active');
-    });
-    
-    document.getElementById('rv-upload-btn').addEventListener('click', () => {
-      overlay.classList.remove('active');
-      // Trigger the file picker
-      const fileInput = document.getElementById('ch-hidden-file-input');
-      if (fileInput) fileInput.click();
-    });
+  if (window.showToast) {
+    window.showToast('Please select at least one photo or video before continuing.', 'error');
+  } else {
+    alert('Please select at least one photo or video before continuing.');
   }
-  
-  // Trigger animation
-  requestAnimationFrame(() => {
-    overlay.classList.add('active');
-  });
 }
 
 // =========================================================================
 // REVIEW HUBBS - COMPARISON SLIDER & SYNC
 // =========================================================================
-window.initReviewSlider = function() {
+window.initReviewSlider = function () {
   const emptyState = document.getElementById('review-empty-state');
   const sliderWrapper = document.getElementById('review-slider-wrapper');
-  
+
   if (!window.chUploads || window.chUploads.length === 0) {
     if (emptyState) emptyState.style.display = 'flex';
     if (sliderWrapper) sliderWrapper.style.display = 'none';
     return;
   }
-  
+
   if (emptyState) emptyState.style.display = 'none';
   if (sliderWrapper) sliderWrapper.style.display = 'block';
-  
+
   const beforeContainer = document.getElementById('review-before-container');
   const afterContainer = document.getElementById('review-after-container');
-  
+
   if (!beforeContainer || !afterContainer) return;
-  
+
   // Clear containers except for absolute labels and lines
   [beforeContainer, afterContainer].forEach(container => {
     Array.from(container.children).forEach(child => {
@@ -9256,7 +11006,7 @@ window.initReviewSlider = function() {
 
   const hasMultiple = window.chUploads.length >= 2;
   let layout = (window.HubbleEditor && window.HubbleEditor.activeLayout) || 'original';
-  
+
   layout = window.getEffectiveLayout(layout, window.chUploads);
 
   const layoutClass = (hasMultiple && layout !== 'original' && layout !== 'single') ? `layout-${layout}` : '';
@@ -9268,7 +11018,7 @@ window.initReviewSlider = function() {
   const afterWrapper = document.createElement('div');
   afterWrapper.style.cssText = 'width: 100%; height: 100%;';
   if (layoutClass) afterWrapper.className = layoutClass;
-  
+
   let firstVideoBefore = null;
   let firstVideoAfter = null;
 
@@ -9278,16 +11028,16 @@ window.initReviewSlider = function() {
   window.chUploads.forEach((mediaItem) => {
     const url = URL.createObjectURL(mediaItem.file);
     const state = mediaItem.editorState || {
-       filter: 'original', rotation: 0, zoom: 1, panX: 0, panY: 0,
-       adjustments: { brightness: 100, contrast: 100, exposure: 100, highlights: 100, shadows: 100, temperature: 0, tint: 0, saturation: 100, vibrance: 100, sharpness: 0, blur: 0, opacity: 100 },
-       crop: null, layers: [], isMuted: false, musicTrack: null, selectedLocation: null
+      filter: 'original', rotation: 0, zoom: 1, panX: 0, panY: 0,
+      adjustments: { brightness: 100, contrast: 100, exposure: 100, highlights: 100, shadows: 100, temperature: 0, tint: 0, saturation: 100, vibrance: 100, sharpness: 0, blur: 0, opacity: 100 },
+      crop: null, layers: [], isMuted: false, musicTrack: null, selectedLocation: null
     };
 
     const ar = (window.HubbleEditor && window.HubbleEditor.getEditedAspectRatio) ? window.HubbleEditor.getEditedAspectRatio(mediaItem) : 1;
     const beforeCell = document.createElement('div');
     beforeCell.className = 'ch-preview-item';
     beforeCell.style.cssText = `position: relative; width: 100%; height: 100%; overflow: hidden; display: flex; align-items: center; justify-content: center;`;
-    
+
     const afterCell = document.createElement('div');
     afterCell.className = 'ch-preview-item';
     afterCell.style.cssText = `position: relative; width: 100%; height: 100%; overflow: hidden; display: flex; align-items: center; justify-content: center;`;
@@ -9303,9 +11053,9 @@ window.initReviewSlider = function() {
 
     let cw = 100, ch = 100, cx = 0, cy = 0;
     if (state.crop) {
-       cw = state.crop.width; ch = state.crop.height; cx = state.crop.x; cy = state.crop.y;
+      cw = state.crop.width; ch = state.crop.height; cx = state.crop.x; cy = state.crop.y;
     }
-    const cropScaleCSS = state.crop ? `position: absolute; width: ${10000/cw}%; height: ${10000/ch}%; left: -${(cx/cw)*100}%; top: -${(cy/ch)*100}%;` : `position: absolute; width: 100%; height: 100%; left: 0; top: 0;`;
+    const cropScaleCSS = state.crop ? `position: absolute; width: ${10000 / cw}%; height: ${10000 / ch}%; left: -${(cx / cw) * 100}%; top: -${(cy / ch) * 100}%;` : `position: absolute; width: 100%; height: 100%; left: 0; top: 0;`;
 
     const beforeInner = document.createElement('div');
     beforeInner.style.cssText = 'position: absolute; width: 100%; height: 100%; left: 0; top: 0;';
@@ -9318,7 +11068,7 @@ window.initReviewSlider = function() {
     if (mediaItem.type.startsWith('video/')) {
       beforeMediaNode = document.createElement('video');
       afterMediaNode = document.createElement('video');
-      
+
       [beforeMediaNode, afterMediaNode].forEach(v => {
         v.src = url;
         v.style.cssText = 'position: absolute; width: 100%; height: 100%; object-fit: contain; object-position: center;';
@@ -9327,18 +11077,18 @@ window.initReviewSlider = function() {
         v.playsInline = true;
         v.autoplay = true;
       });
-      
+
       if (!firstVideoBefore) {
-         firstVideoBefore = beforeMediaNode;
-         firstVideoAfter = afterMediaNode;
+        firstVideoBefore = beforeMediaNode;
+        firstVideoAfter = afterMediaNode;
       } else {
-         // Sync secondary videos to the first one just by playing them together
-         firstVideoBefore.addEventListener('play', () => beforeMediaNode.play());
-         firstVideoBefore.addEventListener('pause', () => beforeMediaNode.pause());
-         firstVideoBefore.addEventListener('seeking', () => beforeMediaNode.currentTime = firstVideoBefore.currentTime);
-         firstVideoAfter.addEventListener('play', () => afterMediaNode.play());
-         firstVideoAfter.addEventListener('pause', () => afterMediaNode.pause());
-         firstVideoAfter.addEventListener('seeking', () => afterMediaNode.currentTime = firstVideoAfter.currentTime);
+        // Sync secondary videos to the first one just by playing them together
+        firstVideoBefore.addEventListener('play', () => beforeMediaNode.play());
+        firstVideoBefore.addEventListener('pause', () => beforeMediaNode.pause());
+        firstVideoBefore.addEventListener('seeking', () => beforeMediaNode.currentTime = firstVideoBefore.currentTime);
+        firstVideoAfter.addEventListener('play', () => afterMediaNode.play());
+        firstVideoAfter.addEventListener('pause', () => afterMediaNode.pause());
+        firstVideoAfter.addEventListener('seeking', () => afterMediaNode.currentTime = firstVideoAfter.currentTime);
       }
     } else {
       beforeMediaNode = document.createElement('img');
@@ -9351,7 +11101,7 @@ window.initReviewSlider = function() {
 
     // Apply Edits to After node
     if (window.HubbleEditor) {
-        afterMediaNode.style.filter = window.HubbleEditor.buildCSSFilterString(state.filter, state.adjustments);
+      afterMediaNode.style.filter = window.HubbleEditor.buildCSSFilterString(state.filter, state.adjustments);
     }
     const zoom = state.zoom || 1;
     afterMediaNode.style.transform = `translate(${state.panX || 0}%, ${state.panY || 0}%) rotate(${state.rotation || 0}deg) scale(${zoom})`;
@@ -9359,14 +11109,14 @@ window.initReviewSlider = function() {
     beforeInner.appendChild(beforeMediaNode);
     beforeFrame.appendChild(beforeInner);
     beforeCell.appendChild(beforeFrame);
-    
+
     afterInner.appendChild(afterMediaNode);
     afterFrame.appendChild(afterInner);
 
     // Inject Layers (Stickers / Text)
     const interactionWrapper = document.createElement('div');
     interactionWrapper.style.cssText = 'position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;';
-    
+
     if (state.layers) {
       state.layers.forEach((layer) => {
         const el = document.createElement('div');
@@ -9388,67 +11138,67 @@ window.initReviewSlider = function() {
 
   beforeBlocks.forEach(b => beforeWrapper.appendChild(b.el));
   afterBlocks.forEach(b => afterWrapper.appendChild(b.el));
-  
+
   // Audio sync and controls for the primary video
   if (firstVideoBefore) {
-      firstVideoBefore.addEventListener('play', () => { 
-        firstVideoAfter.play(); 
-        if (window.HubbleEditor && window.HubbleEditor.GlobalAudio) {
-            window.HubbleEditor.GlobalAudio.sync(firstVideoBefore.currentTime);
-            window.HubbleEditor.GlobalAudio.play(); 
-        }
-      });
-      firstVideoBefore.addEventListener('pause', () => { 
-        firstVideoAfter.pause(); 
-        if (window.HubbleEditor && window.HubbleEditor.GlobalAudio) {
-            window.HubbleEditor.GlobalAudio.pause(); 
-        }
-      });
-      firstVideoBefore.addEventListener('seeking', () => {
-        firstVideoAfter.currentTime = firstVideoBefore.currentTime;
-        if (window.HubbleEditor && window.HubbleEditor.GlobalAudio) {
-            window.HubbleEditor.GlobalAudio.sync(firstVideoBefore.currentTime);
-        }
-      });
-      firstVideoBefore.addEventListener('seeked', () => {
-        firstVideoAfter.currentTime = firstVideoBefore.currentTime;
-        if (window.HubbleEditor && window.HubbleEditor.GlobalAudio) {
-            window.HubbleEditor.GlobalAudio.sync(firstVideoBefore.currentTime);
-        }
-      });
-
-      sliderWrapper.onclick = (e) => {
-        if (e.target.id === 'review-slider-handle' || e.target.closest('#review-slider-handle') || e.target.closest('#he-speaker-btn')) return;
-        if (firstVideoBefore.paused) {
-          firstVideoBefore.play();
-          const btn = document.getElementById('he-review-play-btn');
-          if (btn) {
-              btn.innerHTML = '<i data-lucide="pause" style="color: white; width: 32px; height: 32px;"></i>';
-              if (window.lucide) window.lucide.createIcons();
-              btn.style.opacity = '1';
-              btn.style.transform = 'scale(1)';
-              setTimeout(() => { btn.style.opacity = '0'; btn.style.transform = 'scale(0.9)'; }, 2000);
-          }
-        } else {
-          firstVideoBefore.pause();
-          const btn = document.getElementById('he-review-play-btn');
-          if (btn) {
-              btn.innerHTML = '<i data-lucide="play" style="color: white; width: 32px; height: 32px;"></i>';
-              if (window.lucide) window.lucide.createIcons();
-              btn.style.opacity = '1';
-              btn.style.transform = 'scale(1)';
-          }
-        }
-      };
-
-      let reviewControls = document.getElementById('he-review-controls');
-      if (reviewControls) reviewControls.remove();
-      if (window.HubbleEditor) {
-         reviewControls = window.HubbleEditor.buildVideoControls(sliderWrapper, firstVideoBefore, true);
+    firstVideoBefore.addEventListener('play', () => {
+      firstVideoAfter.play();
+      if (window.HubbleEditor && window.HubbleEditor.GlobalAudio) {
+        window.HubbleEditor.GlobalAudio.sync(firstVideoBefore.currentTime);
+        window.HubbleEditor.GlobalAudio.play();
       }
+    });
+    firstVideoBefore.addEventListener('pause', () => {
+      firstVideoAfter.pause();
+      if (window.HubbleEditor && window.HubbleEditor.GlobalAudio) {
+        window.HubbleEditor.GlobalAudio.pause();
+      }
+    });
+    firstVideoBefore.addEventListener('seeking', () => {
+      firstVideoAfter.currentTime = firstVideoBefore.currentTime;
+      if (window.HubbleEditor && window.HubbleEditor.GlobalAudio) {
+        window.HubbleEditor.GlobalAudio.sync(firstVideoBefore.currentTime);
+      }
+    });
+    firstVideoBefore.addEventListener('seeked', () => {
+      firstVideoAfter.currentTime = firstVideoBefore.currentTime;
+      if (window.HubbleEditor && window.HubbleEditor.GlobalAudio) {
+        window.HubbleEditor.GlobalAudio.sync(firstVideoBefore.currentTime);
+      }
+    });
+
+    sliderWrapper.onclick = (e) => {
+      if (e.target.id === 'review-slider-handle' || e.target.closest('#review-slider-handle') || e.target.closest('#he-speaker-btn')) return;
+      if (firstVideoBefore.paused) {
+        firstVideoBefore.play();
+        const btn = document.getElementById('he-review-play-btn');
+        if (btn) {
+          btn.innerHTML = '<i data-lucide="pause" style="color: white; width: 32px; height: 32px;"></i>';
+          if (window.lucide) window.lucide.createIcons();
+          btn.style.opacity = '1';
+          btn.style.transform = 'scale(1)';
+          setTimeout(() => { btn.style.opacity = '0'; btn.style.transform = 'scale(0.9)'; }, 2000);
+        }
+      } else {
+        firstVideoBefore.pause();
+        const btn = document.getElementById('he-review-play-btn');
+        if (btn) {
+          btn.innerHTML = '<i data-lucide="play" style="color: white; width: 32px; height: 32px;"></i>';
+          if (window.lucide) window.lucide.createIcons();
+          btn.style.opacity = '1';
+          btn.style.transform = 'scale(1)';
+        }
+      }
+    };
+
+    let reviewControls = document.getElementById('he-review-controls');
+    if (reviewControls) reviewControls.remove();
+    if (window.HubbleEditor) {
+      reviewControls = window.HubbleEditor.buildVideoControls(sliderWrapper, firstVideoBefore, true);
+    }
   } else {
-      let reviewControls = document.getElementById('he-review-controls');
-      if (reviewControls) reviewControls.remove();
+    let reviewControls = document.getElementById('he-review-controls');
+    if (reviewControls) reviewControls.remove();
   }
 
   // Insert at the beginning so they sit behind the absolute positioned labels
@@ -9459,39 +11209,39 @@ window.initReviewSlider = function() {
   const handle = document.getElementById('review-slider-handle');
   if (handle) {
     let isDragging = false;
-    
+
     const updateSliderPos = (x) => {
       const rect = sliderWrapper.getBoundingClientRect();
       let position = x - rect.left;
       position = Math.max(0, Math.min(position, rect.width));
       const percentage = (position / rect.width) * 100;
-      
+
       beforeContainer.style.clipPath = `inset(0 ${100 - percentage}% 0 0)`;
       handle.style.left = `${percentage}%`;
     };
 
     handle.onmousedown = (e) => {
       isDragging = true;
-      e.preventDefault(); 
+      e.preventDefault();
     };
-    
+
     handle.ontouchstart = (e) => {
       isDragging = true;
     };
-    
+
     document.addEventListener('mousemove', (e) => {
       if (!isDragging) return;
       updateSliderPos(e.clientX);
     });
-    
+
     document.addEventListener('touchmove', (e) => {
       if (!isDragging) return;
       updateSliderPos(e.touches[0].clientX);
     }, { passive: true });
-    
+
     document.addEventListener('mouseup', () => isDragging = false);
     document.addEventListener('touchend', () => isDragging = false);
-    
+
     // Initial State 50%
     beforeContainer.style.clipPath = `inset(0 50% 0 0)`;
     handle.style.left = `50%`;
@@ -9501,7 +11251,7 @@ window.initReviewSlider = function() {
 // =========================================================================
 // REVIEW HUBBS - ACTIONS
 // =========================================================================
-window.saveReviewDraft = function(btn) {
+window.saveReviewDraft = function (btn) {
   if (window.showToast) window.showToast('All edits saved to draft! 📝');
   const span = document.getElementById('review-draft-time');
   if (span) {
@@ -9516,166 +11266,397 @@ window.saveReviewDraft = function(btn) {
 };
 
 
-window.publishHubb = async function() {
-  if (!window.chUploads || window.chUploads.length === 0) return;
-  const media = window.chUploads[0];
-  
+async function resolveMediaToDataUrl(upload) {
+  if (!upload) return null;
+  const isVideo = upload.type && upload.type.startsWith('video');
+
+  // Rasterize edited image if editorState is present
+  if (!isVideo && upload.editorState) {
+    try {
+      const state = upload.editorState;
+      const img = new Image();
+      img.crossOrigin = 'Anonymous';
+
+      let sourceUrl = upload.thumbUrl;
+      if (!sourceUrl && (upload.file || upload.blob)) {
+        sourceUrl = URL.createObjectURL(upload.file || upload.blob);
+      } else if (!sourceUrl) {
+        sourceUrl = upload.editedUrl || upload.url || upload.src || upload.base64 || upload.dataUrl;
+      }
+
+      img.src = sourceUrl;
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+      });
+
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+
+      // 1. Calculate base dimensions (incorporate rotation)
+      let baseWidth = img.width;
+      let baseHeight = img.height;
+      const rot = state.rotation || 0;
+      if (rot === 90 || rot === 270 || rot === -90 || rot === -270) {
+        baseWidth = img.height;
+        baseHeight = img.width;
+      }
+
+      // 2. Calculate crop dimensions
+      let cropX = 0, cropY = 0, cropW = baseWidth, cropH = baseHeight;
+      if (state.crop) {
+        cropX = (state.crop.x / 100) * baseWidth;
+        cropY = (state.crop.y / 100) * baseHeight;
+        cropW = (state.crop.width / 100) * baseWidth;
+        cropH = (state.crop.height / 100) * baseHeight;
+      }
+
+      // 3. Set final canvas size to cropped area
+      canvas.width = cropW;
+      canvas.height = cropH;
+
+      // 4. Apply CSS Filters
+      const cssFilter = window.HubbleEditor && window.HubbleEditor.buildCSSFilterString
+        ? window.HubbleEditor.buildCSSFilterString(state.filter || 'original', state.adjustments || {})
+        : 'none';
+      ctx.filter = cssFilter !== 'none' ? cssFilter : 'none';
+
+      // 5. Draw Image with crop, zoom, pan, and rotation
+      ctx.save();
+      // Translate to the center of the cropped canvas
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+
+      // Apply Zoom and Pan (Pan is relative to the base dimensions)
+      const zoom = state.zoom || 1;
+      const panX = ((state.panX || 0) / 100) * baseWidth;
+      const panY = ((state.panY || 0) / 100) * baseHeight;
+      ctx.scale(zoom, zoom);
+      ctx.translate(panX, panY);
+
+      // Offset by crop center relative to base center
+      const baseCenterX = baseWidth / 2;
+      const baseCenterY = baseHeight / 2;
+      const cropCenterX = cropX + (cropW / 2);
+      const cropCenterY = cropY + (cropH / 2);
+      ctx.translate(baseCenterX - cropCenterX, baseCenterY - cropCenterY);
+
+      // Apply Rotation
+      ctx.rotate((rot * Math.PI) / 180);
+
+      // Draw the original image centered
+      ctx.drawImage(img, -img.width / 2, -img.height / 2, img.width, img.height);
+      ctx.restore();
+
+      // 6. Reset filter for overlays
+      ctx.filter = 'none';
+
+      // 7. Draw Layers (Text & Stickers)
+      if (state.layers && state.layers.length > 0) {
+        state.layers.forEach(layer => {
+          ctx.save();
+          // Layers are positioned relative to the crop boundaries
+          const x = (parseFloat(layer.x) / 100) * canvas.width || (canvas.width / 2);
+          const y = (parseFloat(layer.y) / 100) * canvas.height || (canvas.height / 2);
+
+          if (layer.type === 'text') {
+            ctx.font = `${layer.bold ? 'bold ' : ''}${layer.italic ? 'italic ' : ''}${layer.fontSize || 32}px ${layer.fontFamily || 'Arial'}`;
+            ctx.fillStyle = layer.color || '#ffffff';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            if (layer.shadow) {
+              ctx.shadowColor = 'rgba(0,0,0,0.8)';
+              ctx.shadowBlur = 5;
+              ctx.shadowOffsetX = 2;
+              ctx.shadowOffsetY = 2;
+            }
+            ctx.fillText(layer.content || layer.text || '', x, y);
+          } else if (layer.type === 'sticker') {
+            ctx.font = '80px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(layer.content || layer.emoji || '', x, y);
+          }
+          ctx.restore();
+        });
+      }
+
+      return canvas.toDataURL('image/jpeg', 0.95);
+    } catch (e) {
+      console.error('Canvas rasterization failed:', e);
+    }
+  }
+
+  // Fallback to original file for videos or if rasterization fails
+  const fileObj = upload.file || upload.blob;
+  if (fileObj && (fileObj instanceof File || fileObj instanceof Blob || (typeof fileObj === 'object' && typeof fileObj.slice === 'function'))) {
+    try {
+      const dataUrl = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result);
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(fileObj);
+      });
+      if (dataUrl) return dataUrl;
+    } catch (e) {
+      console.warn('FileReader error on fileObj:', e);
+    }
+  }
+
+  // 2. Check upload properties: editedUrl, url, src, thumbUrl, base64, dataUrl
+  let url = upload.editedUrl || upload.url || upload.src || upload.thumbUrl || upload.base64 || upload.dataUrl;
+  if (!url || typeof url !== 'string') return null;
+
+  // 3. If already Data URL
+  if (url.startsWith('data:')) {
+    return url;
+  }
+
+  // 4. If Blob URL
+  if (url.startsWith('blob:')) {
+    try {
+      const res = await fetch(url);
+      const blob = await res.blob();
+      const dataUrl = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result);
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(blob);
+      });
+      if (dataUrl) return dataUrl;
+    } catch (e) {
+      console.warn('fetch blob URL failed, trying canvas fallback:', e);
+    }
+
+    // Canvas fallback for images
+    try {
+      return await new Promise((resolve) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+          try {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.naturalWidth || img.width || 800;
+            canvas.height = img.naturalHeight || img.height || 600;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            resolve(canvas.toDataURL('image/jpeg', 0.9));
+          } catch (err) {
+            resolve(null);
+          }
+        };
+        img.onerror = () => resolve(null);
+        img.src = url;
+      });
+    } catch (e) {
+      console.warn('Canvas fallback failed:', e);
+    }
+  }
+
+  return url;
+}
+
+window.publishHubb = async function () {
+  console.log('[ShareHubs Publish] Share button clicked, initiating publishing flow');
+
+  const captionEl = document.getElementById('ch-caption-input');
+  const captionText = captionEl ? captionEl.value.trim() : '';
+
+  if ((!window.chUploads || window.chUploads.length === 0) && !captionText) {
+    if (window.showToast) window.showToast('Please upload media or enter a caption.');
+    return;
+  }
+
   const pubBtn = document.getElementById('review-publish-btn');
   if (pubBtn) {
     pubBtn.disabled = true;
     pubBtn.style.opacity = '0.7';
-    pubBtn.innerHTML = '<i data-lucide="loader" class="animate-spin"></i> Processing...';
+    pubBtn.innerHTML = '<i data-lucide="loader" class="animate-spin" style="width: 18px; height: 18px;"></i> Sharing HUB...';
     if (window.lucide) window.lucide.createIcons();
   }
 
   try {
-    // Create an offscreen canvas
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    
-    // Load image
-    const img = new Image();
-    img.crossOrigin = 'Anonymous';
-    img.src = media.thumbUrl || URL.createObjectURL(media.file);
-    
-    await new Promise((resolve, reject) => {
-      img.onload = resolve;
-      img.onerror = reject;
-    });
-    
-    canvas.width = img.width;
-    canvas.height = img.height;
-    
-    // Apply CSS filters if present
-    const state = media.editorState || {};
-    const cssFilter = window.HubbleEditor && window.HubbleEditor.buildCSSFilterString ? window.HubbleEditor.buildCSSFilterString(state.filter || 'original', state.adjustments || {}) : 'none';
-    ctx.filter = cssFilter !== 'none' ? cssFilter : 'none';
-    
-    // Draw base image
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    
-    // Reset filter for drawing text/stickers
-    ctx.filter = 'none';
-    
-    // Render layers (Text & Stickers)
-    if (state.layers && state.layers.length > 0) {
-      state.layers.forEach(layer => {
-         if (layer.type === 'text') {
-            ctx.font = `${layer.fontSize}px ${layer.fontFamily}`;
-            ctx.fillStyle = layer.color;
-            const x = (parseFloat(layer.x) / 100) * canvas.width || 0;
-            const y = (parseFloat(layer.y) / 100) * canvas.height || 0;
-            ctx.fillText(layer.text, x, y);
-         } else if (layer.type === 'sticker') {
-            const emojiFont = '100px Arial'; 
-            ctx.font = emojiFont;
-            const x = (parseFloat(layer.x) / 100) * canvas.width || 0;
-            const y = (parseFloat(layer.y) / 100) * canvas.height || 0;
-            ctx.fillText(layer.emoji, x, y);
-         }
-      });
+    const token = localStorage.getItem('invibe_jwt_token');
+    if (!token) {
+      console.error('[ShareHubs Publish Error] AUTHENTICATION FAILED: Missing JWT token');
+      throw new Error('Please log in before sharing a HUB.');
     }
 
-    const base64Image = canvas.toDataURL('image/jpeg', 0.9);
-    
+    let uploadedMediaUrl = null;
+    let finalMediaType = 'image';
+
+    // Process first media item from window.chUploads for Stories
+    if (window.chUploads && window.chUploads.length > 0) {
+      const upload = window.chUploads[0];
+
+      // Ensure the editor state is attached to the upload before resolving
+      if (window.HubbleEditor && window.HubbleEditor.state) {
+        upload.editorState = JSON.parse(JSON.stringify(window.HubbleEditor.state));
+      }
+
+      const dataUrl = await resolveMediaToDataUrl(upload);
+      if (dataUrl) {
+        const rawType = upload.type || (upload.file ? upload.file.type : '');
+        finalMediaType = (rawType && rawType.startsWith('video')) ? 'video' : 'image';
+
+        // Attempt direct Supabase storage upload
+        try {
+          const base64Response = await fetch(dataUrl);
+          const blob = await base64Response.blob();
+
+          const ext = finalMediaType === 'video' ? 'mp4' : 'jpeg';
+          const bucketName = finalMediaType === 'video' ? 'post-videos' : 'post-images';
+          const userStr = localStorage.getItem('invibeUser');
+          let userId = 'anon';
+          try { if (userStr) userId = JSON.parse(userStr).id || userId; } catch (e) { }
+          const filename = `${userId}/story_${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`;
+
+          const client = supabase || window.supabase;
+          if (client && client.storage) {
+            const { error: uploadErr } = await client.storage
+              .from(bucketName)
+              .upload(filename, blob, { contentType: blob.type || (finalMediaType === 'video' ? 'video/mp4' : 'image/jpeg'), upsert: true });
+
+            if (!uploadErr) {
+              const { data: publicUrlData } = client.storage.from(bucketName).getPublicUrl(filename);
+              if (publicUrlData && publicUrlData.publicUrl) {
+                uploadedMediaUrl = publicUrlData.publicUrl;
+                console.log('[ShareHubs Publish] Media successfully uploaded to storage:', uploadedMediaUrl);
+              }
+            } else {
+              console.warn('[ShareHubs Publish Notice] Client storage upload notice:', uploadErr.message);
+            }
+          }
+        } catch (uploadException) {
+          console.warn('[ShareHubs Publish Notice] Client storage upload exception:', uploadException.message);
+        }
+
+        // If client-side upload was bypassed or failed, pass dataUrl to backend which will upload to storage via service role
+        if (!uploadedMediaUrl) {
+          uploadedMediaUrl = dataUrl;
+        }
+      }
+    }
+
+    if (!uploadedMediaUrl) {
+      console.error('[ShareHubs Publish Error] MEDIA UPLOAD FAILED: No valid media could be generated');
+      throw new Error('No valid media could be generated for upload.');
+    }
+
+    // Format payload specifically for /api/stories
+    const payload = {
+      mediaUrl: uploadedMediaUrl,
+      mediaType: finalMediaType,
+      scheduledAt: window.chScheduledAt || null
+    };
+
+    const API_URL = window.API_URL || '';
+    let endpoint = `${API_URL}/api/stories`;
     if (window.chScheduledAt) {
-      // Scheduled HUBB - Send to backend
-      const token = localStorage.getItem('invibe_jwt_token');
-      if (!token) {
-        if (window.showToast) window.showToast('Please log in to schedule a HUBB! 🔐', 'error');
-        throw new Error('No token');
-      }
-      
-      const API_URL = window.API_URL || '';
-      const res = await fetch(`${API_URL}/api/stories/schedule`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ 
-          mediaUrl: base64Image, 
-          mediaType: media.type || 'image',
-          scheduledAt: window.chScheduledAt 
-        })
-      });
-      
-      if (!res.ok) throw new Error('Failed to schedule HUBB');
-      
-      if (window.showToast) window.showToast('HUBB scheduled successfully! 🗓️✨');
-      
-      // Reset scheduling
+      endpoint = `${API_URL}/api/stories/schedule`;
+    }
+
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      console.log('[ShareHubs Publish] Story successfully created:', data);
+
+      // Clear creator state
+      window.chUploads = [];
       window.chScheduledAt = null;
-      const toggle = document.getElementById('ch-schedule-toggle');
-      if (toggle) toggle.checked = false;
-      const row = document.getElementById('ch-schedule-datetime-row');
-      if (row) row.style.display = 'none';
-      const infoBox = document.getElementById('review-scheduled-info');
-      if (infoBox) infoBox.style.display = 'none';
+      if (captionEl) captionEl.value = '';
+
+      if (window.showToast) {
+        window.showToast('HUB shared to your story! 🚀');
+      }
+
+      // Return to home feed and reload stories
+      if (window.switchView) {
+        window.switchView('home');
+      }
+
+      // Trigger story refresh in stories section
+      if (typeof window.loadHubbStories === 'function') {
+        await window.loadHubbStories();
+      } else if (typeof window.loadStories === 'function') {
+        await window.loadStories();
+      }
     } else {
-      // Link to Project A's upload logic
-      window.currentStoryImageBase64 = base64Image;
-      if (typeof window.submitStory === 'function') {
-         await window.submitStory(false);
-      } else if (typeof submitStory === 'function') {
-         await submitStory(false);
+      const errData = await res.json().catch(() => ({}));
+      const errMsg = errData.error || errData.message || 'Unable to share HUB story. Please try again.';
+      console.error('[ShareHubs Publish Error] STORY API FAILED:', { status: res.status, error: errMsg });
+      if (window.showToast) {
+        window.showToast(errMsg, 'error');
       } else {
-         console.error("submitStory function not found!");
-         showToast('Error: submitStory not found');
+        alert(errMsg);
       }
     }
-  } catch (e) {
-    console.error("Rasterization Error:", e);
-    if (window.showToast) window.showToast('Failed to process image', 'error');
-  } finally {
-    window.chUploads = [];
-    if (window.currentDraftId) {
-      DraftsDB.deleteDraft(window.currentDraftId).then(() => {
-        window.currentDraftId = null;
-        window.currentDraftCreatedAt = null;
-        window.renderDraftsList();
-      }).catch(console.error);
+  } catch (err) {
+    console.error('[ShareHubs Publish Error] PUBLISH FAILED:', err.message || err);
+    if (window.showToast) {
+      window.showToast(err.message || 'Unable to share HUB. Please try again.', 'error');
+    } else {
+      alert(err.message || 'Unable to share HUB. Please try again.');
     }
+  } finally {
     if (pubBtn) {
       pubBtn.disabled = false;
       pubBtn.style.opacity = '1';
-      pubBtn.innerHTML = '<span id="review-publish-text">Publish Hubb</span> <i id="review-publish-icon" data-lucide="upload-cloud" style="width: 18px; height: 18px;"></i>';
+      pubBtn.innerHTML = '<span id="review-publish-text">Share the HUB</span> <i id="review-publish-icon" data-lucide="send" style="width: 18px; height: 18px;"></i>';
       if (window.lucide) window.lucide.createIcons();
     }
-    setTimeout(() => {
-      switchView('home');
-      if (typeof initCreateHubbsUpload === 'function') initCreateHubbsUpload();
-    }, 100);
   }
 };
 
+window.loadHubbStories = async function () {
+  if (typeof window.loadStories === 'function') {
+    await window.loadStories();
+  }
+};
 
-window.openPublishedStory = function(card) {
+document.addEventListener('DOMContentLoaded', () => {
+  if (window.loadHubbStories) window.loadHubbStories();
+});
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
+  if (window.loadHubbStories) window.loadHubbStories();
+}
+
+window.openPublishedStory = function (card) {
   const dataNode = card.querySelector('.story-data');
   if (!dataNode) return;
   const data = JSON.parse(dataNode.innerHTML);
-  
+
   const modal = document.getElementById('story-viewer-modal');
   if (!modal) return;
-  
+
   const avatar = document.getElementById('story-viewer-avatar');
   if (avatar) avatar.src = 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&h=150&q=80';
-  
+
   const name = document.getElementById('story-viewer-name');
   if (name) name.innerText = 'Your Story';
-  
+
   const time = document.getElementById('story-viewer-time');
   if (time) time.innerText = 'Just now';
-  
+
   const contentBox = document.getElementById('story-viewer-content-box');
   if (!contentBox) return;
   contentBox.innerHTML = '';
-  
+
   let mediaDataList = data.allMedia;
   if (!mediaDataList) {
-      // Fallback for old single media posts
-      mediaDataList = [{
-         url: data.url, type: data.type, filter: data.filter,
-         rotation: data.rotation, zoom: data.zoom, panX: 0, panY: 0,
-         crop: data.crop, layers: data.layers, ar: 1
-      }];
+    // Fallback for old single media posts
+    mediaDataList = [{
+      url: data.url, type: data.type, filter: data.filter,
+      rotation: data.rotation, zoom: data.zoom, panX: 0, panY: 0,
+      crop: data.crop, layers: data.layers, ar: 1
+    }];
   }
 
   const hasMultiple = mediaDataList.length >= 2;
@@ -9694,16 +11675,16 @@ window.openPublishedStory = function(card) {
     const cell = document.createElement('div');
     cell.className = 'ch-preview-item';
     cell.style.cssText = `position: relative; width: 100%; height: 100%; overflow: hidden; display: flex; align-items: center; justify-content: center;`;
-    
+
     const frame = document.createElement('div');
     frame.className = 'edited-frame';
     frame.style.cssText = `position: relative; overflow: hidden; aspect-ratio: ${mData.ar}; border-radius: 10px; background: #1a1a1a; display: flex; align-items: center; justify-content: center; margin: auto; width: min(100cqw, calc(100cqh * ${mData.ar})); height: min(100cqh, calc(100cqw / ${mData.ar}));`;
-    
+
     let cw = 100, ch = 100, cx = 0, cy = 0;
     if (mData.crop) {
-       cw = mData.crop.width; ch = mData.crop.height; cx = mData.crop.x; cy = mData.crop.y;
+      cw = mData.crop.width; ch = mData.crop.height; cx = mData.crop.x; cy = mData.crop.y;
     }
-    const cropScaleCSS = mData.crop ? `position: absolute; width: ${10000/cw}%; height: ${10000/ch}%; left: -${(cx/cw)*100}%; top: -${(cy/ch)*100}%;` : `position: absolute; width: 100%; height: 100%; left: 0; top: 0;`;
+    const cropScaleCSS = mData.crop ? `position: absolute; width: ${10000 / cw}%; height: ${10000 / ch}%; left: -${(cx / cw) * 100}%; top: -${(cy / ch) * 100}%;` : `position: absolute; width: 100%; height: 100%; left: 0; top: 0;`;
 
     const inner = document.createElement('div');
     inner.style.cssText = cropScaleCSS;
@@ -9723,7 +11704,7 @@ window.openPublishedStory = function(card) {
     mediaNode.style.cssText = 'position: absolute; width: 100%; height: 100%; object-fit: contain; object-position: center;';
     mediaNode.style.filter = mData.filter || '';
     mediaNode.style.transform = `translate(${mData.panX || 0}%, ${mData.panY || 0}%) rotate(${mData.rotation || 0}deg) scale(${mData.zoom || 1})`;
-    
+
     inner.appendChild(mediaNode);
     frame.appendChild(inner);
 
@@ -9742,14 +11723,14 @@ window.openPublishedStory = function(card) {
       });
       frame.appendChild(interactionWrapper);
     }
-    
+
     cell.appendChild(frame);
     wrapper.appendChild(cell);
   });
-  
+
   contentBox.appendChild(wrapper);
 
-  
+
   modal.style.display = 'flex';
   requestAnimationFrame(() => modal.style.opacity = '1');
 };
@@ -9778,7 +11759,7 @@ window.HubbleEditor = {
   },
   history: [],
   redoStack: [],
-  
+
   // Initialization
   init() {
     this.injectEditorUI();
@@ -9791,7 +11772,7 @@ window.HubbleEditor = {
       const modal = document.createElement('div');
       modal.id = 'he-canvas-modal';
       modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.85); backdrop-filter: blur(12px); z-index: 9990; display: none; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.3s;';
-      
+
       modal.innerHTML = `
         <div style="position: absolute; top: 20px; right: 20px; display: flex; gap: 12px; z-index: 9995;">
           <button onclick="HubbleEditor.undo()" id="he-undo-btn" class="ch-premium-tool-btn" style="width: 40px; height: 40px; border-radius: 12px; background: rgba(255,255,255,0.1); color: white; border: none; cursor: pointer; opacity: 0.5; pointer-events: none;"><i data-lucide="undo" style="width: 18px; height: 18px;"></i></button>
@@ -9834,39 +11815,39 @@ window.HubbleEditor = {
       `;
       document.body.appendChild(modal);
       if (window.lucide) window.lucide.createIcons();
-      
+
       const overlay = document.getElementById('he-crop-overlay');
       const container = document.getElementById('he-render-container');
-      
+
       if (overlay) overlay.style.cursor = 'move';
-      
+
       if (container && !container.dataset.zoomPanBound) {
         container.dataset.zoomPanBound = "true";
-        
+
         // Mouse Wheel Zoom
         container.addEventListener('wheel', (e) => {
           if (e.target.closest('#he-video-controls') || e.target.closest('#he-review-controls') || e.target.closest('.he-delete-btn') || e.target.closest('.ch-premium-tool-btn')) return;
           e.preventDefault();
           const rect = container.getBoundingClientRect();
-          
+
           const mouseX = ((e.clientX - rect.left) / rect.width * 100) - 50;
           const mouseY = ((e.clientY - rect.top) / rect.height * 100) - 50;
-          
+
           const oldZoom = HubbleEditor.state.zoom || 1;
           const zoomDelta = e.deltaY > 0 ? -0.05 : 0.05;
           let newZoom = Math.max(0.5, Math.min(3, oldZoom + zoomDelta));
-          
+
           if (newZoom !== oldZoom) {
-             HubbleEditor.state.panX = (HubbleEditor.state.panX || 0) - (mouseX - (HubbleEditor.state.panX || 0)) * (newZoom / oldZoom - 1);
-             HubbleEditor.state.panY = (HubbleEditor.state.panY || 0) - (mouseY - (HubbleEditor.state.panY || 0)) * (newZoom / oldZoom - 1);
-             HubbleEditor.setCropZoom(newZoom);
+            HubbleEditor.state.panX = (HubbleEditor.state.panX || 0) - (mouseX - (HubbleEditor.state.panX || 0)) * (newZoom / oldZoom - 1);
+            HubbleEditor.state.panY = (HubbleEditor.state.panY || 0) - (mouseY - (HubbleEditor.state.panY || 0)) * (newZoom / oldZoom - 1);
+            HubbleEditor.setCropZoom(newZoom);
           }
         }, { passive: false });
-        
+
         // Mouse Drag Pan
         let isMousePanning = false;
         let mousePanStartX, mousePanStartY, mouseInitialPanX, mouseInitialPanY;
-        
+
         container.addEventListener('mousedown', (e) => {
           if (e.target.closest('#he-video-controls') || e.target.closest('#he-review-controls') || e.target.closest('.he-delete-btn') || e.target.closest('.ch-premium-tool-btn')) return;
           if ((HubbleEditor.state.zoom || 1) <= 1) return;
@@ -9876,23 +11857,23 @@ window.HubbleEditor = {
           mouseInitialPanX = HubbleEditor.state.panX || 0;
           mouseInitialPanY = HubbleEditor.state.panY || 0;
         });
-        
+
         window.addEventListener('mousemove', (e) => {
           if (isMousePanning) {
             e.preventDefault();
             const rect = container.getBoundingClientRect();
             const dx = ((e.clientX - mousePanStartX) / rect.width) * 100;
             const dy = ((e.clientY - mousePanStartY) / rect.height) * 100;
-            
+
             HubbleEditor.state.panX = mouseInitialPanX + dx;
             HubbleEditor.state.panY = mouseInitialPanY + dy;
             HubbleEditor.enforcePanConstraints();
             HubbleEditor.updateRender();
           }
         });
-        
+
         window.addEventListener('mouseup', () => { isMousePanning = false; });
-        
+
         // Touch Zoom and Pan
         let initialPinchDist = null;
         let initialZoom = 1;
@@ -9900,7 +11881,7 @@ window.HubbleEditor = {
         let initialPinchCenter = null;
         let isTouchPanning = false;
         let touchPanStartX, touchPanStartY;
-        
+
         container.addEventListener('touchstart', (e) => {
           if (e.target.closest('#he-video-controls') || e.target.closest('#he-review-controls') || e.target.closest('.he-delete-btn') || e.target.closest('.ch-premium-tool-btn')) return;
           if (e.touches.length === 2) {
@@ -9908,13 +11889,13 @@ window.HubbleEditor = {
             isTouchPanning = false;
             const dx = e.touches[0].clientX - e.touches[1].clientX;
             const dy = e.touches[0].clientY - e.touches[1].clientY;
-            initialPinchDist = Math.sqrt(dx*dx + dy*dy);
+            initialPinchDist = Math.sqrt(dx * dx + dy * dy);
             initialZoom = HubbleEditor.state.zoom || 1;
             initialPanX = HubbleEditor.state.panX || 0;
             initialPanY = HubbleEditor.state.panY || 0;
             initialPinchCenter = {
-                x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
-                y: (e.touches[0].clientY + e.touches[1].clientY) / 2
+              x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+              y: (e.touches[0].clientY + e.touches[1].clientY) / 2
             };
           } else if (e.touches.length === 1) {
             if ((HubbleEditor.state.zoom || 1) <= 1) return;
@@ -9925,27 +11906,27 @@ window.HubbleEditor = {
             initialPanY = HubbleEditor.state.panY || 0;
           }
         }, { passive: false });
-        
+
         container.addEventListener('touchmove', (e) => {
           if (e.touches.length === 2 && initialPinchDist) {
             e.preventDefault();
             const dx = e.touches[0].clientX - e.touches[1].clientX;
             const dy = e.touches[0].clientY - e.touches[1].clientY;
-            const dist = Math.sqrt(dx*dx + dy*dy);
+            const dist = Math.sqrt(dx * dx + dy * dy);
             const scale = dist / initialPinchDist;
             let newZoom = Math.max(0.5, Math.min(3, initialZoom * scale));
-            
+
             const rect = container.getBoundingClientRect();
-            
+
             const currentCenterX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
             const currentCenterY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-            
+
             const panDeltaX = ((currentCenterX - initialPinchCenter.x) / rect.width) * 100;
             const panDeltaY = ((currentCenterY - initialPinchCenter.y) / rect.height) * 100;
-            
+
             const mouseX = ((initialPinchCenter.x - rect.left) / rect.width * 100) - 50;
             const mouseY = ((initialPinchCenter.y - rect.top) / rect.height * 100) - 50;
-            
+
             HubbleEditor.state.panX = initialPanX - (mouseX - initialPanX) * (newZoom / initialZoom - 1) + panDeltaX;
             HubbleEditor.state.panY = initialPanY - (mouseY - initialPanY) * (newZoom / initialZoom - 1) + panDeltaY;
             HubbleEditor.setCropZoom(newZoom);
@@ -9954,14 +11935,14 @@ window.HubbleEditor = {
             const rect = container.getBoundingClientRect();
             const dx = ((e.touches[0].clientX - touchPanStartX) / rect.width) * 100;
             const dy = ((e.touches[0].clientY - touchPanStartY) / rect.height) * 100;
-            
+
             HubbleEditor.state.panX = initialPanX + dx;
             HubbleEditor.state.panY = initialPanY + dy;
             HubbleEditor.enforcePanConstraints();
             HubbleEditor.updateRender();
           }
         }, { passive: false });
-        
+
         container.addEventListener('touchend', (e) => {
           if (e.touches.length < 2) initialPinchDist = null;
           if (e.touches.length === 0) isTouchPanning = false;
@@ -9975,14 +11956,14 @@ window.HubbleEditor = {
     buttons.forEach((btn, index) => {
       btn.onclick = (e) => {
         e.preventDefault();
-        
+
         if (!window.chUploads || window.chUploads.length === 0) {
           if (window.showToast) window.showToast('Please upload media first.');
           return;
         }
 
         const tools = ['filters', 'crop', 'rotate', 'adjust', 'stickers', 'text'];
-        
+
         // Remove active class from all
         buttons.forEach(b => {
           b.classList.remove('active');
@@ -9991,13 +11972,13 @@ window.HubbleEditor = {
           b.style.boxShadow = 'none';
           b.style.color = 'var(--text-main)';
           const span = b.nextElementSibling;
-          if(span) {
-             span.style.color = 'var(--text-muted)';
-             span.style.fontWeight = 'normal';
-             span.style.textShadow = 'none';
+          if (span) {
+            span.style.color = 'var(--text-muted)';
+            span.style.fontWeight = 'normal';
+            span.style.textShadow = 'none';
           }
         });
-        
+
         // Add active to current
         btn.classList.add('active');
         btn.style.background = 'rgba(168, 85, 247, 0.2)';
@@ -10005,16 +11986,16 @@ window.HubbleEditor = {
         btn.style.boxShadow = '0 4px 15px rgba(168, 85, 247, 0.4), inset 0 0 10px rgba(168, 85, 247, 0.2)';
         btn.style.color = 'var(--primary)';
         const activeSpan = btn.nextElementSibling;
-        if(activeSpan) {
-           activeSpan.style.color = 'var(--primary)';
-           activeSpan.style.fontWeight = '600';
-           activeSpan.style.textShadow = '0 0 10px rgba(168, 85, 247, 0.3)';
+        if (activeSpan) {
+          activeSpan.style.color = 'var(--primary)';
+          activeSpan.style.fontWeight = '600';
+          activeSpan.style.textShadow = '0 0 10px rgba(168, 85, 247, 0.3)';
         }
 
         if (tools[index] === 'text' && HubbleEditor.activeSelectedLayerId) {
-            this.openTextTool(HubbleEditor.activeSelectedLayerId);
+          this.openTextTool(HubbleEditor.activeSelectedLayerId);
         } else {
-            this.openTool(tools[index]);
+          this.openTool(tools[index]);
         }
       };
     });
@@ -10024,233 +12005,233 @@ window.HubbleEditor = {
   textState: { text: '', color: '#ffffff', font: 'inherit', bold: false, italic: false, layerId: null },
 
   openTextTool(layerId = null) {
-      if (layerId) {
-          const layer = this.state.layers.find(l => l.id === layerId);
-          if (layer) {
-             this.textState = {
-                text: layer.content,
-                color: layer.styles.color || '#ffffff',
-                font: layer.styles.font || 'inherit',
-                bold: !!layer.styles.bold,
-                italic: !!layer.styles.italic,
-                layerId: layer.id
-             };
-          }
-      } else {
-          this.textState = { text: '', color: '#ffffff', font: 'inherit', bold: false, italic: false, layerId: null };
+    if (layerId) {
+      const layer = this.state.layers.find(l => l.id === layerId);
+      if (layer) {
+        this.textState = {
+          text: layer.content,
+          color: layer.styles.color || '#ffffff',
+          font: layer.styles.font || 'inherit',
+          bold: !!layer.styles.bold,
+          italic: !!layer.styles.italic,
+          layerId: layer.id
+        };
       }
-      
-      const buttons = document.querySelectorAll('.ch-image-tools .ch-premium-tool-btn');
-      buttons.forEach((b, i) => {
-         if(i === 5) { 
-            b.classList.add('active');
-            b.style.background = 'rgba(168, 85, 247, 0.2)';
-            b.style.borderColor = 'rgba(168, 85, 247, 0.5)';
-            b.style.boxShadow = '0 4px 15px rgba(168, 85, 247, 0.4), inset 0 0 10px rgba(168, 85, 247, 0.2)';
-            b.style.color = 'var(--primary)';
-            const activeSpan = b.nextElementSibling;
-            if(activeSpan) {
-               activeSpan.style.color = 'var(--primary)';
-               activeSpan.style.fontWeight = '600';
-               activeSpan.style.textShadow = '0 0 10px rgba(168, 85, 247, 0.3)';
-            }
-         } else {
-            b.classList.remove('active');
-            b.style.background = 'rgba(255,255,255,0.05)';
-            b.style.borderColor = 'rgba(255,255,255,0.1)';
-            b.style.boxShadow = 'none';
-            b.style.color = 'var(--text-main)';
-            const span = b.nextElementSibling;
-            if(span) {
-               span.style.color = 'var(--text-muted)';
-               span.style.fontWeight = 'normal';
-               span.style.textShadow = 'none';
-            }
-         }
-      });
-      
-      this.openTool('text');
+    } else {
+      this.textState = { text: '', color: '#ffffff', font: 'inherit', bold: false, italic: false, layerId: null };
+    }
+
+    const buttons = document.querySelectorAll('.ch-image-tools .ch-premium-tool-btn');
+    buttons.forEach((b, i) => {
+      if (i === 5) {
+        b.classList.add('active');
+        b.style.background = 'rgba(168, 85, 247, 0.2)';
+        b.style.borderColor = 'rgba(168, 85, 247, 0.5)';
+        b.style.boxShadow = '0 4px 15px rgba(168, 85, 247, 0.4), inset 0 0 10px rgba(168, 85, 247, 0.2)';
+        b.style.color = 'var(--primary)';
+        const activeSpan = b.nextElementSibling;
+        if (activeSpan) {
+          activeSpan.style.color = 'var(--primary)';
+          activeSpan.style.fontWeight = '600';
+          activeSpan.style.textShadow = '0 0 10px rgba(168, 85, 247, 0.3)';
+        }
+      } else {
+        b.classList.remove('active');
+        b.style.background = 'rgba(255,255,255,0.05)';
+        b.style.borderColor = 'rgba(255,255,255,0.1)';
+        b.style.boxShadow = 'none';
+        b.style.color = 'var(--text-main)';
+        const span = b.nextElementSibling;
+        if (span) {
+          span.style.color = 'var(--text-muted)';
+          span.style.fontWeight = 'normal';
+          span.style.textShadow = 'none';
+        }
+      }
+    });
+
+    this.openTool('text');
   },
 
   updateLiveTextColor(color) {
-      this.textState.color = color;
-      this.updateLiveText();
-      
-      const colorInput = document.getElementById('he-text-color-picker');
-      if (colorInput) colorInput.value = color;
-      
-      const hiddenInput = document.getElementById('he-text-color');
-      if (hiddenInput) hiddenInput.value = color;
-      
-      const swatches = document.querySelectorAll('.he-color-swatch');
-      swatches.forEach(s => {
-         if (s.dataset.color.toLowerCase() === color.toLowerCase()) {
-             s.style.border = '2px solid var(--primary, #a855f7)';
-         } else {
-             s.style.border = '2px solid rgba(255,255,255,0.1)';
-         }
-      });
+    this.textState.color = color;
+    this.updateLiveText();
+
+    const colorInput = document.getElementById('he-text-color-picker');
+    if (colorInput) colorInput.value = color;
+
+    const hiddenInput = document.getElementById('he-text-color');
+    if (hiddenInput) hiddenInput.value = color;
+
+    const swatches = document.querySelectorAll('.he-color-swatch');
+    swatches.forEach(s => {
+      if (s.dataset.color.toLowerCase() === color.toLowerCase()) {
+        s.style.border = '2px solid var(--primary, #a855f7)';
+      } else {
+        s.style.border = '2px solid rgba(255,255,255,0.1)';
+      }
+    });
   },
 
   toggleTextFormat(type) {
-      if (type === 'bold') {
-          this.textState.bold = !this.textState.bold;
-          const btn = document.getElementById('he-text-bold');
-          if (btn) {
-             btn.style.border = this.textState.bold ? '1px solid var(--primary, #a855f7)' : '1px solid rgba(255,255,255,0.1)';
-             btn.style.background = this.textState.bold ? 'rgba(168,85,247,0.2)' : 'rgba(255,255,255,0.05)';
-          }
+    if (type === 'bold') {
+      this.textState.bold = !this.textState.bold;
+      const btn = document.getElementById('he-text-bold');
+      if (btn) {
+        btn.style.border = this.textState.bold ? '1px solid var(--primary, #a855f7)' : '1px solid rgba(255,255,255,0.1)';
+        btn.style.background = this.textState.bold ? 'rgba(168,85,247,0.2)' : 'rgba(255,255,255,0.05)';
       }
-      if (type === 'italic') {
-          this.textState.italic = !this.textState.italic;
-          const btn = document.getElementById('he-text-italic');
-          if (btn) {
-             btn.style.border = this.textState.italic ? '1px solid var(--primary, #a855f7)' : '1px solid rgba(255,255,255,0.1)';
-             btn.style.background = this.textState.italic ? 'rgba(168,85,247,0.2)' : 'rgba(255,255,255,0.05)';
-          }
+    }
+    if (type === 'italic') {
+      this.textState.italic = !this.textState.italic;
+      const btn = document.getElementById('he-text-italic');
+      if (btn) {
+        btn.style.border = this.textState.italic ? '1px solid var(--primary, #a855f7)' : '1px solid rgba(255,255,255,0.1)';
+        btn.style.background = this.textState.italic ? 'rgba(168,85,247,0.2)' : 'rgba(255,255,255,0.05)';
       }
-      this.updateLiveText();
+    }
+    this.updateLiveText();
   },
 
   updateLiveText() {
-      const input = document.getElementById('he-text-input');
-      const font = document.getElementById('he-text-font');
-      
-      if (!input || !font) return;
+    const input = document.getElementById('he-text-input');
+    const font = document.getElementById('he-text-font');
 
-      this.textState.text = input.value;
-      this.textState.font = font.value;
-      
-      let layerToUpdate = null;
-      let shouldRender = false;
-      
-      if (this.textState.text.trim() !== '') {
-          if (this.textState.layerId) {
-             const layer = this.state.layers.find(l => l.id === this.textState.layerId);
-             if (layer) {
-                layer.content = this.textState.text;
-                layer.styles = { ...layer.styles, color: this.textState.color, font: this.textState.font, bold: this.textState.bold, italic: this.textState.italic };
-                layerToUpdate = layer;
-             }
-          } else {
-             const id = Date.now();
-             this.textState.layerId = id;
-             this.state.layers.push({
-               id, type: 'text', content: this.textState.text, x: 50, y: 50, rotation: 0, scale: 1, zIndex: this.state.layers.length + 10,
-               styles: { color: this.textState.color, font: this.textState.font, bold: this.textState.bold, italic: this.textState.italic, size: 32 }
-             });
-             this.activeSelectedLayerId = id;
-             shouldRender = true;
-          }
+    if (!input || !font) return;
+
+    this.textState.text = input.value;
+    this.textState.font = font.value;
+
+    let layerToUpdate = null;
+    let shouldRender = false;
+
+    if (this.textState.text.trim() !== '') {
+      if (this.textState.layerId) {
+        const layer = this.state.layers.find(l => l.id === this.textState.layerId);
+        if (layer) {
+          layer.content = this.textState.text;
+          layer.styles = { ...layer.styles, color: this.textState.color, font: this.textState.font, bold: this.textState.bold, italic: this.textState.italic };
+          layerToUpdate = layer;
+        }
       } else {
-          if (this.textState.layerId) {
-             this.state.layers = this.state.layers.filter(l => l.id !== this.textState.layerId);
-             this.textState.layerId = null;
-             this.activeSelectedLayerId = null;
-             shouldRender = true;
-          }
+        const id = Date.now();
+        this.textState.layerId = id;
+        this.state.layers.push({
+          id, type: 'text', content: this.textState.text, x: 50, y: 50, rotation: 0, scale: 1, zIndex: this.state.layers.length + 10,
+          styles: { color: this.textState.color, font: this.textState.font, bold: this.textState.bold, italic: this.textState.italic, size: 32 }
+        });
+        this.activeSelectedLayerId = id;
+        shouldRender = true;
       }
-      
-      if (shouldRender) {
-          this.updateRender();
-      } else if (layerToUpdate) {
-          // Fast DOM update for color, font, typing
-          const interactionLayer = document.getElementById('he-interaction-layer');
-          if (interactionLayer) {
-              const el = Array.from(interactionLayer.children).find(child => child.dataset.layerId == layerToUpdate.id);
-              if (el && el.firstElementChild) {
-                  const textDiv = el.firstElementChild;
-                  textDiv.style.color = layerToUpdate.styles.color || 'white';
-                  textDiv.style.fontFamily = layerToUpdate.styles.font || 'inherit';
-                  textDiv.style.fontWeight = layerToUpdate.styles.bold ? 'bold' : 'normal';
-                  textDiv.style.fontStyle = layerToUpdate.styles.italic ? 'italic' : 'normal';
-                  textDiv.textContent = layerToUpdate.content;
-              }
-          }
+    } else {
+      if (this.textState.layerId) {
+        this.state.layers = this.state.layers.filter(l => l.id !== this.textState.layerId);
+        this.textState.layerId = null;
+        this.activeSelectedLayerId = null;
+        shouldRender = true;
       }
+    }
 
-      const btn = document.getElementById('he-text-add-btn');
-      if (btn) {
-         const hasText = this.textState.text.trim().length > 0;
-         btn.style.background = hasText ? 'linear-gradient(135deg, var(--primary, #a855f7) 0%, #7e22ce 100%)' : 'rgba(255,255,255,0.1)';
-         btn.style.boxShadow = hasText ? '0 8px 20px rgba(168,85,247,0.3)' : 'none';
-         btn.style.color = hasText ? 'white' : 'rgba(255,255,255,0.4)';
-         btn.style.cursor = hasText ? 'pointer' : 'not-allowed';
-         btn.style.pointerEvents = hasText ? 'all' : 'none';
-         const isExisting = this.textState.layerId && this.history && this.history.length > 0 && this.history.some(h => h.layers.some(l => l.id === this.textState.layerId));
-         btn.innerText = isExisting ? 'Update Text' : 'Add Text';
+    if (shouldRender) {
+      this.updateRender();
+    } else if (layerToUpdate) {
+      // Fast DOM update for color, font, typing
+      const interactionLayer = document.getElementById('he-interaction-layer');
+      if (interactionLayer) {
+        const el = Array.from(interactionLayer.children).find(child => child.dataset.layerId == layerToUpdate.id);
+        if (el && el.firstElementChild) {
+          const textDiv = el.firstElementChild;
+          textDiv.style.color = layerToUpdate.styles.color || 'white';
+          textDiv.style.fontFamily = layerToUpdate.styles.font || 'inherit';
+          textDiv.style.fontWeight = layerToUpdate.styles.bold ? 'bold' : 'normal';
+          textDiv.style.fontStyle = layerToUpdate.styles.italic ? 'italic' : 'normal';
+          textDiv.textContent = layerToUpdate.content;
+        }
       }
+    }
+
+    const btn = document.getElementById('he-text-add-btn');
+    if (btn) {
+      const hasText = this.textState.text.trim().length > 0;
+      btn.style.background = hasText ? 'linear-gradient(135deg, var(--primary, #a855f7) 0%, #7e22ce 100%)' : 'rgba(255,255,255,0.1)';
+      btn.style.boxShadow = hasText ? '0 8px 20px rgba(168,85,247,0.3)' : 'none';
+      btn.style.color = hasText ? 'white' : 'rgba(255,255,255,0.4)';
+      btn.style.cursor = hasText ? 'pointer' : 'not-allowed';
+      btn.style.pointerEvents = hasText ? 'all' : 'none';
+      const isExisting = this.textState.layerId && this.history && this.history.length > 0 && this.history.some(h => h.layers.some(l => l.id === this.textState.layerId));
+      btn.innerText = isExisting ? 'Update Text' : 'Add Text';
+    }
   },
 
   commitLiveText() {
-      if (!this.textState.text.trim()) return;
-      this.pushHistory();
-      this.textState = { text: '', color: '#ffffff', font: 'inherit', bold: false, italic: false, layerId: null };
-      this.renderPanels('text');
+    if (!this.textState.text.trim()) return;
+    this.pushHistory();
+    this.textState = { text: '', color: '#ffffff', font: 'inherit', bold: false, italic: false, layerId: null };
+    this.renderPanels('text');
   },
 
   toggleManualRotate() {
-      const panel = document.getElementById('he-manual-rotate-panel');
-      if (!panel) return;
-      if (panel.style.display === 'none') {
-          let r = this.state.rotation % 360;
-          if (r > 180) r -= 360;
-          else if (r < -180) r += 360;
-          
-          const slider = document.getElementById('he-manual-rotate-slider');
-          if (slider) slider.value = r;
-          
-          const valEl = document.getElementById('he-manual-rotate-val');
-          if (valEl) valEl.innerText = Math.round(r) + '°';
-          
-          panel.style.display = 'flex';
-          panel.style.opacity = '0';
-          panel.style.transform = 'scale(0.95) translateY(-10px)';
-          requestAnimationFrame(() => {
-              panel.style.transition = 'all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1)';
-              panel.style.opacity = '1';
-              panel.style.transform = 'scale(1) translateY(0)';
-          });
-      } else {
-          panel.style.opacity = '0';
-          panel.style.transform = 'scale(0.95) translateY(-10px)';
-          setTimeout(() => { panel.style.display = 'none'; }, 200);
-      }
-  },
-  
-  onManualRotate(val) {
-      this.state.rotation = parseFloat(val);
-      const valEl = document.getElementById('he-manual-rotate-val');
-      if (valEl) valEl.innerText = Math.round(val) + '°';
-      this.updateRender();
-  },
-  
-  resetManualRotate() {
-      this.state.rotation = 0;
+    const panel = document.getElementById('he-manual-rotate-panel');
+    if (!panel) return;
+    if (panel.style.display === 'none') {
+      let r = this.state.rotation % 360;
+      if (r > 180) r -= 360;
+      else if (r < -180) r += 360;
+
       const slider = document.getElementById('he-manual-rotate-slider');
-      if (slider) slider.value = 0;
+      if (slider) slider.value = r;
+
       const valEl = document.getElementById('he-manual-rotate-val');
-      if (valEl) valEl.innerText = '0°';
-      this.updateRender();
+      if (valEl) valEl.innerText = Math.round(r) + '°';
+
+      panel.style.display = 'flex';
+      panel.style.opacity = '0';
+      panel.style.transform = 'scale(0.95) translateY(-10px)';
+      requestAnimationFrame(() => {
+        panel.style.transition = 'all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1)';
+        panel.style.opacity = '1';
+        panel.style.transform = 'scale(1) translateY(0)';
+      });
+    } else {
+      panel.style.opacity = '0';
+      panel.style.transform = 'scale(0.95) translateY(-10px)';
+      setTimeout(() => { panel.style.display = 'none'; }, 200);
+    }
   },
-  
+
+  onManualRotate(val) {
+    this.state.rotation = parseFloat(val);
+    const valEl = document.getElementById('he-manual-rotate-val');
+    if (valEl) valEl.innerText = Math.round(val) + '°';
+    this.updateRender();
+  },
+
+  resetManualRotate() {
+    this.state.rotation = 0;
+    const slider = document.getElementById('he-manual-rotate-slider');
+    if (slider) slider.value = 0;
+    const valEl = document.getElementById('he-manual-rotate-val');
+    if (valEl) valEl.innerText = '0°';
+    this.updateRender();
+  },
+
   applyManualRotate() {
-      this.pushHistory();
-      const panel = document.getElementById('he-manual-rotate-panel');
-      if (panel) {
-          panel.style.opacity = '0';
-          panel.style.transform = 'scale(0.95) translateY(-10px)';
-          setTimeout(() => { panel.style.display = 'none'; }, 200);
-      }
+    this.pushHistory();
+    const panel = document.getElementById('he-manual-rotate-panel');
+    if (panel) {
+      panel.style.opacity = '0';
+      panel.style.transform = 'scale(0.95) translateY(-10px)';
+      setTimeout(() => { panel.style.display = 'none'; }, 200);
+    }
   },
 
   openTool(toolName) {
     if (toolName === 'text' && (!this.textState || this.textState.layerId === null)) {
-       this.textState = { text: '', color: '#ffffff', font: 'inherit', bold: false, italic: false, layerId: null };
+      this.textState = { text: '', color: '#ffffff', font: 'inherit', bold: false, italic: false, layerId: null };
     }
     this.openCanvas();
     this.renderPanels(toolName);
-    
+
     if (toolName === 'crop') {
       this.enterCropMode();
     }
@@ -10267,7 +12248,7 @@ window.HubbleEditor = {
     // Also disable layer dragging during crop
     const layers = document.getElementById('he-interaction-layer');
     if (layers) layers.style.pointerEvents = 'none';
-    
+
     this.renderCropHandles();
   },
 
@@ -10285,7 +12266,7 @@ window.HubbleEditor = {
     }
     const layers = document.getElementById('he-interaction-layer');
     if (layers) layers.style.pointerEvents = 'none';
-    
+
     // Close the panel
     this.closeCanvas();
   },
@@ -10293,17 +12274,17 @@ window.HubbleEditor = {
   setCropAspect(ratio) {
     if (!this.tempCrop) return;
     this.tempCrop.aspect = ratio;
-    
+
     // Reset to center 80% if changing aspect
     if (ratio === 'Free') {
-       this.tempCrop.width = 80; this.tempCrop.height = 80;
+      this.tempCrop.width = 80; this.tempCrop.height = 80;
     } else {
       const [w, h] = ratio.split(':').map(Number);
       const container = document.getElementById('he-render-container');
       const rect = container.getBoundingClientRect();
       const containerAspect = rect.width / rect.height;
       const targetAspect = w / h;
-      
+
       if (targetAspect > containerAspect) {
         this.tempCrop.width = 80;
         this.tempCrop.height = 80 * (containerAspect / targetAspect);
@@ -10312,7 +12293,7 @@ window.HubbleEditor = {
         this.tempCrop.width = 80 * (targetAspect / containerAspect);
       }
     }
-    
+
     this.tempCrop.x = (100 - this.tempCrop.width) / 2;
     this.tempCrop.y = (100 - this.tempCrop.height) / 2;
     this.renderCropHandles();
@@ -10323,44 +12304,44 @@ window.HubbleEditor = {
     let crop = this.tempCrop || this.state.crop || { x: 0, y: 0, width: 100, height: 100 };
     let z = this.state.zoom || 1;
     let { x, y, width, height } = crop;
-    
+
     let minPanX = x + width - 50 - 50 * z;
     let maxPanX = x - 50 + 50 * z;
     if (minPanX > maxPanX) {
-       this.state.panX = (minPanX + maxPanX) / 2;
+      this.state.panX = (minPanX + maxPanX) / 2;
     } else {
-       this.state.panX = Math.max(minPanX, Math.min(maxPanX, this.state.panX || 0));
+      this.state.panX = Math.max(minPanX, Math.min(maxPanX, this.state.panX || 0));
     }
-    
+
     let minPanY = y + height - 50 - 50 * z;
     let maxPanY = y - 50 + 50 * z;
     if (minPanY > maxPanY) {
-       this.state.panY = (minPanY + maxPanY) / 2;
+      this.state.panY = (minPanY + maxPanY) / 2;
     } else {
-       this.state.panY = Math.max(minPanY, Math.min(maxPanY, this.state.panY || 0));
+      this.state.panY = Math.max(minPanY, Math.min(maxPanY, this.state.panY || 0));
     }
   },
 
   setCropZoom(val) {
     let z = Math.max(0.5, Math.min(3, val));
     this.state.zoom = z;
-    
+
     this.enforcePanConstraints();
-    
+
     const slider = document.getElementById('he-zoom-slider');
     if (slider) slider.value = z;
     const valEl = document.getElementById('he-zoom-val');
     if (valEl) valEl.innerText = Math.round(z * 100) + '%';
-    
+
     this.updateRender();
   },
 
   renderCropHandles() {
     const overlay = document.getElementById('he-crop-overlay');
     if (!overlay) return;
-    
+
     overlay.innerHTML = '';
-    
+
     const box = document.createElement('div');
     box.id = 'he-crop-box';
     box.style.cssText = `
@@ -10373,7 +12354,7 @@ window.HubbleEditor = {
       box-shadow: 0 0 0 9999px rgba(0,0,0,0.7);
       pointer-events: none;
     `;
-    
+
     const handlePositions = [
       { top: '-6px', left: '-6px', cursor: 'nwse-resize', id: 'tl' },
       { top: '-6px', left: 'calc(50% - 6px)', cursor: 'ns-resize', id: 'tc' },
@@ -10384,7 +12365,7 @@ window.HubbleEditor = {
       { bottom: '-6px', left: 'calc(50% - 6px)', cursor: 'ns-resize', id: 'bc' },
       { bottom: '-6px', right: '-6px', cursor: 'nwse-resize', id: 'br' }
     ];
-    
+
     handlePositions.forEach(pos => {
       const h = document.createElement('div');
       h.style.cssText = `
@@ -10401,7 +12382,7 @@ window.HubbleEditor = {
       this.bindCropDrag(h, pos.id);
       box.appendChild(h);
     });
-    
+
     overlay.appendChild(box);
   },
 
@@ -10414,47 +12395,47 @@ window.HubbleEditor = {
       const startCrop = JSON.parse(JSON.stringify(this.tempCrop));
       const startPanX = this.state.panX || 0;
       const startPanY = this.state.panY || 0;
-      
+
       const move = (ev) => {
         if (!isDragging) return;
         const container = document.getElementById('he-render-container');
         const rect = container.getBoundingClientRect();
-        
+
         const dx = ((ev.clientX - startX) / rect.width) * 100;
         const dy = ((ev.clientY - startY) / rect.height) * 100;
-        
+
         let { x, y, width, height, aspect } = startCrop;
-        
+
         if (type.includes('l')) { x += dx; width -= dx; }
         if (type.includes('r')) { width += dx; }
         if (type.includes('t')) { y += dy; height -= dy; }
         if (type.includes('b')) { height += dy; }
-        
+
         if (aspect !== 'Free') {
           const [wRatio, hRatio] = aspect.split(':').map(Number);
           const targetRatio = wRatio / hRatio;
           const containerRatio = rect.width / rect.height;
-          
+
           if (type.includes('l') || type.includes('r')) {
-             height = width * (containerRatio / targetRatio);
-             if(type.includes('t')) y = startCrop.y - (height - startCrop.height);
+            height = width * (containerRatio / targetRatio);
+            if (type.includes('t')) y = startCrop.y - (height - startCrop.height);
           } else {
-             width = height * (targetRatio / containerRatio);
-             if(type.includes('l')) x = startCrop.x - (width - startCrop.width);
+            width = height * (targetRatio / containerRatio);
+            if (type.includes('l')) x = startCrop.x - (width - startCrop.width);
           }
         }
-        
+
         // Clamp bounds
         if (x < 0) x = 0;
         if (y < 0) y = 0;
         if (x + width > 100) { width = 100 - x; }
         if (y + height > 100) { height = 100 - y; }
-        
+
         width = Math.max(10, width);
         height = Math.max(10, height);
-        
+
         this.tempCrop = { ...this.tempCrop, x, y, width, height };
-        
+
         const box = document.getElementById('he-crop-box');
         if (box) {
           box.style.left = `${this.tempCrop.x}%`;
@@ -10463,13 +12444,13 @@ window.HubbleEditor = {
           box.style.height = `${this.tempCrop.height}%`;
         }
       };
-      
+
       const up = () => {
         isDragging = false;
         document.removeEventListener('mousemove', move);
         document.removeEventListener('mouseup', up);
       };
-      
+
       document.addEventListener('mousemove', move);
       document.addEventListener('mouseup', up);
     };
@@ -10480,11 +12461,11 @@ window.HubbleEditor = {
     if (!modal) return;
     modal.style.display = 'flex';
     requestAnimationFrame(() => modal.style.opacity = '1');
-    
+
     if (this.history.length === 0) {
       this.pushHistory(); // Initial state
     }
-    
+
     this.updateRender();
   },
 
@@ -10500,7 +12481,7 @@ window.HubbleEditor = {
     });
     const mediaLayer = document.getElementById('he-media-layer');
     if (mediaLayer) mediaLayer.innerHTML = '';
-    
+
     if (this.GlobalAudio) {
       this.GlobalAudio.pause();
       this.GlobalAudio.audio.currentTime = 0;
@@ -10510,8 +12491,8 @@ window.HubbleEditor = {
   closeCanvas() {
     const overlay = document.getElementById('he-crop-overlay');
     if (overlay && overlay.style.display !== 'none') {
-       overlay.style.display = 'none';
-       overlay.style.pointerEvents = 'none';
+      overlay.style.display = 'none';
+      overlay.style.pointerEvents = 'none';
     }
     const modal = document.getElementById('he-canvas-modal');
     if (!modal) return;
@@ -10521,21 +12502,21 @@ window.HubbleEditor = {
 
     // Sync state one final time
     if (window.chUploads && window.chUploads[this.activeMediaIndex]) {
-        window.chUploads[this.activeMediaIndex].editorState = JSON.parse(JSON.stringify(this.state));
+      window.chUploads[this.activeMediaIndex].editorState = JSON.parse(JSON.stringify(this.state));
     }
 
     modal.style.opacity = '0';
     setTimeout(() => {
       modal.style.display = 'none';
       document.getElementById('he-panels-container').innerHTML = '';
-      
+
       // Also update the tiny thumbnails to reflect changes visually
       if (typeof window.initCreateHubbsUpload === 'function') {
-         const thumbs = document.querySelectorAll('.ch-preview-item img, .ch-preview-item video');
-         if (thumbs[this.activeMediaIndex]) {
-           thumbs[this.activeMediaIndex].style.filter = this.buildCSSFilterString();
-           thumbs[this.activeMediaIndex].style.transform = `rotate(${this.state.rotation}deg)`;
-         }
+        const thumbs = document.querySelectorAll('.ch-preview-item img, .ch-preview-item video');
+        if (thumbs[this.activeMediaIndex]) {
+          thumbs[this.activeMediaIndex].style.filter = this.buildCSSFilterString();
+          thumbs[this.activeMediaIndex].style.transform = `rotate(${this.state.rotation}deg)`;
+        }
       }
     }, 300);
   },
@@ -10582,21 +12563,21 @@ window.HubbleEditor = {
     if (!item) return 1;
     let w = item.originalWidth || 1000;
     let h = item.originalHeight || 1000;
-    
+
     // First, apply crop
     if (item.editorState && item.editorState.crop) {
-       w = w * (item.editorState.crop.width / 100);
-       h = h * (item.editorState.crop.height / 100);
+      w = w * (item.editorState.crop.width / 100);
+      h = h * (item.editorState.crop.height / 100);
     }
-    
+
     // Then rotation
     if (item.editorState && item.editorState.rotation) {
-       const r = Math.abs(item.editorState.rotation) % 180;
-       if (r === 90) {
-          const temp = w;
-          w = h;
-          h = temp;
-       }
+      const r = Math.abs(item.editorState.rotation) % 180;
+      if (r === 90) {
+        const temp = w;
+        w = h;
+        h = temp;
+      }
     }
     return w / h;
   },
@@ -10604,7 +12585,7 @@ window.HubbleEditor = {
   buildCSSFilterString(overrideFilter = null, overrideAdjustments = null) {
     const activeFilter = overrideFilter !== null ? overrideFilter : this.state.filter;
     const adj = overrideAdjustments !== null ? overrideAdjustments : this.state.adjustments;
-    
+
     const filterPresets = {
       'original': {},
       'bright': { brightness: 10, contrast: 10, saturation: 10 },
@@ -10624,53 +12605,53 @@ window.HubbleEditor = {
     };
 
     const preset = filterPresets[activeFilter] || {};
-    
+
     const getVal = (key, defaultVal) => {
-       const manualVal = adj[key] !== undefined ? Number(adj[key]) : defaultVal;
-       const manualDelta = manualVal - defaultVal;
-       const presetDelta = preset[key] || 0;
-       return defaultVal + presetDelta + manualDelta;
+      const manualVal = adj[key] !== undefined ? Number(adj[key]) : defaultVal;
+      const manualDelta = manualVal - defaultVal;
+      const presetDelta = preset[key] || 0;
+      return defaultVal + presetDelta + manualDelta;
     };
 
     const p = {
-       brightness: getVal('brightness', 100),
-       contrast: getVal('contrast', 100),
-       exposure: getVal('exposure', 100),
-       highlights: getVal('highlights', 100),
-       shadows: getVal('shadows', 100),
-       temperature: getVal('temperature', 0),
-       tint: getVal('tint', 0),
-       saturation: getVal('saturation', 100),
-       vibrance: getVal('vibrance', 100),
-       sharpness: getVal('sharpness', 0),
-       blur: getVal('blur', 0),
-       opacity: getVal('opacity', 100)
+      brightness: getVal('brightness', 100),
+      contrast: getVal('contrast', 100),
+      exposure: getVal('exposure', 100),
+      highlights: getVal('highlights', 100),
+      shadows: getVal('shadows', 100),
+      temperature: getVal('temperature', 0),
+      tint: getVal('tint', 0),
+      saturation: getVal('saturation', 100),
+      vibrance: getVal('vibrance', 100),
+      sharpness: getVal('sharpness', 0),
+      blur: getVal('blur', 0),
+      opacity: getVal('opacity', 100)
     };
 
     const totalSaturate = Math.max(0, p.saturation + (p.vibrance - 100) * 0.5);
 
     let tableValuesStr = "";
     for (let i = 0; i <= 15; i++) {
-       let x = i / 15.0;
-       let y = x * (p.exposure / 100);
+      let x = i / 15.0;
+      let y = x * (p.exposure / 100);
 
-       let shadowDelta = (p.shadows - 100) / 100; 
-       if (x < 0.5) y += shadowDelta * (0.5 - x);
+      let shadowDelta = (p.shadows - 100) / 100;
+      if (x < 0.5) y += shadowDelta * (0.5 - x);
 
-       let highlightDelta = (p.highlights - 100) / 100; 
-       if (x > 0.5) y += highlightDelta * (x - 0.5);
+      let highlightDelta = (p.highlights - 100) / 100;
+      if (x > 0.5) y += highlightDelta * (x - 0.5);
 
-       y += (p.brightness - 100) / 100;
-       y = (y - 0.5) * (p.contrast / 100) + 0.5;
+      y += (p.brightness - 100) / 100;
+      y = (y - 0.5) * (p.contrast / 100) + 0.5;
 
-       y = Math.max(0, Math.min(1, y));
-       tableValuesStr += y.toFixed(3) + " ";
+      y = Math.max(0, Math.min(1, y));
+      tableValuesStr += y.toFixed(3) + " ";
     }
     let tableValues = tableValuesStr.trim();
 
     let temp = p.temperature / 100;
     let tint = p.tint / 100;
-    
+
     let rMult = 1 + temp * 0.2 + tint * 0.1;
     let gMult = 1 - tint * 0.2;
     let bMult = 1 - temp * 0.2 + tint * 0.1;
@@ -10682,7 +12663,7 @@ window.HubbleEditor = {
        0 0 0 1 0
     `;
 
-    let s = p.sharpness / 100; 
+    let s = p.sharpness / 100;
     s = Math.max(-0.5, Math.min(2, s));
     let center = 1 + 4 * s;
     let edge = -s;
@@ -10739,36 +12720,36 @@ window.HubbleEditor = {
       const handle = document.createElement('div');
       handle.className = `he-resize-handle ${c.class}`;
       handle.style.cssText = `position: absolute; width: 14px; height: 14px; background: white; border: 2px solid #a855f7; border-radius: 50%; z-index: 100; cursor: ${c.cursor}; box-shadow: 0 2px 5px rgba(0,0,0,0.3); pointer-events: all; ${c.top ? `top: ${c.top};` : ''} ${c.bottom ? `bottom: ${c.bottom};` : ''} ${c.left ? `left: ${c.left};` : ''} ${c.right ? `right: ${c.right};` : ''}`;
-      
+
       handle.onmousedown = (ev) => {
         ev.preventDefault();
         ev.stopPropagation();
         this.pushHistory();
-        
+
         const rect = interactionLayer.getBoundingClientRect();
         // The layer center in absolute viewport coords
         const centerX = rect.left + (layer.x / 100) * rect.width;
         const centerY = rect.top + (layer.y / 100) * rect.height;
-        
+
         const startDist = Math.hypot(ev.clientX - centerX, ev.clientY - centerY);
         const startScale = layer.scale || 1;
-        
+
         const onMouseMove = (moveEv) => {
           const currentDist = Math.hypot(moveEv.clientX - centerX, moveEv.clientY - centerY);
           let newScale = startScale * (currentDist / startDist);
           if (newScale < 0.1) newScale = 0.1;
           if (newScale > 10) newScale = 10;
-          
+
           layer.scale = newScale;
           el.style.transform = `translate(-50%, -50%) rotate(${layer.rotation}deg) scale(${layer.scale})`;
         };
-        
+
         const onMouseUp = () => {
           window.removeEventListener('mousemove', onMouseMove);
           window.removeEventListener('mouseup', onMouseUp);
           this.updateRender();
         };
-        
+
         window.addEventListener('mousemove', onMouseMove);
         window.addEventListener('mouseup', onMouseUp);
       };
@@ -10778,14 +12759,14 @@ window.HubbleEditor = {
 
   updateRender() {
     if (!window.chUploads || window.chUploads.length === 0) return;
-    
+
     const media = window.chUploads[this.activeMediaIndex];
     if (!media) return;
 
     const container = document.getElementById('he-render-container');
     const mediaLayer = document.getElementById('he-media-layer');
     const interactionLayer = document.getElementById('he-interaction-layer');
-    
+
     if (!container || !mediaLayer || !interactionLayer) return;
 
     // Set Aspect Ratio based on media
@@ -10793,7 +12774,7 @@ window.HubbleEditor = {
     container.style.aspectRatio = '9/16';
     container.style.background = '#111';
     container.style.borderRadius = '16px';
-    
+
     // Render Media Node
     if (!mediaLayer.firstChild || mediaLayer.firstChild.dataset.url !== media.thumbUrl) {
       if (mediaLayer.firstChild && mediaLayer.firstChild.tagName === 'VIDEO') {
@@ -10807,16 +12788,16 @@ window.HubbleEditor = {
         node = document.createElement('video');
         node.src = URL.createObjectURL(media.file);
         node.loop = true; node.muted = window.HubbleEditor.state.isMuted; node.autoplay = true; node.playsInline = true;
-        
+
         // Sync Audio
         node.addEventListener('play', () => {
-           window.HubbleEditor.GlobalAudio.sync(node.currentTime);
-           window.HubbleEditor.GlobalAudio.play();
+          window.HubbleEditor.GlobalAudio.sync(node.currentTime);
+          window.HubbleEditor.GlobalAudio.play();
         });
         node.addEventListener('pause', () => window.HubbleEditor.GlobalAudio.pause());
         node.addEventListener('seeking', () => window.HubbleEditor.GlobalAudio.sync(node.currentTime));
         node.addEventListener('seeked', () => window.HubbleEditor.GlobalAudio.sync(node.currentTime));
-        
+
       } else {
         node = document.createElement('img');
         node.src = media.thumbUrl;
@@ -10826,10 +12807,10 @@ window.HubbleEditor = {
       node.draggable = false;
       mediaLayer.appendChild(node);
     }
-    
+
     // Ensure we have a reference to the active media node
     const activeMediaNode = mediaLayer.firstChild;
-    
+
     // Video Controls overlay
     let videoControls = document.getElementById('he-video-controls');
     if (media.type.startsWith('video/')) {
@@ -10848,133 +12829,133 @@ window.HubbleEditor = {
     // Apply Transforms, Filters & Zoom
     activeMediaNode.style.filter = this.buildCSSFilterString();
     activeMediaNode.style.transform = `translate(${this.state.panX || 0}%, ${this.state.panY || 0}%) rotate(${this.state.rotation}deg) scale(${this.state.zoom || 1})`;
-    
+
     // Apply Crop Clip-Path to Media and Interaction Layers (but NOT the crop overlay)
     if (this.state.crop) {
-       const { x, y, width, height } = this.state.crop;
-       const clipPathStr = `inset(${y}% ${100 - (x + width)}% ${100 - (y + height)}% ${x}%)`;
-       mediaLayer.style.clipPath = clipPathStr;
-       interactionLayer.style.clipPath = clipPathStr;
+      const { x, y, width, height } = this.state.crop;
+      const clipPathStr = `inset(${y}% ${100 - (x + width)}% ${100 - (y + height)}% ${x}%)`;
+      mediaLayer.style.clipPath = clipPathStr;
+      interactionLayer.style.clipPath = clipPathStr;
     } else {
-       mediaLayer.style.clipPath = 'none';
-       interactionLayer.style.clipPath = 'none';
+      mediaLayer.style.clipPath = 'none';
+      interactionLayer.style.clipPath = 'none';
     }
-    
+
     // Render Interaction Layers (Stickers / Text)
     interactionLayer.innerHTML = '';
     this.state.layers.forEach((layer, idx) => {
       const el = document.createElement('div');
       el.dataset.layerId = layer.id;
       el.style.cssText = `position: absolute; left: ${layer.x}%; top: ${layer.y}%; transform: translate(-50%, -50%) rotate(${layer.rotation}deg) scale(${layer.scale}); z-index: ${layer.zIndex}; pointer-events: all; cursor: grab;`;
-      
+
       if (layer.type === 'text') {
         el.innerHTML = `<div style="color: ${layer.styles.color || 'white'}; font-family: ${layer.styles.font || 'inherit'}; font-size: ${layer.styles.size || 24}px; font-weight: ${layer.styles.bold ? 'bold' : 'normal'}; font-style: ${layer.styles.italic ? 'italic' : 'normal'}; text-shadow: ${layer.styles.shadow ? '0 2px 10px rgba(0,0,0,0.5)' : 'none'}; text-align: center; white-space: pre-wrap;">${layer.content}</div>`;
       } else if (layer.type === 'sticker') {
         el.innerHTML = `<div style="font-size: ${layer.styles.size || 80}px; pointer-events: none;">${layer.content}</div>`;
       }
-      
+
       const isActive = HubbleEditor.activeSelectedLayerId === layer.id;
       if (isActive) {
-          el.style.border = '2px dashed rgba(255,255,255,0.8)';
-          el.style.padding = '8px';
-          el.style.borderRadius = '12px';
-          const deleteBtn = document.createElement('div');
-          deleteBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
-          deleteBtn.style.cssText = 'position: absolute; top: -14px; right: -14px; background: rgba(255,59,48,0.9); border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; cursor: pointer; pointer-events: all; box-shadow: 0 4px 10px rgba(0,0,0,0.3); z-index: 100;';
-          deleteBtn.onmousedown = (ev) => {
-              ev.stopPropagation();
-              HubbleEditor.pushHistory();
-              HubbleEditor.state.layers = HubbleEditor.state.layers.filter(l => l.id !== layer.id);
-              if (HubbleEditor.textState && HubbleEditor.textState.layerId === layer.id) {
-                  HubbleEditor.textState = { text: '', color: '#ffffff', font: 'inherit', bold: false, italic: false, layerId: null };
-                  HubbleEditor.renderPanels('text');
-              }
-              HubbleEditor.activeSelectedLayerId = null;
-              HubbleEditor.updateRender();
-          };
-          el.appendChild(deleteBtn);
-          HubbleEditor.addLayerControls(el, layer, interactionLayer);
+        el.style.border = '2px dashed rgba(255,255,255,0.8)';
+        el.style.padding = '8px';
+        el.style.borderRadius = '12px';
+        const deleteBtn = document.createElement('div');
+        deleteBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+        deleteBtn.style.cssText = 'position: absolute; top: -14px; right: -14px; background: rgba(255,59,48,0.9); border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; cursor: pointer; pointer-events: all; box-shadow: 0 4px 10px rgba(0,0,0,0.3); z-index: 100;';
+        deleteBtn.onmousedown = (ev) => {
+          ev.stopPropagation();
+          HubbleEditor.pushHistory();
+          HubbleEditor.state.layers = HubbleEditor.state.layers.filter(l => l.id !== layer.id);
+          if (HubbleEditor.textState && HubbleEditor.textState.layerId === layer.id) {
+            HubbleEditor.textState = { text: '', color: '#ffffff', font: 'inherit', bold: false, italic: false, layerId: null };
+            HubbleEditor.renderPanels('text');
+          }
+          HubbleEditor.activeSelectedLayerId = null;
+          HubbleEditor.updateRender();
+        };
+        el.appendChild(deleteBtn);
+        HubbleEditor.addLayerControls(el, layer, interactionLayer);
       } else {
-          el.style.border = 'none';
-          el.style.padding = '0';
-          el.style.borderRadius = '0';
+        el.style.border = 'none';
+        el.style.padding = '0';
+        el.style.borderRadius = '0';
       }
 
       el.ondblclick = (e) => {
-         e.stopPropagation();
-         if (layer.type === 'text') {
-             HubbleEditor.openTextTool(layer.id);
-         }
+        e.stopPropagation();
+        if (layer.type === 'text') {
+          HubbleEditor.openTextTool(layer.id);
+        }
       };
-      
+
       // Drag Logic
       el.onmousedown = (e) => {
         e.preventDefault();
         e.stopPropagation();
         let isDragging = true;
         HubbleEditor.activeSelectedLayerId = layer.id;
-        
+
         // Fast active state DOM update
         Array.from(interactionLayer.children).forEach(child => {
-            if (child.dataset.layerId == layer.id) {
-                child.style.border = '2px dashed rgba(255,255,255,0.8)';
-                child.style.padding = '8px';
-                child.style.borderRadius = '12px';
-                if (!child.querySelector('.he-delete-btn')) {
-                    const deleteBtn = document.createElement('div');
-                    deleteBtn.className = 'he-delete-btn';
-                    deleteBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
-                    deleteBtn.style.cssText = 'position: absolute; top: -14px; right: -14px; background: rgba(255,59,48,0.9); border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; cursor: pointer; pointer-events: all; box-shadow: 0 4px 10px rgba(0,0,0,0.3); z-index: 100;';
-                    deleteBtn.onmousedown = (ev) => {
-                        ev.stopPropagation();
-                        HubbleEditor.pushHistory();
-                        HubbleEditor.state.layers = HubbleEditor.state.layers.filter(l => l.id !== layer.id);
-                        if (HubbleEditor.textState && HubbleEditor.textState.layerId === layer.id) {
-                            HubbleEditor.textState = { text: '', color: '#ffffff', font: 'inherit', bold: false, italic: false, layerId: null };
-                            HubbleEditor.renderPanels('text');
-                        }
-                        HubbleEditor.activeSelectedLayerId = null;
-                        HubbleEditor.updateRender();
-                    };
-                    child.appendChild(deleteBtn);
-                    HubbleEditor.addLayerControls(child, layer, interactionLayer);
+          if (child.dataset.layerId == layer.id) {
+            child.style.border = '2px dashed rgba(255,255,255,0.8)';
+            child.style.padding = '8px';
+            child.style.borderRadius = '12px';
+            if (!child.querySelector('.he-delete-btn')) {
+              const deleteBtn = document.createElement('div');
+              deleteBtn.className = 'he-delete-btn';
+              deleteBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+              deleteBtn.style.cssText = 'position: absolute; top: -14px; right: -14px; background: rgba(255,59,48,0.9); border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; cursor: pointer; pointer-events: all; box-shadow: 0 4px 10px rgba(0,0,0,0.3); z-index: 100;';
+              deleteBtn.onmousedown = (ev) => {
+                ev.stopPropagation();
+                HubbleEditor.pushHistory();
+                HubbleEditor.state.layers = HubbleEditor.state.layers.filter(l => l.id !== layer.id);
+                if (HubbleEditor.textState && HubbleEditor.textState.layerId === layer.id) {
+                  HubbleEditor.textState = { text: '', color: '#ffffff', font: 'inherit', bold: false, italic: false, layerId: null };
+                  HubbleEditor.renderPanels('text');
                 }
-            } else {
-                child.style.border = 'none';
-                child.style.padding = '0';
-                child.style.borderRadius = '0';
-                const dBtn = child.querySelector('.he-delete-btn');
-                if (dBtn) dBtn.remove();
-                child.querySelectorAll('.he-resize-handle').forEach(h => h.remove());
+                HubbleEditor.activeSelectedLayerId = null;
+                HubbleEditor.updateRender();
+              };
+              child.appendChild(deleteBtn);
+              HubbleEditor.addLayerControls(child, layer, interactionLayer);
             }
+          } else {
+            child.style.border = 'none';
+            child.style.padding = '0';
+            child.style.borderRadius = '0';
+            const dBtn = child.querySelector('.he-delete-btn');
+            if (dBtn) dBtn.remove();
+            child.querySelectorAll('.he-resize-handle').forEach(h => h.remove());
+          }
         });
-        
+
         if (layer.type === 'text') {
-            const isTextToolOpen = document.getElementById('he-text-input') !== null;
-            if (isTextToolOpen && HubbleEditor.textState && HubbleEditor.textState.layerId !== layer.id) {
-                HubbleEditor.openTextTool(layer.id);
-            }
+          const isTextToolOpen = document.getElementById('he-text-input') !== null;
+          if (isTextToolOpen && HubbleEditor.textState && HubbleEditor.textState.layerId !== layer.id) {
+            HubbleEditor.openTextTool(layer.id);
+          }
         }
-        
+
         let startX = e.clientX;
         let startY = e.clientY;
         const startLeft = layer.x;
         const startTop = layer.y;
-        
+
         // Bring to front
         layer.zIndex = Math.max(...this.state.layers.map(l => l.zIndex)) + 1;
         el.style.zIndex = layer.zIndex;
-        
+
         const move = (ev) => {
-          if(!isDragging) return;
+          if (!isDragging) return;
           const rect = interactionLayer.getBoundingClientRect();
           const dx = ((ev.clientX - startX) / rect.width) * 100;
           const dy = ((ev.clientY - startY) / rect.height) * 100;
           layer.x = startLeft + dx;
           layer.y = startTop + dy;
           requestAnimationFrame(() => {
-              el.style.left = layer.x + '%';
-              el.style.top = layer.y + '%';
+            el.style.left = layer.x + '%';
+            el.style.top = layer.y + '%';
           });
         };
         const up = () => {
@@ -10987,35 +12968,35 @@ window.HubbleEditor = {
         document.addEventListener('mousemove', move);
         document.addEventListener('mouseup', up);
       };
-      
+
       interactionLayer.appendChild(el);
     });
-    
+
     if (!interactionLayer.dataset.clickBound) {
-        interactionLayer.addEventListener('mousedown', (e) => {
-           if (e.target === interactionLayer) {
-               if (HubbleEditor.activeSelectedLayerId) {
-                   HubbleEditor.activeSelectedLayerId = null;
-                   Array.from(interactionLayer.children).forEach(child => {
-                       child.style.border = 'none';
-                       child.style.padding = '0';
-                       child.style.borderRadius = '0';
-                       const dBtn = child.querySelector('.he-delete-btn');
-                       if (dBtn) dBtn.remove();
-                   });
-               }
-           }
-        });
-        interactionLayer.dataset.clickBound = "true";
+      interactionLayer.addEventListener('mousedown', (e) => {
+        if (e.target === interactionLayer) {
+          if (HubbleEditor.activeSelectedLayerId) {
+            HubbleEditor.activeSelectedLayerId = null;
+            Array.from(interactionLayer.children).forEach(child => {
+              child.style.border = 'none';
+              child.style.padding = '0';
+              child.style.borderRadius = '0';
+              const dBtn = child.querySelector('.he-delete-btn');
+              if (dBtn) dBtn.remove();
+            });
+          }
+        }
+      });
+      interactionLayer.dataset.clickBound = "true";
     }
 
     // Sync state to chUploads so it's always up to date
     if (window.chUploads && window.chUploads[this.activeMediaIndex]) {
-        window.chUploads[this.activeMediaIndex].editorState = JSON.parse(JSON.stringify(this.state));
+      window.chUploads[this.activeMediaIndex].editorState = JSON.parse(JSON.stringify(this.state));
     }
     // Update live preview thumbnail
     if (typeof this.updatePreviewThumbnail === 'function') {
-        this.updatePreviewThumbnail(this.activeMediaIndex);
+      this.updatePreviewThumbnail(this.activeMediaIndex);
     }
   },
 
@@ -11027,39 +13008,39 @@ window.HubbleEditor = {
     this.activeLayout = layoutName;
     const previewRow = document.getElementById('ch-media-preview-row');
     if (!previewRow) return;
-    
+
     // Remove existing layout classes
     previewRow.className = 'ch-media-preview-row';
-    
+
     // Add new layout class if not original/single default
     if (effectiveLayoutName !== 'original' && effectiveLayoutName !== 'single') {
-       previewRow.classList.add(`layout-${effectiveLayoutName}`);
+      previewRow.classList.add(`layout-${effectiveLayoutName}`);
     }
-    
+
     // Update active button state
     document.querySelectorAll('.ch-layout-btn').forEach(btn => {
-       btn.classList.remove('ch-layout-btn-active');
-       if (btn.dataset.layout === layoutName) {
-           btn.classList.add('ch-layout-btn-active');
-       }
+      btn.classList.remove('ch-layout-btn-active');
+      if (btn.dataset.layout === layoutName) {
+        btn.classList.add('ch-layout-btn-active');
+      }
     });
-    
+
     // Flatten DOM (remove layout row wrappers)
     const items = Array.from(previewRow.querySelectorAll('.ch-preview-item'));
     if (items.length > 0) {
-       items.sort((a, b) => parseInt(a.dataset.index) - parseInt(b.dataset.index));
-       
-       previewRow.querySelectorAll('.ch-layout-row').forEach(el => el.remove());
-       const addMoreBtn = document.getElementById('ch-add-more-media-btn');
+      items.sort((a, b) => parseInt(a.dataset.index) - parseInt(b.dataset.index));
 
-       items.forEach(item => {
-           previewRow.insertBefore(item, addMoreBtn);
-       });
+      previewRow.querySelectorAll('.ch-layout-row').forEach(el => el.remove());
+      const addMoreBtn = document.getElementById('ch-add-more-media-btn');
 
-       // Update active aspect ratios
-       for (let i = 0; i < window.chUploads.length; i++) {
-           this.updatePreviewThumbnail(i);
-       }
+      items.forEach(item => {
+        previewRow.insertBefore(item, addMoreBtn);
+      });
+
+      // Update active aspect ratios
+      for (let i = 0; i < window.chUploads.length; i++) {
+        this.updatePreviewThumbnail(i);
+      }
     }
   },
 
@@ -11068,7 +13049,7 @@ window.HubbleEditor = {
     const item = window.chUploads[index];
     const previewEl = passedEl || document.querySelector(`.ch-preview-item[data-index="${index}"]`);
     if (!previewEl) return;
-    
+
     let state = item.editorState;
     if (index === this.activeMediaIndex) state = this.state;
     if (!state) return; // No edits, just keep original
@@ -11077,51 +13058,51 @@ window.HubbleEditor = {
     const rmBtn = previewEl.querySelector('.ch-remove-media');
     let overlay = null;
     if (item.type.startsWith('video/')) {
-        const divs = previewEl.querySelectorAll('div');
-        divs.forEach(d => {
-           if(d.innerHTML.includes('lucide="video"')) overlay = d;
-        });
+      const divs = previewEl.querySelectorAll('div');
+      divs.forEach(d => {
+        if (d.innerHTML.includes('lucide="video"')) overlay = d;
+      });
     }
 
     const ar = this.getEditedAspectRatio(item);
     previewEl.style.aspectRatio = '';
     previewEl.style.removeProperty('--ar');
     previewEl.innerHTML = '';
-    
+
     // Containment frame
     const miniContainer = document.createElement('div');
     miniContainer.className = 'edited-frame';
     miniContainer.style.cssText = `position: relative; overflow: hidden; aspect-ratio: ${ar}; border-radius: 10px; background: #1a1a1a; display: flex; align-items: center; justify-content: center; margin: auto; width: min(100cqw, calc(100cqh * ${ar})); height: min(100cqh, calc(100cqw / ${ar}));`;
-    
+
     // innerWrapper to handle crop scaling/translating
     const innerWrapper = document.createElement('div');
     if (state.crop) {
-       const cw = state.crop.width;
-       const ch = state.crop.height;
-       const cx = state.crop.x;
-       const cy = state.crop.y;
-       innerWrapper.style.cssText = `position: absolute; width: ${10000/cw}%; height: ${10000/ch}%; left: -${(cx/cw)*100}%; top: -${(cy/ch)*100}%;`;
+      const cw = state.crop.width;
+      const ch = state.crop.height;
+      const cx = state.crop.x;
+      const cy = state.crop.y;
+      innerWrapper.style.cssText = `position: absolute; width: ${10000 / cw}%; height: ${10000 / ch}%; left: -${(cx / cw) * 100}%; top: -${(cy / ch) * 100}%;`;
     } else {
-       innerWrapper.style.cssText = 'position: absolute; width: 100%; height: 100%; left: 0; top: 0;';
+      innerWrapper.style.cssText = 'position: absolute; width: 100%; height: 100%; left: 0; top: 0;';
     }
 
     // Media layer
     const miniMediaLayer = document.createElement('div');
     miniMediaLayer.style.cssText = 'position: absolute; width: 100%; height: 100%;';
-    
+
     // Interaction layer
     const miniInteractionLayer = document.createElement('div');
     miniInteractionLayer.style.cssText = 'position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;';
-    
+
     // Media Node (Thumbnails are always images to avoid heavy video playback in previews unless hovered/needed)
     const node = document.createElement('img');
     node.src = item.thumbUrl;
     node.style.cssText = 'width: 100%; height: 100%; object-fit: contain; transform-origin: center center;';
-    
+
     // Apply Edits
     node.style.filter = this.buildCSSFilterString(state.filter, state.adjustments);
     node.style.transform = `translate(${state.panX || 0}%, ${state.panY || 0}%) rotate(${state.rotation || 0}deg) scale(${state.zoom || 1})`;
-    
+
     miniMediaLayer.appendChild(node);
 
     // Interactions
@@ -11146,7 +13127,7 @@ window.HubbleEditor = {
     innerWrapper.appendChild(miniMediaLayer);
     innerWrapper.appendChild(miniInteractionLayer);
     miniContainer.appendChild(innerWrapper);
-    
+
     previewEl.appendChild(miniContainer);
     if (overlay) previewEl.appendChild(overlay);
     if (rmBtn) previewEl.appendChild(rmBtn);
@@ -11155,16 +13136,16 @@ window.HubbleEditor = {
   renderPanels(activeTool) {
     const container = document.getElementById('he-panels-container');
     if (!container) return;
-    
+
     // Generate glassmorphism panel
     let html = `<div style="background: rgba(15,15,20,0.85); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.1); border-radius: 20px; padding: 20px; width: 320px; box-shadow: 0 20px 50px rgba(0,0,0,0.5); color: white;">`;
-    
+
     if (activeTool === 'filters') {
       html += `<h4 style="margin: 0 0 16px 0; font-size: 1.1rem; display: flex; align-items: center; gap: 8px;"><i data-lucide="aperture" style="width: 18px; height: 18px; color: var(--primary);"></i> Filters</h4>`;
       html += `<div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; max-height: 400px; overflow-y: auto; padding-right: 8px;" class="custom-scrollbar">`;
-      
+
       const filters = ['Original', 'Bright', 'Warm', 'Cool', 'Vintage', 'Black & White', 'HDR', 'Cinematic', 'Soft', 'Dream', 'Purple Glow', 'Cool Blue', 'Sepia', 'Vivid', 'Mono'];
-      
+
       const defaultAdjustments = {
         brightness: 100, contrast: 100, exposure: 100, highlights: 100, shadows: 100,
         temperature: 0, tint: 0, saturation: 100, vibrance: 100, sharpness: 0, blur: 0, opacity: 100
@@ -11177,7 +13158,7 @@ window.HubbleEditor = {
         const id = f.toLowerCase();
         const active = this.state.filter === id ? 'border: 2px solid var(--primary); transform: scale(1.05);' : 'border: 2px solid transparent;';
         const cssFilter = this.buildCSSFilterString(id, defaultAdjustments);
-        
+
         html += `
           <div onclick="HubbleEditor.pushHistory(); HubbleEditor.state.filter = '${id}'; HubbleEditor.updateRender(); HubbleEditor.renderPanels('filters');" style="display: flex; flex-direction: column; align-items: center; gap: 6px; cursor: pointer; transition: all 0.2s; ${active}">
             <div style="width: 100%; aspect-ratio: 1; border-radius: 12px; background: url('${mediaUrl}') center/cover; filter: ${cssFilter}; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.1);"></div>
@@ -11190,7 +13171,7 @@ window.HubbleEditor = {
     else if (activeTool === 'adjust') {
       html += `<h4 style="margin: 0 0 16px 0; font-size: 1.1rem; display: flex; align-items: center; gap: 8px;"><i data-lucide="sliders" style="width: 18px; height: 18px; color: var(--primary);"></i> Adjust</h4>`;
       html += `<div style="display: flex; flex-direction: column; gap: 16px; max-height: 400px; overflow-y: auto; padding-right: 12px;" class="custom-scrollbar">`;
-      
+
       const sliders = [
         { id: 'brightness', label: 'Brightness', min: 0, max: 200 },
         { id: 'contrast', label: 'Contrast', min: 0, max: 200 },
@@ -11205,7 +13186,7 @@ window.HubbleEditor = {
         { id: 'blur', label: 'Blur', min: 0, max: 20 },
         { id: 'opacity', label: 'Opacity', min: 0, max: 100 }
       ];
-      
+
       sliders.forEach(s => {
         const val = this.state.adjustments[s.id];
         html += `
@@ -11221,7 +13202,7 @@ window.HubbleEditor = {
           </div>
         `;
       });
-      
+
       html += `<button onclick="HubbleEditor.pushHistory(); HubbleEditor.state.filter = 'original'; HubbleEditor.state.adjustments = { brightness: 100, contrast: 100, exposure: 100, highlights: 100, shadows: 100, temperature: 0, tint: 0, saturation: 100, vibrance: 100, sharpness: 0, blur: 0, opacity: 100 }; HubbleEditor.updateRender(); HubbleEditor.renderPanels('adjust');" style="margin-top: 12px; padding: 10px; border-radius: 8px; background: rgba(255,255,255,0.05); color: white; border: 1px solid rgba(255,255,255,0.1); cursor: pointer;">Reset All</button>`;
       html += `</div>`;
     }
@@ -11239,7 +13220,7 @@ window.HubbleEditor = {
         html += `<button onclick="HubbleEditor.setCropAspect('${r}');" style="padding: 12px; border-radius: 12px; color: white; font-weight: 600; font-size: 0.9rem; cursor: pointer; ${active}">${labels[i]}</button>`;
       });
       html += `</div>`;
-      
+
       const currentZoom = this.state.zoom || 1;
       const zoomPct = Math.round(currentZoom * 100);
       html += `
@@ -11255,7 +13236,7 @@ window.HubbleEditor = {
           </div>
         </div>
       `;
-      
+
       html += `<div style="display: flex; flex-direction: column; gap: 12px;">`;
       html += `<div style="display: flex; gap: 12px;">
                  <button class="he-glass-btn" onclick="HubbleEditor.state.zoom = 1; HubbleEditor.state.panX = 0; HubbleEditor.state.panY = 0; HubbleEditor.tempCrop = { x: 0, y: 0, width: 100, height: 100, aspect: 'Free' }; HubbleEditor.renderCropHandles(); HubbleEditor.renderPanels('crop'); HubbleEditor.updateRender();">Reset</button>
@@ -11267,18 +13248,18 @@ window.HubbleEditor = {
     else if (activeTool === 'stickers') {
       html += `<h4 style="margin: 0 0 16px 0; font-size: 1.1rem; display: flex; align-items: center; gap: 8px;"><i data-lucide="sticker" style="width: 18px; height: 18px; color: var(--primary);"></i> Stickers</h4>`;
       html += `<div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; max-height: 400px; overflow-y: auto;" class="custom-scrollbar">`;
-      
+
       const emojiStickers = ['🔥', '✨', '❤️', '🎉', '🚀', '💯', '😂', '😍', '🎂', '✈️', '🌴', '💎', '👑', '🌈', '⚡️', '🌟'];
-      
+
       emojiStickers.forEach(e => {
         html += `<div onclick="HubbleEditor.addLayer('text', '${e}', { size: 80 });" style="font-size: 32px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.2)'" onmouseout="this.style.transform='scale(1)'">${e}</div>`;
       });
-      
+
       html += `</div>`;
     }
     else if (activeTool === 'text') {
       html += `<h4 style="margin: 0 0 16px 0; font-size: 1.1rem; display: flex; align-items: center; gap: 8px;"><i data-lucide="type" style="width: 18px; height: 18px; color: var(--primary);"></i> Text</h4>`;
-      
+
       const colors = ['#ffffff', '#000000', '#888888', '#ff3b30', '#ff9500', '#ffcc00', '#4cd964', '#5ac8fa', '#007aff', '#5856d6', '#ff2d55'];
       let currentColor = HubbleEditor.textState ? HubbleEditor.textState.color : '#ffffff';
       let currentFont = HubbleEditor.textState ? HubbleEditor.textState.font : 'inherit';
@@ -11366,17 +13347,17 @@ window.HubbleEditor = {
   openLocationSelector() {
     const renderContainer = document.getElementById('he-render-container');
     if (!renderContainer) return;
-    
+
     let locationOverlay = document.getElementById('he-location-overlay');
-    
+
     if (locationOverlay) {
-        // Toggle off if already open
-        locationOverlay.remove();
-        if (this._locationSearchTimeout) clearTimeout(this._locationSearchTimeout);
-        this.state.selectedLocation = null;
-        return;
+      // Toggle off if already open
+      locationOverlay.remove();
+      if (this._locationSearchTimeout) clearTimeout(this._locationSearchTimeout);
+      this.state.selectedLocation = null;
+      return;
     }
-    
+
     locationOverlay = document.createElement('div');
     locationOverlay.id = 'he-location-overlay';
     // Style as a glassmorphism widget placed at top-left inside media preview
@@ -11391,7 +13372,7 @@ window.HubbleEditor = {
         flex-direction: column;
         gap: 8px;
     `;
-    
+
     // Prevent dragging/zooming when interacting with search overlay
     locationOverlay.addEventListener('mousedown', e => e.stopPropagation());
     locationOverlay.addEventListener('wheel', e => e.stopPropagation());
@@ -11408,19 +13389,19 @@ window.HubbleEditor = {
         box-shadow: 0 4px 20px rgba(0,0,0,0.3);
         transition: border-color 0.2s;
     `;
-    
+
     const searchIcon = document.createElement('i');
     searchIcon.setAttribute('data-lucide', 'map-pin');
     searchIcon.style.cssText = 'position: absolute; left: 14px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: rgba(255,255,255,0.6);';
     searchInputWrapper.appendChild(searchIcon);
-    
+
     const searchInput = document.createElement('input');
     searchInput.id = 'he-location-search-input';
     searchInput.type = 'text';
     searchInput.placeholder = '📍 Search location...';
     // If we have a selected location, show its name
     if (this.state.selectedLocation && this.state.selectedLocation.displayName) {
-        searchInput.value = this.state.selectedLocation.displayName;
+      searchInput.value = this.state.selectedLocation.displayName;
     }
     searchInput.style.cssText = `
         width: 100%;
@@ -11435,46 +13416,46 @@ window.HubbleEditor = {
         pointer-events: auto;
         user-select: auto;
     `;
-    
+
     // Ensure clicking the input actually focuses it, bypassing any global preventDefault
     searchInput.addEventListener('mousedown', e => {
-        e.stopPropagation();
+      e.stopPropagation();
     });
     searchInput.addEventListener('click', e => {
-        e.stopPropagation();
-        searchInput.focus();
+      e.stopPropagation();
+      searchInput.focus();
     });
-    
+
     // Prevent typing from triggering editor shortcuts (e.g. Backspace deleting layers)
     searchInput.addEventListener('keydown', e => {
-        e.stopPropagation();
-        if (e.key === 'Escape') {
-            document.getElementById('he-location-results-container').style.display = 'none';
-            searchInput.blur();
-        }
+      e.stopPropagation();
+      if (e.key === 'Escape') {
+        document.getElementById('he-location-results-container').style.display = 'none';
+        searchInput.blur();
+      }
     });
-    
+
     searchInput.addEventListener('input', e => {
-        if (window.HubbleEditor) window.HubbleEditor.handleLocationSearch(e.target.value);
+      if (window.HubbleEditor) window.HubbleEditor.handleLocationSearch(e.target.value);
     });
-    
+
     searchInput.addEventListener('focus', () => {
-        searchInputWrapper.style.borderColor = 'var(--primary)';
-        document.getElementById('he-location-results-container').style.display = 'flex';
-        // Only trigger search if there is a query, else show empty
-        if (searchInput.value.trim().length >= 2) {
-            this.handleLocationSearch(searchInput.value);
-        } else {
-            this.renderLocationResults(null, 'empty_default');
-        }
+      searchInputWrapper.style.borderColor = 'var(--primary)';
+      document.getElementById('he-location-results-container').style.display = 'flex';
+      // Only trigger search if there is a query, else show empty
+      if (searchInput.value.trim().length >= 2) {
+        this.handleLocationSearch(searchInput.value);
+      } else {
+        this.renderLocationResults(null, 'empty_default');
+      }
     });
-    
+
     searchInput.addEventListener('blur', () => {
-        searchInputWrapper.style.borderColor = 'rgba(255,255,255,0.1)';
+      searchInputWrapper.style.borderColor = 'rgba(255,255,255,0.1)';
     });
 
     searchInputWrapper.appendChild(searchInput);
-    
+
     const resultsContainer = document.createElement('div');
     resultsContainer.id = 'he-location-results-container';
     resultsContainer.style.cssText = `
@@ -11493,42 +13474,42 @@ window.HubbleEditor = {
         padding: 8px;
         box-sizing: border-box;
     `;
-    
+
     // Add custom thin scrollbar css rules for this container implicitly
     // (We will add the scrollbar styling in style.css or rely on the global one if it exists)
     resultsContainer.classList.add('he-thin-scrollbar');
-    
+
     locationOverlay.appendChild(searchInputWrapper);
     locationOverlay.appendChild(resultsContainer);
-    
+
     renderContainer.appendChild(locationOverlay);
-    
+
     if (window.lucide) window.lucide.createIcons();
-    
+
     // Close dropdown on outside click
     const outsideClickListener = (e) => {
-        if (!locationOverlay.contains(e.target)) {
-            resultsContainer.style.display = 'none';
-        }
+      if (!locationOverlay.contains(e.target)) {
+        resultsContainer.style.display = 'none';
+      }
     };
     document.addEventListener('mousedown', outsideClickListener);
-    
+
     // Cleanup listener when overlay is removed
     const observer = new MutationObserver((mutations) => {
-        mutations.forEach((mutation) => {
-            mutation.removedNodes.forEach((node) => {
-                if (node === locationOverlay) {
-                    document.removeEventListener('mousedown', outsideClickListener);
-                    observer.disconnect();
-                }
-            });
+      mutations.forEach((mutation) => {
+        mutation.removedNodes.forEach((node) => {
+          if (node === locationOverlay) {
+            document.removeEventListener('mousedown', outsideClickListener);
+            observer.disconnect();
+          }
         });
+      });
     });
     observer.observe(renderContainer, { childList: true });
-    
+
     // Initial render empty
     this.renderLocationResults(null, 'empty_default');
-    
+
     searchInput.focus();
   },
 
@@ -11540,7 +13521,7 @@ window.HubbleEditor = {
   handleLocationSearch(query) {
     if (this._locationSearchTimeout) clearTimeout(this._locationSearchTimeout);
     if (this._locationSearchAbortController) this._locationSearchAbortController.abort();
-    
+
     if (!query || query.trim().length < 2) {
       this.renderLocationResults(null, 'empty_default');
       return;
@@ -11557,7 +13538,7 @@ window.HubbleEditor = {
         });
         if (!res.ok) throw new Error('Network error');
         const data = await res.json();
-        
+
         if (data && data.length > 0) {
           const results = data.map(item => {
             const addr = item.address;
@@ -11591,15 +13572,15 @@ window.HubbleEditor = {
   renderLocationResults(results, state) {
     this._lastLocationResults = results;
     this._lastLocationState = state;
-    
+
     const container = document.getElementById('he-location-results-container');
     if (!container) return;
-    
+
     const buildItemHTML = (id, mainText, subText, isSelected) => {
-        const bg = isSelected ? 'rgba(168,85,247,0.15)' : 'rgba(255,255,255,0.02)';
-        const border = isSelected ? 'rgba(168,85,247,0.5)' : 'transparent';
-        const checkIcon = isSelected ? `<i data-lucide="check" style="color: var(--primary); width: 16px; height: 16px; margin-left: auto;"></i>` : '';
-        return `
+      const bg = isSelected ? 'rgba(168,85,247,0.15)' : 'rgba(255,255,255,0.02)';
+      const border = isSelected ? 'rgba(168,85,247,0.5)' : 'transparent';
+      const checkIcon = isSelected ? `<i data-lucide="check" style="color: var(--primary); width: 16px; height: 16px; margin-left: auto;"></i>` : '';
+      return `
           <div onclick="if(window.HubbleEditor) window.HubbleEditor.selectLocation('${id.replace(/'/g, "\\'")}', '${mainText.replace(/'/g, "\\'")}', '${subText ? subText.replace(/'/g, "\\'") : ''}')" style="display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 12px; background: ${bg}; border: 1px solid ${border}; cursor: pointer; transition: all 0.2s;" onmouseover="if(!${isSelected}){this.style.background='rgba(255,255,255,0.05)'; this.style.borderColor='rgba(255,255,255,0.1)';}" onmouseout="if(!${isSelected}){this.style.background='rgba(255,255,255,0.02)'; this.style.borderColor='transparent';}">
             <div style="width: 32px; height: 32px; border-radius: 50%; background: rgba(255,255,255,0.05); display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
               <i data-lucide="map-pin" style="color: ${isSelected ? 'var(--primary)' : 'rgba(255,255,255,0.6)'}; width: 14px; height: 14px;"></i>
@@ -11614,53 +13595,53 @@ window.HubbleEditor = {
     };
 
     if (state === 'empty_default') {
-        container.style.display = 'none'; // hide if nothing typed
+      container.style.display = 'none'; // hide if nothing typed
     } else if (state === 'loading') {
-        container.style.display = 'flex';
-        container.innerHTML = `
+      container.style.display = 'flex';
+      container.innerHTML = `
         <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 16px; gap: 12px; color: rgba(255,255,255,0.6);">
             <div class="he-spinner" style="width: 20px; height: 20px; border: 2px solid rgba(255,255,255,0.2); border-top-color: var(--primary); border-radius: 50%; animation: he-spin 1s linear infinite;"></div>
         </div>`;
     } else if (state === 'empty') {
-        container.style.display = 'flex';
-        container.innerHTML = `
+      container.style.display = 'flex';
+      container.innerHTML = `
         <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 16px; gap: 8px; color: rgba(255,255,255,0.6);">
             <span style="font-size: 0.85rem;">No locations found.</span>
         </div>`;
     } else if (state === 'error') {
-        container.style.display = 'flex';
-        container.innerHTML = `
+      container.style.display = 'flex';
+      container.innerHTML = `
         <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 16px; gap: 8px; color: rgba(255,255,255,0.6);">
             <span style="font-size: 0.85rem;">Couldn't load locations.</span>
         </div>`;
     } else if (state === 'results' && results) {
-        container.style.display = 'flex';
-        let html = `<div style="display: flex; flex-direction: column; gap: 8px;">`;
-        results.forEach(res => {
-            const isSelected = this.state.selectedLocation && String(this.state.selectedLocation.id) === String(res.id);
-            html += buildItemHTML(String(res.id), res.displayName, res.subText, isSelected);
-        });
-        html += `</div>`;
-        container.innerHTML = html;
-        if (window.lucide) window.lucide.createIcons();
+      container.style.display = 'flex';
+      let html = `<div style="display: flex; flex-direction: column; gap: 8px;">`;
+      results.forEach(res => {
+        const isSelected = this.state.selectedLocation && String(this.state.selectedLocation.id) === String(res.id);
+        html += buildItemHTML(String(res.id), res.displayName, res.subText, isSelected);
+      });
+      html += `</div>`;
+      container.innerHTML = html;
+      if (window.lucide) window.lucide.createIcons();
     }
   },
 
   selectLocation(id, displayName, subText) {
     this.state.selectedLocation = {
-        id: id,
-        displayName: displayName,
-        subText: subText
+      id: id,
+      displayName: displayName,
+      subText: subText
     };
-    
+
     const searchInput = document.getElementById('he-location-search-input');
     if (searchInput) {
-        searchInput.value = displayName;
+      searchInput.value = displayName;
     }
-    
+
     const resultsContainer = document.getElementById('he-location-results-container');
     if (resultsContainer) {
-        resultsContainer.style.display = 'none';
+      resultsContainer.style.display = 'none';
     }
   },
 
@@ -11668,8 +13649,8 @@ window.HubbleEditor = {
     const modal = document.getElementById('he-music-modal');
     const list = document.getElementById('he-music-list');
     const removeBtn = document.getElementById('he-music-remove-btn');
-    if(!modal || !list) return;
-    
+    if (!modal || !list) return;
+
     // Mock Tracks
     const tracks = [
       { id: 'm1', title: 'Summer Vibes', artist: 'Chill Wave', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3' },
@@ -11677,7 +13658,7 @@ window.HubbleEditor = {
       { id: 'm3', title: 'Ambient Journey', artist: 'Space Echo', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3' },
       { id: 'm4', title: 'Acoustic Sunrise', artist: 'Folk Tales', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3' }
     ];
-    
+
     list.innerHTML = '';
     tracks.forEach(t => {
       const isSelected = window.HubbleEditor.state.musicTrack && window.HubbleEditor.state.musicTrack.id === t.id;
@@ -11695,20 +13676,20 @@ window.HubbleEditor = {
         window.HubbleEditor.state.musicTrack = t;
         window.HubbleEditor.GlobalAudio.setTrack(t.url);
         window.HubbleEditor.openMusicSelector(); // re-render
-        
+
         const canvasVideo = document.querySelector('#he-media-layer video');
-        if(canvasVideo && !canvasVideo.paused) {
-           window.HubbleEditor.GlobalAudio.play();
+        if (canvasVideo && !canvasVideo.paused) {
+          window.HubbleEditor.GlobalAudio.play();
         }
       };
       list.appendChild(el);
     });
-    
+
     removeBtn.style.display = window.HubbleEditor.state.musicTrack ? 'block' : 'none';
-    
+
     modal.style.display = 'flex';
     setTimeout(() => modal.style.opacity = '1', 10);
-    if(window.lucide) window.lucide.createIcons();
+    if (window.lucide) window.lucide.createIcons();
   },
 
   removeMusic() {
@@ -11727,7 +13708,7 @@ window.HubbleEditor = {
       e.stopPropagation();
       e.preventDefault();
     }
-    
+
     if (window.HubbleEditor._isTogglingSpeaker) return;
     window.HubbleEditor._isTogglingSpeaker = true;
     setTimeout(() => { window.HubbleEditor._isTogglingSpeaker = false; }, 150);
@@ -11738,24 +13719,24 @@ window.HubbleEditor = {
     } else {
       state.isMuted = !state.isMuted;
     }
-    
+
     // Smooth Mute: Update volume to 0/1 to prevent decoder stutter on some browsers
     const videos = [
       document.querySelector('#he-media-layer video'),
       ...document.querySelectorAll('#review-slider-wrapper video')
     ];
-    
+
     videos.forEach(v => {
       if (v) {
         v.muted = state.isMuted;
         v.volume = state.isMuted ? 0 : 1;
       }
     });
-    
+
     // Update speaker UI efficiently
     const mutedIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>';
     const unmutedIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>';
-    
+
     document.querySelectorAll('.he-speaker-icon').forEach(icon => {
       icon.innerHTML = state.isMuted ? mutedIcon : unmutedIcon;
     });
@@ -11766,12 +13747,12 @@ window.HubbleEditor = {
     let controls = document.createElement('div');
     controls.id = controlsId;
     controls.style.cssText = 'position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1000; display: flex; flex-direction: column; justify-content: flex-end; padding-bottom: 24px;';
-    
+
     const playBtn = document.createElement('div');
     playBtn.id = isReview ? 'he-review-play-btn' : 'he-play-btn';
     playBtn.style.cssText = 'position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) scale(0.9); width: 64px; height: 64px; border-radius: 50%; background: rgba(0,0,0,0.4); backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; pointer-events: all; cursor: pointer; transition: all 0.3s; opacity: 0; box-shadow: 0 8px 32px rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1);';
     playBtn.innerHTML = '<i data-lucide="pause" style="color: white; width: 32px; height: 32px;"></i>';
-    
+
     let hideTimeout;
     const showPlayBtn = (icon) => {
       playBtn.innerHTML = `<i data-lucide="${icon}" style="color: white; width: 32px; height: 32px;"></i>`;
@@ -11806,7 +13787,7 @@ window.HubbleEditor = {
         showPlayBtn('pause');
       }
     });
-    
+
     showPlayBtn('pause'); // Set initial state
 
     const bottomRow = document.createElement('div');
@@ -11821,14 +13802,14 @@ window.HubbleEditor = {
     timeText.id = isReview ? 'he-review-time-text' : 'he-time-text';
     timeText.style.cssText = 'color: white; font-size: 11px; font-weight: 600; font-family: monospace; text-shadow: 0 1px 4px rgba(0,0,0,0.8); display: flex; justify-content: space-between; opacity: 0.9;';
     timeText.innerHTML = '<span>00:00</span><span>00:00</span>';
-    
+
     const track = document.createElement('div');
     track.style.cssText = 'width: 100%; height: 6px; border-radius: 4px; background: rgba(255,255,255,0.3); backdrop-filter: blur(4px); position: relative; overflow: hidden;';
-    
+
     const fill = document.createElement('div');
     fill.id = isReview ? 'he-review-timeline-fill' : 'he-timeline-fill';
     fill.style.cssText = 'position: absolute; top: 0; left: 0; height: 100%; width: 0%; background: var(--primary, #a855f7); box-shadow: 0 0 10px rgba(168,85,247,0.5); border-radius: 4px; transition: width 0.1s linear;';
-    
+
     track.appendChild(fill);
     timelineContainer.appendChild(track);
     timelineContainer.appendChild(timeText);
@@ -11846,11 +13827,11 @@ window.HubbleEditor = {
     volumeSlider.value = this.state.isMuted ? '0' : (this.state.volume || '1');
     volumeSlider.id = isReview ? 'he-review-volume' : 'he-volume';
     volumeSlider.className = 'he-glass-slider';
-    
+
     volumeSlider.oninput = (e) => {
       const val = parseFloat(e.target.value);
       this.state.volume = val;
-      
+
       const videos = [
         document.querySelector('#he-media-layer video'),
         ...document.querySelectorAll('#review-slider-wrapper video')
@@ -11861,15 +13842,15 @@ window.HubbleEditor = {
           if (val > 0 && v.muted) v.muted = false;
         }
       });
-      
+
       if (this.GlobalAudio && this.GlobalAudio.audio) {
-         this.GlobalAudio.audio.volume = val;
+        this.GlobalAudio.audio.volume = val;
       }
 
       if (val === 0 && !this.state.isMuted) {
-         this.toggleSpeaker(null, true);
+        this.toggleSpeaker(null, true);
       } else if (val > 0 && this.state.isMuted) {
-         this.toggleSpeaker(null, false);
+        this.toggleSpeaker(null, false);
       }
     };
 
@@ -11879,14 +13860,14 @@ window.HubbleEditor = {
     speakerBtn.className = 'he-speaker-icon';
     speakerBtn.style.cssText = 'width: 44px; height: 44px; border-radius: 50%; background: rgba(168,85,247,0.25); backdrop-filter: blur(12px); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1); box-shadow: 0 4px 15px rgba(168,85,247,0.4), inset 0 0 10px rgba(168,85,247,0.2); border: 1px solid rgba(168,85,247,0.5); color: white; flex-shrink: 0;';
     speakerBtn.innerHTML = this.state.isMuted ? '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>' : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>';
-    
+
     speakerBtn.onclick = (e) => {
       this.toggleSpeaker(e);
       if (this.state.isMuted) {
         volumeSlider.value = '0';
       } else {
         volumeSlider.value = this.state.volume || '1';
-        
+
         const videos = [
           document.querySelector('#he-media-layer video'),
           ...document.querySelectorAll('#review-slider-wrapper video')
@@ -11894,7 +13875,7 @@ window.HubbleEditor = {
         videos.forEach(v => { if (v) v.volume = parseFloat(volumeSlider.value); });
       }
     };
-    
+
     rightControls.appendChild(volumeSlider);
     rightControls.appendChild(speakerBtn);
 
@@ -11909,49 +13890,49 @@ window.HubbleEditor = {
 
     // Timeline Drag Logic
     const updateTimeline = (e) => {
-       const rect = timelineContainer.getBoundingClientRect();
-       let pos = (e.clientX - rect.left) / rect.width;
-       pos = Math.max(0, Math.min(pos, 1));
-       
-       if (videoNode && videoNode.duration) {
-          videoNode.currentTime = pos * videoNode.duration;
-       }
+      const rect = timelineContainer.getBoundingClientRect();
+      let pos = (e.clientX - rect.left) / rect.width;
+      pos = Math.max(0, Math.min(pos, 1));
+
+      if (videoNode && videoNode.duration) {
+        videoNode.currentTime = pos * videoNode.duration;
+      }
     };
-    
+
     let isDragging = false;
     timelineContainer.onmousedown = (e) => {
-       isDragging = true;
-       updateTimeline(e);
+      isDragging = true;
+      updateTimeline(e);
     };
     window.addEventListener('mousemove', (e) => {
-       if (isDragging) updateTimeline(e);
+      if (isDragging) updateTimeline(e);
     });
     window.addEventListener('mouseup', () => {
-       isDragging = false;
+      isDragging = false;
     });
 
     // RAF Update Loop for UI
     const formatTime = (time) => {
-       if (isNaN(time)) return '00:00';
-       const m = Math.floor(time / 60).toString().padStart(2, '0');
-       const s = Math.floor(time % 60).toString().padStart(2, '0');
-       return `${m}:${s}`;
+      if (isNaN(time)) return '00:00';
+      const m = Math.floor(time / 60).toString().padStart(2, '0');
+      const s = Math.floor(time % 60).toString().padStart(2, '0');
+      return `${m}:${s}`;
     };
 
     const updateUI = () => {
-       if (!controls.parentElement) return; // Cleanup when unmounted
-       
-       if (videoNode && videoNode.duration) {
-          const perc = (videoNode.currentTime / videoNode.duration) * 100;
-          fill.style.width = `${perc}%`;
-          timeText.innerHTML = `<span>${formatTime(videoNode.currentTime)}</span><span>${formatTime(videoNode.duration)}</span>`;
-       }
+      if (!controls.parentElement) return; // Cleanup when unmounted
 
-       if (this.state.isMuted && volumeSlider.value !== '0') {
-          volumeSlider.value = '0';
-       }
+      if (videoNode && videoNode.duration) {
+        const perc = (videoNode.currentTime / videoNode.duration) * 100;
+        fill.style.width = `${perc}%`;
+        timeText.innerHTML = `<span>${formatTime(videoNode.currentTime)}</span><span>${formatTime(videoNode.duration)}</span>`;
+      }
 
-       requestAnimationFrame(updateUI);
+      if (this.state.isMuted && volumeSlider.value !== '0') {
+        volumeSlider.value = '0';
+      }
+
+      requestAnimationFrame(updateUI);
     };
     requestAnimationFrame(updateUI);
 
@@ -11974,16 +13955,16 @@ window.selectedCollaborators = [];
 window.collaborationEnabled = true;
 let cachedHubbers = null;
 
-window.toggleCollaboration = function(enabled) {
+window.toggleCollaboration = function (enabled) {
   window.collaborationEnabled = enabled;
   const contentDiv = document.getElementById('ch-collab-content');
   const msgDiv = document.getElementById('ch-collab-disabled-msg');
   const addBtn = document.getElementById('btn-add-collaborators');
-  
+
   if (window.renderCollaboratorChips) window.renderCollaboratorChips();
-  
+
   if (!contentDiv || !msgDiv || !addBtn) return;
-  
+
   if (enabled) {
     contentDiv.style.opacity = '1';
     contentDiv.style.pointerEvents = 'auto';
@@ -11992,7 +13973,7 @@ window.toggleCollaboration = function(enabled) {
   } else {
     contentDiv.style.opacity = '0.55';
     addBtn.style.display = 'none';
-    
+
     if (window.selectedCollaborators.length === 0) {
       msgDiv.style.display = 'block';
     } else {
@@ -12001,25 +13982,25 @@ window.toggleCollaboration = function(enabled) {
   }
 };
 
-window.openCollaboratorModal = async function() {
+window.openCollaboratorModal = async function () {
   if (window.collaborationEnabled === false) return;
-  
+
   const modal = document.getElementById('collaborator-modal');
   const searchInput = document.getElementById('collaborator-search-input');
-  if(searchInput) searchInput.value = '';
+  if (searchInput) searchInput.value = '';
   modal.style.display = 'flex';
-  
+
   if (cachedHubbers === null) {
     const listContainer = document.getElementById('collaborator-list-container');
     listContainer.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-muted);">Loading Hubbers...</div>';
-    
+
     const token = localStorage.getItem('invibe_jwt_token');
     const currentUserStr = localStorage.getItem('invibeUser');
     if (!token || !currentUserStr) return;
-    
+
     const currentUser = JSON.parse(currentUserStr);
     const userId = currentUser.id || currentUser._id;
-    
+
     try {
       const res = await fetch(`${API_URL}/api/users/${userId}/followers-list`, {
         headers: { 'Authorization': `Bearer ${token}` }
@@ -12031,19 +14012,19 @@ window.openCollaboratorModal = async function() {
       cachedHubbers = [];
     }
   }
-  
+
   window.renderCollaboratorModalList();
 };
 
-window.closeCollaboratorModal = function() {
+window.closeCollaboratorModal = function () {
   const modal = document.getElementById('collaborator-modal');
   modal.style.display = 'none';
 };
 
-window.renderCollaboratorModalList = function(query = '') {
+window.renderCollaboratorModalList = function (query = '') {
   const listContainer = document.getElementById('collaborator-list-container');
   if (!listContainer) return;
-  
+
   if (!cachedHubbers || cachedHubbers.length === 0) {
     listContainer.innerHTML = `
       <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 20px; text-align: center;">
@@ -12052,24 +14033,24 @@ window.renderCollaboratorModalList = function(query = '') {
         <p style="margin: 0; color: var(--text-muted); font-size: 0.9rem;">You don't have any Hubbers yet.<br>Connect with people first before collaborating.</p>
       </div>
     `;
-    if(window.lucide) window.lucide.createIcons();
+    if (window.lucide) window.lucide.createIcons();
     return;
   }
-  
+
   const lowerQuery = query.toLowerCase();
   const filtered = cachedHubbers.filter(h => {
     const name = (h.name || '').toLowerCase();
     const username = (h.username || '').toLowerCase();
     return name.includes(lowerQuery) || username.includes(lowerQuery);
   });
-  
+
   if (filtered.length === 0) {
     listContainer.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-muted);">No matching Hubbers found.</div>';
     return;
   }
-  
+
   const selectedIds = window.selectedCollaborators.map(c => c._id || c.id);
-  
+
   listContainer.innerHTML = filtered.map(h => {
     const isSelected = selectedIds.includes(h._id || h.id);
     const avatar = h.profilePic || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=40&q=80';
@@ -12086,54 +14067,54 @@ window.renderCollaboratorModalList = function(query = '') {
       </div>
     `;
   }).join('');
-  
-  if(window.lucide) window.lucide.createIcons();
+
+  if (window.lucide) window.lucide.createIcons();
 };
 
-window.toggleCollaboratorSelection = function(hubberObj) {
+window.toggleCollaboratorSelection = function (hubberObj) {
   const hubberId = hubberObj._id || hubberObj.id;
   const isSelected = window.selectedCollaborators.some(c => (c._id || c.id) === hubberId);
-  
+
   if (isSelected) {
     return; // Prevent duplicates / already added
   } else {
     window.selectedCollaborators.push(hubberObj);
   }
-  
+
   window.renderCollaboratorChips();
   // Re-render modal to reflect "Added" state if modal is open
   const searchInput = document.getElementById('collaborator-search-input');
-  if(searchInput) {
+  if (searchInput) {
     window.renderCollaboratorModalList(searchInput.value);
   } else {
     window.renderCollaboratorModalList();
   }
 };
 
-window.removeCollaborator = function(hubberId) {
+window.removeCollaborator = function (hubberId) {
   window.selectedCollaborators = window.selectedCollaborators.filter(c => (c._id || c.id) !== hubberId);
   window.renderCollaboratorChips();
-  
+
   // Re-render modal if open
   const searchInput = document.getElementById('collaborator-search-input');
-  if(document.getElementById('collaborator-modal').style.display === 'flex') {
+  if (document.getElementById('collaborator-modal').style.display === 'flex') {
     window.renderCollaboratorModalList(searchInput ? searchInput.value : '');
   }
 };
 
-window.renderCollaboratorChips = function() {
+window.renderCollaboratorChips = function () {
   const container = document.getElementById('ch-selected-collaborators');
   const label = document.getElementById('ch-collaborators-label');
   if (!container) return;
-  
+
   if (window.selectedCollaborators.length > 0) {
-    if(label) label.style.display = 'block';
+    if (label) label.style.display = 'block';
   } else {
-    if(label) label.style.display = 'none';
+    if (label) label.style.display = 'none';
   }
-  
+
   const isEnabled = window.collaborationEnabled !== false;
-  
+
   container.innerHTML = window.selectedCollaborators.map(c => {
     const id = c._id || c.id;
     const avatar = c.profilePic || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=30&q=80';
@@ -12145,12 +14126,77 @@ window.renderCollaboratorChips = function() {
       </div>
     `;
   }).join('');
-  
+
   if (window.lucide) window.lucide.createIcons();
 };
 
 document.addEventListener('DOMContentLoaded', () => {
-  const api = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' ? 'http://localhost:5000' : 'https://hi-hubble-backend.vercel.app';
+  const api = (
+    window.location.hostname === 'localhost' ||
+    window.location.hostname === '127.0.0.1' ||
+    window.location.hostname === '[::1]' ||
+    window.location.hostname === '::1'
+  ) ? `${window.location.protocol}//${window.location.hostname}:3000`
+    : window.location.origin;
+
   initVideoEditor(api, window.showToast, window.loadFeedReels || window.loadFeed);
+  if (typeof window.loadFeedReels === 'function') {
+    window.loadFeedReels();
+  }
 });
+
+// Screen Time Tracker
+(function initScreenTimeTracker() {
+  if (window._screenTimeInterval) clearInterval(window._screenTimeInterval);
+
+  function getUid() {
+    try {
+      const userStr = localStorage.getItem('invibe_user') || localStorage.getItem('invibeUser');
+      if (userStr) {
+        const u = JSON.parse(userStr);
+        return u.id || u._id || 'guest';
+      }
+    } catch (e) { }
+    return 'guest';
+  }
+
+  const storageKey = `hihubble_screen_time_${getUid()}`;
+  let screenTimeSeconds = parseInt(localStorage.getItem(storageKey) || '0', 10);
+
+  function updateScreenTimeUI() {
+    const box = document.getElementById('screen-time-box');
+    if (box) {
+      const hours = Math.floor(screenTimeSeconds / 3600);
+      const minutes = Math.floor((screenTimeSeconds % 3600) / 60);
+      const hStr = hours.toString().padStart(2, '0');
+      const mStr = minutes.toString().padStart(2, '0');
+      box.textContent = `Screen Time: ${hStr}h ${mStr}m`;
+    }
+  }
+
+  // Update immediately on load
+  updateScreenTimeUI();
+
+  window._screenTimeInterval = setInterval(() => {
+    // Only count active application time
+    if (document.visibilityState === 'visible') {
+      screenTimeSeconds++;
+
+      // Persist occasionally so we don't spam localStorage, but keep it accurate
+      if (screenTimeSeconds % 5 === 0) {
+        localStorage.setItem(storageKey, screenTimeSeconds.toString());
+      }
+
+      updateScreenTimeUI();
+    }
+  }, 1000);
+
+  // Save precisely when leaving the tab
+  window.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      localStorage.setItem(storageKey, screenTimeSeconds.toString());
+    }
+  });
+})();
+
 

@@ -34,18 +34,24 @@ router.post('/api/calls/initiate', authenticateToken, async (req, res) => {
 });
 
 router.get('/api/calls/incoming', authenticateToken, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
   try {
+    if (!req.user) return res.json(null);
     const { data: incomingCall, error } = await supabase.from('calls')
-      .select('*, caller:users!caller(_id, fullName, username, profileImage)')
-      .eq('recipient', req.user.id)
+      .select('*, initiator:profiles!initiator_id(id, full_name, username, profile_image_url)')
       .eq('status', 'ringing')
-      .single();
+      .neq('initiator_id', req.user.id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
     
-    if (error && error.code !== 'PGRST116') throw error; // Ignore not found error
+    if (error) {
+      return res.json(null);
+    }
 
     res.json(incomingCall || null);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.json(null);
   }
 });
 

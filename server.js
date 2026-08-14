@@ -16,20 +16,26 @@ import callsRoutes from './routes/calls.js';
 dotenv.config();
 
 const app = express();
+app.set('etag', false);
 
 // Enable CORS for all routes and preflight requests
 app.use(cors({
   origin: true,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-User-Token', 'Accept']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-User-Token', 'Accept', 'Cache-Control']
 }));
 
-// Security Headers Middleware
+// Security & Cache Control Headers Middleware
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('X-XSS-Protection', '1; mode=block');
+  if (req.path.startsWith('/api')) {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  }
   next();
 });
 
@@ -74,42 +80,117 @@ if (!process.env.NO_AUTO_LISTEN && (process.env.NODE_ENV !== 'production' || !pr
 
 // Background Scheduler for Scheduled HUBBs
 import { supabase } from './supabase.js';
+import fs from 'fs';
+import { uploadMediaItem } from './routes/posts.js';
 
 setInterval(async () => {
   try {
     const now = new Date().toISOString();
-    const { data: scheduledStories, error } = await supabase
-      .from('stories')
-      .select('id, scheduledAt')
-      .eq('status', 'scheduled')
-      .lte('scheduledAt', now);
 
-    if (error) {
-      console.error('[Scheduler] Error fetching scheduled stories:', error.message);
-      return;
+    // 1. Process local scheduled posts
+    const postsFile = 'scheduled_posts.json';
+    if (fs.existsSync(postsFile)) {
+      let scheduledPosts = [];
+      try {
+        scheduledPosts = JSON.parse(fs.readFileSync(postsFile, 'utf8'));
+      } catch (_) {}
+
+      const duePosts = scheduledPosts.filter(p => p.scheduledAt <= now);
+      const remainingPosts = scheduledPosts.filter(p => p.scheduledAt > now);
+
+      if (duePosts.length > 0) {
+        for (const post of duePosts) {
+          try {
+            console.log(`[Scheduler] Publishing scheduled post by user ${post.userId}`);
+            
+            // Insert post row
+            const basePayload = {
+              author_id: post.userId,
+              caption: post.caption || '',
+              location: post.location || null
+            };
+
+            const { data: newPost, error: postErr } = await supabase
+              .from('posts')
+              .insert([basePayload])
+              .select('id')
+              .single();
+
+            if (postErr || !newPost) {
+              console.error(`[Scheduler] Failed to create post row:`, postErr?.message);
+              continue;
+            }
+
+            // Upload and insert media items
+            for (let i = 0; i < post.mediaItems.length; i++) {
+              const item = post.mediaItems[i];
+              const uploaded = await uploadMediaItem(post.userId, item.mediaUrl || item.url, item.mediaType || item.type);
+
+              await supabase
+                .from('post_media')
+                .insert([{
+                  post_id: newPost.id,
+                  media_url: uploaded.url,
+                  media_type: uploaded.type,
+                  display_order: i + 1
+                }]);
+            }
+            console.log(`[Scheduler] Successfully auto-published scheduled post ${newPost.id}`);
+          } catch (pubErr) {
+            console.error(`[Scheduler] Error auto-publishing post:`, pubErr.message);
+          }
+        }
+
+        // Save remaining scheduled posts
+        fs.writeFileSync(postsFile, JSON.stringify(remainingPosts, null, 2), 'utf8');
+      }
     }
 
-    if (scheduledStories && scheduledStories.length > 0) {
-      for (const story of scheduledStories) {
-        const { error: updateError } = await supabase
-          .from('stories')
-          .update({
-            status: 'published',
-            isScheduled: false,
-            created_at: now // Reset created_at so it appears at the top of the feed now
-          })
-          .eq('id', story.id);
-        
-        if (updateError) {
-          console.error(`[Scheduler] Failed to publish story ${story.id}:`, updateError.message);
-        } else {
-          console.log(`[Scheduler] Successfully auto-published scheduled story ${story.id}`);
+    // 2. Process local scheduled stories
+    const storiesFile = 'scheduled_stories.json';
+    if (fs.existsSync(storiesFile)) {
+      let scheduledStories = [];
+      try {
+        scheduledStories = JSON.parse(fs.readFileSync(storiesFile, 'utf8'));
+      } catch (_) {}
+
+      const dueStories = scheduledStories.filter(s => s.scheduledAt <= now);
+      const remainingStories = scheduledStories.filter(s => s.scheduledAt > now);
+
+      if (dueStories.length > 0) {
+        for (const story of dueStories) {
+          try {
+            console.log(`[Scheduler] Publishing scheduled story by user ${story.userId}`);
+
+            const uploaded = await uploadMediaItem(story.userId, story.mediaUrl, story.mediaType);
+
+            const { error: storyErr } = await supabase
+              .from('stories')
+              .insert([{
+                author_id: story.userId,
+                media_url: uploaded.url,
+                media_type: uploaded.type,
+                caption: story.caption || '',
+                status: 'published'
+              }]);
+
+            if (storyErr) {
+              console.error(`[Scheduler] Failed to create story row:`, storyErr.message);
+            } else {
+              console.log(`[Scheduler] Successfully auto-published scheduled story`);
+            }
+          } catch (pubErr) {
+            console.error(`[Scheduler] Error auto-publishing story:`, pubErr.message);
+          }
         }
+
+        // Save remaining scheduled stories
+        fs.writeFileSync(storiesFile, JSON.stringify(remainingStories, null, 2), 'utf8');
       }
     }
   } catch (err) {
     console.error('[Scheduler] Unexpected error:', err.message);
   }
-}, 60000); // Check every minute
+}, 5000); // Check every 5 seconds for responsive testing
 
 export default app;

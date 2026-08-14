@@ -58,7 +58,6 @@ router.get('/api/chats/threads', authenticateToken, async (req, res) => {
           .from('profiles')
           .select('id, username, full_name, profile_image_url, is_online, last_active_at')
           .in('id', connIdsArr)
-          .not('username', 'ilike', 'test_%')
           .not('username', 'ilike', 'search_test_%');
         suggestedProfiles = connProfs || [];
       }
@@ -68,7 +67,6 @@ router.get('/api/chats/threads', authenticateToken, async (req, res) => {
           .from('profiles')
           .select('id, username, full_name, profile_image_url, is_online, last_active_at')
           .neq('id', currentUserId)
-          .not('username', 'ilike', 'test_%')
           .not('username', 'ilike', 'search_test_%')
           .limit(20);
         suggestedProfiles = allRealProfiles || [];
@@ -132,7 +130,7 @@ router.get('/api/chats/threads', authenticateToken, async (req, res) => {
         if (conv.type === 'direct') {
           const otherMember = (allMembers || []).find(m => m.conversation_id === conv.id && m.user_id !== currentUserId);
           const p = otherMember?.profile;
-          if (!p || p.username.startsWith('test_') || p.username.startsWith('search_test_')) return null;
+          if (!p || p.username.startsWith('search_test_')) return null;
 
           return {
             conversationId: conv.id,
