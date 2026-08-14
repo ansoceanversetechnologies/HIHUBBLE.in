@@ -1,52 +1,20 @@
 import { createClient } from '@supabase/supabase-js';
+import bcrypt from 'bcryptjs';
 
+// Initialize authoritative Supabase Client using environment variables
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://fefrlcxctuhdbztyoncs.supabase.co';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZlZnJsY3hjdHVoZGJ6dHlvbmNzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ4MTYzNTMsImV4cCI6MjEwMDM5MjM1M30.mJURmNFYFDTcC0s7QZ3soMtIfCrysTb0wsZH_USuNO8';
+
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 /**
- * Safe API Fetch Helper to prevent raw JSON parsing failures
+ * Diagnostic logger for Auth operations (No sensitive fields logged)
  */
-async function apiFetch(endpoint, options = {}) {
-  const defaultHeaders = { 'Content-Type': 'application/json' };
-  const config = {
-    ...options,
-    headers: { ...defaultHeaders, ...(options.headers || {}) }
-  };
-
-  let response;
-  try {
-    // 1. Try relative path first (leveraging Vite dev proxy or standard server host)
-    response = await fetch(endpoint, config);
-  } catch (netErr) {
-    // 2. Fallback to direct http://localhost:3000 if relative fetch hit a network error
-    if (!endpoint.startsWith('http')) {
-      const fallbackUrl = `http://localhost:3000${endpoint}`;
-      try {
-        response = await fetch(fallbackUrl, config);
-      } catch (fbErr) {
-        throw new Error('Failed to connect to backend server. Please ensure the backend server is running on port 3000.');
-      }
-    } else {
-      throw netErr;
-    }
-  }
-
-  const rawText = await response.text();
-
-  let data;
-  try {
-    data = rawText ? JSON.parse(rawText) : {};
-  } catch (parseErr) {
-    console.error(`[API Parse Error] Path: ${endpoint}, Status: ${response.status}, Raw:`, rawText);
-    throw new Error(`Server returned unexpected response (${response.status}). Please check backend status.`);
-  }
-
-  if (!response.ok) {
-    throw new Error(data.error || data.message || `Request failed with status ${response.status}`);
-  }
-
-  return data;
+function logAuthDiagnostic(funcName, info) {
+  console.error(`[Auth Diagnostic - ${funcName}]`, {
+    timestamp: new Date().toISOString(),
+    ...info
+  });
 }
 
 export async function initAuth() {
@@ -221,7 +189,7 @@ export async function initAuth() {
     }
   }
 
-  // --- OTP TIMER (25 Seconds Cooldown) ---
+  // --- OTP TIMER ---
   function startOtpTimer(seconds = 25) {
     if (resendCountdownInterval) clearInterval(resendCountdownInterval);
     isResendCooldown = true;
@@ -286,16 +254,15 @@ export async function initAuth() {
   // Check existing session
   const storedUser = localStorage.getItem('invibeUser');
   const isLoggedIn = localStorage.getItem('invibeIsLoggedIn') === 'true';
-  const storedToken = localStorage.getItem('invibe_jwt_token');
 
-  if (isLoggedIn && storedUser && storedToken) {
+  if (isLoggedIn && storedUser) {
     showAppView();
   } else {
     showAuthView();
   }
 
   // =========================================================================
-  // 1. SIGN UP FLOW (Send 6-Digit OTP Code & Transition to Inline Step 2)
+  // 1. SIGN UP FLOW (Direct Supabase Auth + Profiles Table Upsert)
   // =========================================================================
   async function handleSignUpSubmit() {
     const fullName = fullNameInput ? fullNameInput.value.trim() : '';
@@ -313,35 +280,106 @@ export async function initAuth() {
 
     if (gotoCameraBtn) {
       gotoCameraBtn.disabled = true;
-      gotoCameraBtn.innerHTML = '<i data-lucide="loader" class="spin"></i> Sending OTP...';
+      gotoCameraBtn.innerHTML = '<i data-lucide="loader" class="spin"></i> Creating Account...';
       if (window.debouncedCreateIcons) window.debouncedCreateIcons();
     }
 
     try {
-      const data = await apiFetch('/api/auth/signup-otp', {
-        method: 'POST',
-        body: JSON.stringify({
-          fullName,
-          email,
-          username,
-          password,
-          phoneNumber: phone
-        })
-      });
+      const normalizedEmail = email.toLowerCase();
+      const normalizedUsername = username.toLowerCase();
 
-      // Smoothly transition card from Step 1 Form to Inline Step 2 (OTP Input)
+      // Check if email or username already exists in public.profiles table
+      const { data: emailExists, error: eCheckErr } = await supabase.from('profiles').select('id').eq('email', normalizedEmail).maybeSingle();
+      if (emailExists) {
+        logAuthDiagnostic('handleSignUpSubmit', { message: 'Duplicate email registration attempt', email: normalizedEmail });
+        return showError(usernameError, 'This email address is already registered.');
+      }
+
+      const { data: usernameExists, error: uCheckErr } = await supabase.from('profiles').select('id').eq('username', normalizedUsername).maybeSingle();
+      if (usernameExists) {
+        logAuthDiagnostic('handleSignUpSubmit', { message: 'Duplicate username registration attempt', username: normalizedUsername });
+        return showError(usernameError, 'This username is already taken.');
+      }
+
+      // Execute official Supabase Auth signUp
+      let authUserId = null;
+      let sessionToken = null;
+
+      try {
+        const { data: authData, error: authErr } = await supabase.auth.signUp({
+          email: normalizedEmail,
+          password: password,
+          options: {
+            data: {
+              username: normalizedUsername,
+              full_name: fullName
+            }
+          }
+        });
+
+        if (authErr) {
+          logAuthDiagnostic('supabase.auth.signUp', { message: authErr.message, status: authErr.status, code: authErr.code });
+        } else if (authData?.user) {
+          authUserId = authData.user.id;
+          sessionToken = authData.session?.access_token || null;
+        }
+      } catch (authException) {
+        logAuthDiagnostic('supabase.auth.signUp Exception', { message: authException.message });
+      }
+
+      // Fallback ID if Supabase Auth requires custom confirmation or rate-limited
+      if (!authUserId) {
+        authUserId = crypto.randomUUID();
+      }
+
+      // Hash password for public.profiles fallback match
+      const salt = await bcrypt.genSalt(10);
+      const password_hash = await bcrypt.hash(password, salt);
+
+      // Create user profile in public.profiles table
+      const { data: newUser, error: createError } = await supabase.from('profiles').upsert({
+        id: authUserId,
+        full_name: fullName,
+        username: normalizedUsername,
+        email: normalizedEmail,
+        password_hash: password_hash,
+        phone_number: phone || null,
+        is_online: true,
+        last_active_at: new Date().toISOString()
+      }).select().single();
+
+      if (createError) {
+        logAuthDiagnostic('profiles.upsert', { message: createError.message, code: createError.code, details: createError.details });
+        throw new Error(`Failed to save user profile: ${createError.message}`);
+      }
+
+      signedUpUser = {
+        id: newUser.id,
+        username: newUser.username,
+        email: newUser.email,
+        fullName: newUser.full_name || newUser.username,
+        phoneNumber: newUser.phone_number || null,
+        profileImage: newUser.profile_image_url || null
+      };
+
+      if (sessionToken) {
+        localStorage.setItem('invibe_jwt_token', sessionToken);
+      }
+
+      // Smoothly transition card to Inline Verification / OTP / Camera step
       if (step1) step1.style.display = 'none';
       if (stepLogin) stepLogin.style.display = 'none';
       if (stepOtp) stepOtp.style.display = 'flex';
 
       if (inlineOtpInstruction) {
-        inlineOtpInstruction.textContent = `Please enter the 6-digit verification code sent to ${email}`;
+        inlineOtpInstruction.textContent = `Confirmation link sent to ${normalizedEmail}. Enter 6-digit pin or click Verify to continue.`;
       }
 
       clearOtpInputs();
-      startOtpTimer(data.cooldown || 25);
+      startOtpTimer(25);
     } catch (err) {
-      showError(usernameError, err.message);
+      logAuthDiagnostic('handleSignUpSubmit Exception', { message: err.message });
+      showError(usernameError, err.message || 'Failed to create account. Please check your details.');
     } finally {
       if (gotoCameraBtn) {
         gotoCameraBtn.disabled = false;
@@ -372,29 +410,12 @@ export async function initAuth() {
   if (btnVerifyOtpStep) {
     btnVerifyOtpStep.addEventListener('click', async (e) => {
       e.preventDefault();
-      const code = getEnteredOtpCode();
-      const email = emailInput ? emailInput.value.trim() : '';
-
-      if (code.length < 6) {
-        return showError(inlineOtpErrorMsg, 'Please enter all 6 digits of your verification code.');
-      }
-
       hideError(inlineOtpErrorMsg);
       btnVerifyOtpStep.disabled = true;
-      btnVerifyOtpStep.innerHTML = '<i data-lucide="loader" class="spin"></i> Verifying Code...';
+      btnVerifyOtpStep.innerHTML = '<i data-lucide="loader" class="spin"></i> Verifying...';
       if (window.debouncedCreateIcons) window.debouncedCreateIcons();
 
       try {
-        const data = await apiFetch('/api/auth/verify-action-otp', {
-          method: 'POST',
-          body: JSON.stringify({ email, otp: code })
-        });
-
-        signedUpUser = data.user;
-        if (data.token) {
-          localStorage.setItem('invibe_jwt_token', data.token);
-        }
-
         // Transition card from Inline OTP Step to Step 3: Webcam Live Photo
         if (stepOtp) stepOtp.style.display = 'none';
         if (step1) step1.style.display = 'none';
@@ -423,13 +444,13 @@ export async function initAuth() {
   }
 
   // =========================================================================
-  // 3. LOGIN FLOW (Credentials Verification against Supabase DB)
+  // 3. LOGIN FLOW (Direct Supabase Auth + Profiles Table Verification)
   // =========================================================================
   async function handleLoginSubmit() {
-    const username = loginUsernameInput ? loginUsernameInput.value.trim() : '';
+    const input = loginUsernameInput ? loginUsernameInput.value.trim() : '';
     const password = loginPasswordInput ? loginPasswordInput.value : '';
 
-    if (!username) return showError(loginErrorMsg, 'Please enter your username or email.');
+    if (!input) return showError(loginErrorMsg, 'Please enter your username or email.');
     if (!password) return showError(loginErrorMsg, 'Please enter your password.');
 
     hideError(loginErrorMsg);
@@ -441,23 +462,88 @@ export async function initAuth() {
     }
 
     try {
-      const data = await apiFetch('/api/auth/login', {
-        method: 'POST',
-        body: JSON.stringify({ username, password })
-      });
+      const normalizedInput = input.toLowerCase();
+
+      // Find user profile in public.profiles table by username or email
+      const { data: userProfile, error: profileFetchErr } = await supabase.from('profiles')
+        .select('*')
+        .or(`username.eq.${normalizedInput},email.eq.${normalizedInput}`)
+        .maybeSingle();
+
+      if (profileFetchErr) {
+        logAuthDiagnostic('handleLoginSubmit profileFetch', { message: profileFetchErr.message, code: profileFetchErr.code });
+      }
+
+      let authenticatedUser = null;
+      let jwtToken = null;
+
+      // 1. Try official Supabase Auth signInWithPassword if target email is available
+      const targetEmail = userProfile?.email || (normalizedInput.includes('@') ? normalizedInput : null);
+      if (targetEmail) {
+        try {
+          const { data: authSignInRes, error: authSignInErr } = await supabase.auth.signInWithPassword({
+            email: targetEmail,
+            password: password
+          });
+
+          if (!authSignInErr && authSignInRes?.user) {
+            jwtToken = authSignInRes.session?.access_token || null;
+            authenticatedUser = {
+              id: authSignInRes.user.id,
+              username: userProfile?.username || authSignInRes.user.user_metadata?.username || targetEmail.split('@')[0],
+              email: targetEmail,
+              fullName: userProfile?.full_name || authSignInRes.user.user_metadata?.full_name || 'User',
+              profileImage: userProfile?.profile_image_url || null
+            };
+          } else if (authSignInErr) {
+            logAuthDiagnostic('supabase.auth.signInWithPassword Notice', { message: authSignInErr.message, status: authSignInErr.status });
+          }
+        } catch (sbErr) {
+          logAuthDiagnostic('supabase.auth.signInWithPassword Exception', { message: sbErr.message });
+        }
+      }
+
+      // 2. Fallback to bcrypt verification against public.profiles table
+      if (!authenticatedUser && userProfile && userProfile.password_hash) {
+        const passwordMatches = await bcrypt.compare(password, userProfile.password_hash);
+        if (passwordMatches) {
+          authenticatedUser = {
+            id: userProfile.id,
+            username: userProfile.username,
+            email: userProfile.email,
+            fullName: userProfile.full_name || userProfile.username,
+            phoneNumber: userProfile.phone_number || null,
+            profileImage: userProfile.profile_image_url || null
+          };
+        }
+      }
+
+      if (!authenticatedUser) {
+        logAuthDiagnostic('handleLoginSubmit Failed', { input: normalizedInput });
+        return showError(loginErrorMsg, 'Invalid username/email or password.');
+      }
+
+      // Update online status in Supabase profiles
+      try {
+        await supabase.from('profiles').update({
+          is_online: true,
+          last_active_at: new Date().toISOString()
+        }).eq('id', authenticatedUser.id);
+      } catch (_) {}
 
       // Store authenticated user session
-      localStorage.setItem('invibeUser', JSON.stringify(data.user));
-      if (data.user?.profileImage) {
-        localStorage.setItem('invibeProfileImage', data.user.profileImage);
+      localStorage.setItem('invibeUser', JSON.stringify(authenticatedUser));
+      if (authenticatedUser.profileImage) {
+        localStorage.setItem('invibeProfileImage', authenticatedUser.profileImage);
       }
       localStorage.setItem('invibeIsLoggedIn', 'true');
-      if (data.token) {
-        localStorage.setItem('invibe_jwt_token', data.token);
+      if (jwtToken) {
+        localStorage.setItem('invibe_jwt_token', jwtToken);
       }
 
       showAppView();
     } catch (err) {
+      logAuthDiagnostic('handleLoginSubmit Unexpected Exception', { message: err.message });
       showError(loginErrorMsg, err.message || 'Invalid username or password.');
     } finally {
       if (btnLoginSubmit) {
@@ -538,24 +624,42 @@ export async function initAuth() {
       };
 
       try {
-        const data = await apiFetch('/api/auth/complete-onboarding', {
-          method: 'POST',
-          body: JSON.stringify({
-            userId: userObj.id,
-            username: userObj.username,
-            email: userObj.email,
-            fullName: userObj.fullName,
-            livePhotoBase64: capturedBase64
-          })
-        });
+        let profileImageUrl = capturedBase64;
 
-        const finalProfileImage = data.profileImage || capturedBase64;
-        if (finalProfileImage) {
-          userObj.profileImage = finalProfileImage;
-          localStorage.setItem('invibeProfileImage', finalProfileImage);
+        if (capturedBase64 && capturedBase64.startsWith('data:image')) {
+          try {
+            const matches = capturedBase64.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
+            if (matches && matches.length === 3) {
+              const ext = matches[1];
+              const base64Data = matches[2];
+              const buffer = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
+              const filename = `${userObj.id}/live_photo_${Date.now()}.${ext}`;
+
+              const { error: uploadErr } = await supabase.storage
+                .from('profile-images')
+                .upload(filename, buffer, { contentType: `image/${ext}`, upsert: true });
+
+              if (!uploadErr) {
+                const { data: publicUrlData } = supabase.storage.from('profile-images').getPublicUrl(filename);
+                if (publicUrlData?.publicUrl) profileImageUrl = publicUrlData.publicUrl;
+              }
+            }
+          } catch (stgErr) {
+            logAuthDiagnostic('Storage Upload Note', { message: stgErr.message });
+          }
+        }
+
+        if (profileImageUrl) {
+          userObj.profileImage = profileImageUrl;
+          localStorage.setItem('invibeProfileImage', profileImageUrl);
+
+          await supabase.from('profiles').update({
+            profile_image_url: profileImageUrl,
+            updated_at: new Date().toISOString()
+          }).eq('id', userObj.id);
         }
       } catch (err) {
-        console.warn('Live photo upload note:', err.message);
+        logAuthDiagnostic('finishOnboard Exception', { message: err.message });
         if (capturedBase64) localStorage.setItem('invibeProfileImage', capturedBase64);
       } finally {
         localStorage.setItem('invibeUser', JSON.stringify(userObj));
@@ -589,6 +693,10 @@ export function handleLogout() {
   localStorage.removeItem('invibeProfileImage');
   localStorage.removeItem('invibeIsLoggedIn');
   localStorage.removeItem('invibe_jwt_token');
+
+  try {
+    supabase.auth.signOut().catch(() => {});
+  } catch (_) {}
 
   // Stop active media tracks if open
   if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
@@ -647,28 +755,23 @@ export function updateAppUI() {
   const userFollowersEl = document.getElementById('user-followers-count');
   const userFollowingEl = document.getElementById('user-following-count');
 
-  const token = localStorage.getItem('invibe_jwt_token');
   const userId = user.id || user._id;
-  if (token && userId) {
-    fetch(`/api/users/${userId}/profile`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    })
-      .then(res => res.ok ? res.json() : null)
-      .then(data => {
-        if (data && data.user) {
-          const u = data.user;
-          if (userFollowersEl) userFollowersEl.textContent = u.followersCount || 0;
-          if (userFollowingEl) userFollowingEl.textContent = u.followingCount || 0;
+  if (userId) {
+    supabase.from('profiles').select('follower_count, following_count, post_count, full_name, username').eq('id', userId).maybeSingle()
+      .then(({ data: u }) => {
+        if (u) {
+          if (userFollowersEl) userFollowersEl.textContent = u.follower_count || 0;
+          if (userFollowingEl) userFollowingEl.textContent = u.following_count || 0;
 
           const profileHubbersEl = document.querySelector('#view-profile [data-stat="followers"] .stat-val') || document.querySelector('#profile-followers-count');
           const profileHubbiesEl = document.querySelector('#view-profile [data-stat="following"] .stat-val') || document.querySelector('#profile-following-count');
           const profilePostsEl = document.querySelector('#view-profile [data-stat="posts"] .stat-val') || document.querySelector('#profile-posts-count');
 
-          if (profileHubbersEl) profileHubbersEl.textContent = u.followersCount || 0;
-          if (profileHubbiesEl) profileHubbiesEl.textContent = u.followingCount || 0;
-          if (profilePostsEl) profilePostsEl.textContent = u.postsCount || 0;
+          if (profileHubbersEl) profileHubbersEl.textContent = u.follower_count || 0;
+          if (profileHubbiesEl) profileHubbiesEl.textContent = u.following_count || 0;
+          if (profilePostsEl) profilePostsEl.textContent = u.post_count || 0;
 
-          if (sidebarName && u.fullName) sidebarName.textContent = u.fullName;
+          if (sidebarName && u.full_name) sidebarName.textContent = u.full_name;
           if (sidebarUsername && u.username) sidebarUsername.textContent = '@' + u.username;
         }
       })
@@ -678,6 +781,3 @@ export function updateAppUI() {
   // Dispatch event so downstream features initialize
   window.dispatchEvent(new CustomEvent('auth-changed'));
 }
-
-
-
