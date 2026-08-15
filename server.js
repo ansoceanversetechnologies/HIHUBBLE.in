@@ -2,8 +2,12 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
+import fs from 'fs';
+import os from 'os';
 import { fileURLToPath } from 'url';
 
+import { supabase } from './supabase.js';
+import { uploadMediaItem } from './routes/posts.js';
 import authRoutes from './routes/auth.js';
 import usersRoutes from './routes/users.js';
 import postsRoutes from './routes/posts.js';
@@ -79,11 +83,6 @@ if (!process.env.NO_AUTO_LISTEN && (process.env.NODE_ENV !== 'production' || !pr
 }
 
 // Background Scheduler for Scheduled HUBBs
-import { supabase } from './supabase.js';
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
-import { uploadMediaItem } from './routes/posts.js';
 
 export async function processScheduledItems() {
   let countProcessed = 0;
