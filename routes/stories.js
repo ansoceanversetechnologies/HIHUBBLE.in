@@ -1,5 +1,7 @@
 import express from 'express';
 import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { supabase } from '../supabase.js';
 import { authenticateToken } from '../utils.js';
 
@@ -112,34 +114,54 @@ router.post('/api/stories/schedule', authenticateToken, async (req, res) => {
 
   try {
     const userId = req.user.id;
-    let scheduledStories = [];
-    try {
-      if (fs.existsSync('scheduled_stories.json')) {
-        scheduledStories = JSON.parse(fs.readFileSync('scheduled_stories.json', 'utf8'));
-      }
-    } catch (e) {
-      console.warn('Read scheduled_stories.json warning:', e.message);
+    const { url: mediaUrl, type: mediaType } = await uploadMediaItem(userId, rawMediaUrl, rawMediaType);
+    const scheduledIso = new Date(scheduledAt).toISOString();
+    const nowIso = new Date().toISOString();
+    const isDue = scheduledIso <= nowIso;
+
+    // 1. Insert story directly into Supabase stories table
+    const { data: newStory, error: insertErr } = await supabase.from('stories').insert([{
+      author_id: userId,
+      media_url: mediaUrl,
+      media_type: mediaType || 'image',
+      caption: caption || '',
+      status: isDue ? 'published' : 'scheduled',
+      isScheduled: !isDue,
+      scheduledAt: scheduledIso,
+      created_at: nowIso
+    }]).select('*, author:profiles!author_id(id, full_name, username, profile_image_url)').maybeSingle();
+
+    if (insertErr) {
+      console.warn('Supabase story insert warning:', insertErr.message);
     }
 
-    const newScheduledStory = {
-      id: Math.random().toString(36).substring(2, 9),
-      userId,
-      mediaUrl: rawMediaUrl,
-      mediaType: rawMediaType || 'image',
-      caption: caption || '',
-      scheduledAt: new Date(scheduledAt).toISOString()
-    };
+    // 2. Local fallback JSON writing with safe /tmp path and try/catch for read-only environments
+    try {
+      const storiesFile = path.join(os.tmpdir(), 'scheduled_stories.json');
+      let scheduledStories = [];
+      if (fs.existsSync(storiesFile)) {
+        try { scheduledStories = JSON.parse(fs.readFileSync(storiesFile, 'utf8')); } catch (_) {}
+      }
+      scheduledStories.push({
+        id: newStory?.id || Math.random().toString(36).substring(2, 9),
+        userId,
+        mediaUrl,
+        mediaType: mediaType || 'image',
+        caption: caption || '',
+        scheduledAt: scheduledIso
+      });
+      fs.writeFileSync(storiesFile, JSON.stringify(scheduledStories, null, 2), 'utf8');
+    } catch (fsErr) {
+      console.warn('FS write notice (handled for read-only filesystem):', fsErr.message);
+    }
 
-    scheduledStories.push(newScheduledStory);
-    fs.writeFileSync('scheduled_stories.json', JSON.stringify(scheduledStories, null, 2), 'utf8');
-
-    res.status(201).json({
-      id: newScheduledStory.id,
-      media_url: rawMediaUrl,
-      media_type: rawMediaType || 'image',
+    return res.status(201).json({
+      id: newStory?.id || Math.random().toString(36).substring(2, 9),
+      media_url: mediaUrl,
+      media_type: mediaType || 'image',
       caption: caption || '',
       scheduled: true,
-      scheduledAt: newScheduledStory.scheduledAt
+      scheduledAt: scheduledIso
     });
   } catch (err) {
     console.error('Error scheduling story:', err);
@@ -149,6 +171,17 @@ router.post('/api/stories/schedule', authenticateToken, async (req, res) => {
 
 router.get('/api/stories', authenticateToken, async (req, res) => {
   try {
+    const nowIso = new Date().toISOString();
+
+    // Auto-publish any scheduled stories whose target time has arrived
+    try {
+      await supabase
+        .from('stories')
+        .update({ status: 'published', isScheduled: false })
+        .eq('status', 'scheduled')
+        .lte('scheduledAt', nowIso);
+    } catch (_) {}
+
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const { data: storiesData, error } = await supabase.from('stories')
       .select('*, author:profiles!author_id(id, full_name, username, profile_image_url)')
@@ -161,7 +194,8 @@ router.get('/api/stories', authenticateToken, async (req, res) => {
     if (storiesData) {
       for (const s of storiesData) {
         if (s.media_type && s.media_type.startsWith('draft-')) continue;
-        if (s.status === 'scheduled') continue;
+        if (s.status === 'scheduled' && s.scheduledAt && new Date(s.scheduledAt) > new Date()) continue;
+        
         const { data: likes } = await supabase.from('story_reactions').select('user_id').eq('story_id', s.id);
         const likeUserIds = likes ? likes.map(l => l.user_id) : [];
         const isLikedByMe = req.user ? likeUserIds.some(uid => uid && uid.toString() === req.user.id.toString()) : false;
@@ -170,8 +204,6 @@ router.get('/api/stories', authenticateToken, async (req, res) => {
         storyObj.likesCount = likeUserIds.length;
         storyObj.isLiked = isLikedByMe;
         stories.push(storyObj);
-
-        console.log(`[BACKEND GET /api/stories] Story: ${s.id} | likesCount: ${storyObj.likesCount} | isLiked: ${storyObj.isLiked} | reqUser: ${req.user?.id}`);
       }
     }
 

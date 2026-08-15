@@ -1,5 +1,7 @@
 import express from 'express';
 import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { supabase } from '../supabase.js';
 import { authenticateToken } from '../utils.js';
 
@@ -235,12 +237,13 @@ router.post('/api/posts', authenticateToken, async (req, res) => {
 
     if (isScheduled) {
       let scheduledPosts = [];
+      const postsFile = path.join(os.tmpdir(), 'scheduled_posts.json');
       try {
-        if (fs.existsSync('scheduled_posts.json')) {
-          scheduledPosts = JSON.parse(fs.readFileSync('scheduled_posts.json', 'utf8'));
+        if (fs.existsSync(postsFile)) {
+          scheduledPosts = JSON.parse(fs.readFileSync(postsFile, 'utf8'));
         }
       } catch (e) {
-        console.warn('Read scheduled_posts.json warning:', e.message);
+        console.warn('Read scheduled_posts.json notice:', e.message);
       }
 
       const newScheduled = {
@@ -253,7 +256,11 @@ router.post('/api/posts', authenticateToken, async (req, res) => {
       };
 
       scheduledPosts.push(newScheduled);
-      fs.writeFileSync('scheduled_posts.json', JSON.stringify(scheduledPosts, null, 2), 'utf8');
+      try {
+        fs.writeFileSync(postsFile, JSON.stringify(scheduledPosts, null, 2), 'utf8');
+      } catch (fsErr) {
+        console.warn('FS write notice (handled for read-only filesystem):', fsErr.message);
+      }
 
       return res.status(201).json({
         success: true,

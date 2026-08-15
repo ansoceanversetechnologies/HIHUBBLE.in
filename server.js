@@ -81,6 +81,8 @@ if (!process.env.NO_AUTO_LISTEN && (process.env.NODE_ENV !== 'production' || !pr
 // Background Scheduler for Scheduled HUBBs
 import { supabase } from './supabase.js';
 import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { uploadMediaItem } from './routes/posts.js';
 
 export async function processScheduledItems() {
@@ -88,8 +90,25 @@ export async function processScheduledItems() {
   try {
     const now = new Date().toISOString();
 
-    // 1. Process local scheduled posts
-    const postsFile = 'scheduled_posts.json';
+    // 1. Process Database scheduled stories in Supabase
+    try {
+      const { data: updatedStories } = await supabase
+        .from('stories')
+        .update({ status: 'published', isScheduled: false })
+        .eq('status', 'scheduled')
+        .lte('scheduledAt', now)
+        .select('id');
+
+      if (updatedStories && updatedStories.length > 0) {
+        countProcessed += updatedStories.length;
+        console.log(`[Scheduler] Auto-published ${updatedStories.length} scheduled story(ies) in database.`);
+      }
+    } catch (dbErr) {
+      console.warn('[Scheduler] DB story publish notice:', dbErr.message);
+    }
+
+    // 2. Process local scheduled posts (/tmp fallback)
+    const postsFile = path.join(os.tmpdir(), 'scheduled_posts.json');
     if (fs.existsSync(postsFile)) {
       let scheduledPosts = [];
       try {
@@ -143,13 +162,15 @@ export async function processScheduledItems() {
           }
         }
 
-        // Save remaining scheduled posts
-        fs.writeFileSync(postsFile, JSON.stringify(remainingPosts, null, 2), 'utf8');
+        // Save remaining scheduled posts safely
+        try {
+          fs.writeFileSync(postsFile, JSON.stringify(remainingPosts, null, 2), 'utf8');
+        } catch (_) {}
       }
     }
 
-    // 2. Process local scheduled stories
-    const storiesFile = 'scheduled_stories.json';
+    // 3. Process local scheduled stories (/tmp fallback)
+    const storiesFile = path.join(os.tmpdir(), 'scheduled_stories.json');
     if (fs.existsSync(storiesFile)) {
       let scheduledStories = [];
       try {
@@ -187,8 +208,10 @@ export async function processScheduledItems() {
           }
         }
 
-        // Save remaining scheduled stories
-        fs.writeFileSync(storiesFile, JSON.stringify(remainingStories, null, 2), 'utf8');
+        // Save remaining scheduled stories safely
+        try {
+          fs.writeFileSync(storiesFile, JSON.stringify(remainingStories, null, 2), 'utf8');
+        } catch (_) {}
       }
     }
   } catch (err) {
