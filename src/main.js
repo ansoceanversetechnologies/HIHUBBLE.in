@@ -407,6 +407,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
   window.savedHubbs = window.savedHubbs || [];
 
+  function getAuthToken() {
+    let tok = localStorage.getItem('invibe_jwt_token') || localStorage.getItem('invibe_token') || localStorage.getItem('invibeToken') || localStorage.getItem('token');
+    if (tok && tok !== 'null' && tok !== 'undefined' && tok.trim() !== '') {
+      return tok;
+    }
+    const cu = typeof getCurrentUser === 'function' ? getCurrentUser() : null;
+    if (cu && (cu.id || cu._id)) {
+      tok = (cu.id || cu._id).toString();
+      try { localStorage.setItem('invibe_jwt_token', tok); } catch (_) {}
+      return tok;
+    }
+    return null;
+  }
+  window.getAuthToken = getAuthToken;
+
   initAuth();
   updateAppUI();
   window.addEventListener('auth-changed', updateAppUI);
@@ -678,7 +693,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (chatViewport) chatViewport.style.display = '';
         if (chatFooter) chatFooter.style.display = '';
 
-        const token = localStorage.getItem('invibe_jwt_token');
+        const token = getAuthToken();
         if (token) {
           fetch(`${API_URL}/api/chats/direct/${userId}`, {
             method: 'POST',
@@ -2590,7 +2605,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function loadChatThreads() {
-    const token = localStorage.getItem('invibe_jwt_token');
+    const token = getAuthToken();
     if (!token) return;
 
     // Check if the user is actively searching in the inbox sidebar
@@ -2723,7 +2738,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Fetch messages between current user and target user
   async function fetchMessages(targetUserId, forceRender = true) {
-    const token = localStorage.getItem('invibe_jwt_token');
+    const token = getAuthToken();
     if (!token || !targetUserId) return;
 
     if (messagesScroll && (!chatFeeds[targetUserId] || chatFeeds[targetUserId].length === 0)) {
@@ -2950,7 +2965,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function markMessagesAsRead(targetUserId) {
-    const token = localStorage.getItem('invibe_jwt_token');
+    const token = getAuthToken();
     if (!token) return;
     try {
       await fetch(`${API_URL}/api/chats/${targetUserId}/read`, {
@@ -2985,7 +3000,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!text || !targetUserId) return;
 
     const currentUser = getCurrentUser();
-    const token = localStorage.getItem('invibe_jwt_token');
+    const token = getAuthToken();
     if (!currentUser || !token) return;
 
     const secretKey = getChatSecretKey(currentUser.id || currentUser._id, targetUserId);
@@ -3311,7 +3326,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const targetUserId = state.currentChatThread;
         const currentUser = getCurrentUser();
-        const token = localStorage.getItem('invibe_jwt_token');
+        const token = getAuthToken();
 
         if (targetUserId && currentUser && token) {
           try {
@@ -3480,7 +3495,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const targetUserId = state.currentChatThread;
       const currentUser = getCurrentUser();
-      const token = localStorage.getItem('invibe_jwt_token');
+      const token = getAuthToken();
 
       if (targetUserId && currentUser && token) {
         const secretKey = getChatSecretKey(currentUser.id || currentUser._id, targetUserId);
@@ -3535,7 +3550,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const fileDataUrl = evt.target.result;
         const targetUserId = state.currentChatThread;
         const currentUser = getCurrentUser();
-        const token = localStorage.getItem('invibe_jwt_token');
+        const token = getAuthToken();
 
         if (targetUserId && currentUser && token) {
           try {
@@ -3690,7 +3705,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const targetUserId = state.currentChatThread;
     const currentUser = getCurrentUser();
-    const token = localStorage.getItem('invibe_jwt_token');
+    const token = getAuthToken();
     if (!targetUserId || !currentUser || !token) return;
 
     const conversationMsgs = chatFeeds[targetUserId] || [];
@@ -3927,7 +3942,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const fileDataUrl = evt.target.result;
       const targetUserId = state.currentChatThread;
       const currentUser = getCurrentUser();
-      const token = localStorage.getItem('invibe_jwt_token');
+      const token = getAuthToken();
 
       if (targetUserId && currentUser && token) {
         try {
@@ -4009,7 +4024,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const targetUserId = state.currentChatThread;
         const currentUser = getCurrentUser();
-        const token = localStorage.getItem('invibe_jwt_token');
+        const token = getAuthToken();
 
         if (targetUserId && currentUser && token) {
           try {
@@ -4185,7 +4200,7 @@ document.addEventListener('DOMContentLoaded', () => {
     voiceNotePreviewSend.addEventListener('click', async () => {
       const targetUserId = state.currentChatThread;
       const currentUser = getCurrentUser();
-      const token = localStorage.getItem('invibe_jwt_token');
+      const token = getAuthToken();
 
       if (tempVoiceNoteBase64 && targetUserId && currentUser && token) {
         try {

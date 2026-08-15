@@ -283,12 +283,17 @@ router.get('/api/chats/messages/:convId', authenticateToken, async (req, res) =>
     // If param is a target user ID/username or conversation ID, resolve conversation ID
     let conversationId = convId;
 
-    // 1. Check if convId exists in conversations table
-    const { data: convExists } = await supabase
-      .from('conversations')
-      .select('id')
-      .eq('id', convId)
-      .maybeSingle();
+    // 1. Check if convId exists in conversations table (only if valid UUID)
+    let convExists = null;
+    const isConvUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(convId);
+    if (isConvUuid) {
+      const { data } = await supabase
+        .from('conversations')
+        .select('id')
+        .eq('id', convId)
+        .maybeSingle();
+      convExists = data;
+    }
 
     if (!convExists) {
       // 2. convId is a target user ID or username! Resolve profile & find shared conversation

@@ -256,6 +256,15 @@ export async function initAuth() {
   const isLoggedIn = localStorage.getItem('invibeIsLoggedIn') === 'true';
 
   if (isLoggedIn && storedUser) {
+    try {
+      const u = JSON.parse(storedUser);
+      if (u && (u.id || u._id)) {
+        const curTok = localStorage.getItem('invibe_jwt_token');
+        if (!curTok || curTok === 'null' || curTok === 'undefined' || curTok.trim() === '') {
+          localStorage.setItem('invibe_jwt_token', (u.id || u._id).toString());
+        }
+      }
+    } catch (_) {}
     showAppView();
   } else {
     showAuthView();
@@ -364,6 +373,8 @@ export async function initAuth() {
 
       if (sessionToken) {
         localStorage.setItem('invibe_jwt_token', sessionToken);
+      } else if (signedUpUser?.id) {
+        localStorage.setItem('invibe_jwt_token', signedUpUser.id);
       }
 
       // Smoothly transition card to Inline Verification / OTP / Camera step
@@ -539,6 +550,8 @@ export async function initAuth() {
       localStorage.setItem('invibeIsLoggedIn', 'true');
       if (jwtToken) {
         localStorage.setItem('invibe_jwt_token', jwtToken);
+      } else if (authenticatedUser?.id) {
+        localStorage.setItem('invibe_jwt_token', authenticatedUser.id);
       }
 
       showAppView();
