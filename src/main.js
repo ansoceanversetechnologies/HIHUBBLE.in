@@ -2333,7 +2333,7 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         // Send backend network call to store in Supabase public.posts and public.post_media
-        const apiRes = await fetch('/api/posts', {
+        const apiRes = await fetch(`${API_URL}/api/posts`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -6228,7 +6228,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let posts = [];
     try {
-      const res = await fetch('/api/posts');
+      const res = await fetch(`${API_URL}/api/posts`);
       if (res.ok) {
         posts = await res.json();
       }
@@ -6843,6 +6843,9 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     } catch (_) { }
   }
+
+  window.loadFeedPosts = loadFeedPosts;
+  window.loadFeed = loadFeedPosts;
 
   initRealtimeFeedSubscriptions();
 
@@ -14155,6 +14158,9 @@ document.addEventListener('DOMContentLoaded', () => {
     : window.location.origin;
 
   initVideoEditor(api, window.showToast, window.loadFeedReels || window.loadFeed);
+  if (typeof window.loadFeedPosts === 'function') {
+    window.loadFeedPosts();
+  }
   if (typeof window.loadFeedReels === 'function') {
     window.loadFeedReels();
   }
