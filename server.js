@@ -83,7 +83,8 @@ import { supabase } from './supabase.js';
 import fs from 'fs';
 import { uploadMediaItem } from './routes/posts.js';
 
-setInterval(async () => {
+export async function processScheduledItems() {
+  let countProcessed = 0;
   try {
     const now = new Date().toISOString();
 
@@ -136,6 +137,7 @@ setInterval(async () => {
                 }]);
             }
             console.log(`[Scheduler] Successfully auto-published scheduled post ${newPost.id}`);
+            countProcessed++;
           } catch (pubErr) {
             console.error(`[Scheduler] Error auto-publishing post:`, pubErr.message);
           }
@@ -178,6 +180,7 @@ setInterval(async () => {
               console.error(`[Scheduler] Failed to create story row:`, storyErr.message);
             } else {
               console.log(`[Scheduler] Successfully auto-published scheduled story`);
+              countProcessed++;
             }
           } catch (pubErr) {
             console.error(`[Scheduler] Error auto-publishing story:`, pubErr.message);
@@ -191,6 +194,22 @@ setInterval(async () => {
   } catch (err) {
     console.error('[Scheduler] Unexpected error:', err.message);
   }
-}, 5000); // Check every 5 seconds for responsive testing
+  return countProcessed;
+}
+
+// Cron endpoint for Vercel Serverless triggers
+app.all('/api/cron/publish-scheduled', async (req, res) => {
+  try {
+    const processed = await processScheduledItems();
+    res.json({ success: true, processedCount: processed });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Run background interval loop locally when NOT running inside Vercel serverless environment
+if (!process.env.VERCEL) {
+  setInterval(processScheduledItems, 5000);
+}
 
 export default app;
